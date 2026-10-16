@@ -118,6 +118,12 @@ public void block(DecisionId decisionId, DecisionLevel level) {
 4. **不引 JPA、不设 `ddl-auto`** — 建表来源只能有一个：Flyway。
 5. **禁止手工改表结构** — 任何结构变更必须落成迁移脚本，走 Code Review。
 6. **测试用独立 schema `regent_test`** — 永不允许测试指向开发库。
+7. **凭据只放 `application-local.yml` / `application-test.yml`** — 这两个文件已被 `.gitignore` 排除，
+   **永不入库、永不写进代码或文档**。仓库内只允许存在对应的 `.example` 模板。新增依赖数据库的配置时，
+   照此模式处理，不要图省事把密码写进 `application.yml`。
+8. **Flyway 需要 `performance_schema.user_variables_by_thread` 的 SELECT 权限** — 它在启动时会做一次
+   能力探测，缺权限会导致启动直接失败，且报错信息极具误导性：只会看到
+   `Unable to determine value for 'foreign_key_checks' variable`。给账号授权时别忘了这一条。
 
 ## 硬约束：决策分级（核心域）
 

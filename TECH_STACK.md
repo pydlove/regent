@@ -28,7 +28,7 @@
 | 框架 | Spring Boot | 3.5.5 | 由父 POM 管理，**不要自己写版本号** |
 | 持久层 | MyBatis-Plus `mybatis-plus-spring-boot3-starter` | 3.5.8，父 POM 管理 | 与 `app_audit` 保持一致，沿用其 dao 分层风格 |
 | 连接池 | Druid | 1.2.24 | 父 POM 已有 |
-| 数据库 | MySQL | 8.3.0 驱动 | 专用 schema `regent` |
+| 数据库 | MySQL | 服务端 8.0.43 / 驱动 8.3.0 | 专用 schema `regent`，实例与账号见 3.7 |
 | **迁移** | **Flyway** | 父 POM 管理（11.x） | `flyway-core` + `flyway-mysql` |
 | JSON | Jackson | 父 POM 管理 | 逐行解析 `codex exec --json` 的 JSONL |
 | JSON Schema | victools/jsonschema-generator | 4.x | 从 DTO 生成 Codex 出参 Schema |
@@ -97,7 +97,7 @@ spring:
     out-of-order: false         # 版本号必须严格递增，防分支并行乱序
     table: flyway_schema_history
   datasource:
-    url: jdbc:mysql://127.0.0.1:3306/regent?useUnicode=true&characterEncoding=utf8mb4
+    url: jdbc:mysql://127.0.0.1:3306/regent?characterEncoding=UTF-8&connectionTimeZone=UTC&useSSL=false&allowPublicKeyRetrieval=true
     username: regent
     password: ${REGENT_DB_PASSWORD}
 ```
@@ -126,6 +126,37 @@ spring:
 | `approval_token` | 一次性审批链接令牌 |
 
 全部用 `utf8mb4`，主键用 `BIGINT`，状态字段用 `VARCHAR` 存枚举名（不用 MySQL `ENUM`，避免改枚举要动表结构）。时间统一 `DATETIME(3)` 存 UTC。
+
+### 3.7 本机环境与账号（已就绪）
+
+2026-10-16 已在本机搭好并通过启动验证，可直接使用：
+
+| 项 | 值 |
+|---|---|
+| 服务端 | MySQL 8.0.43，`127.0.0.1:3306`，数据目录 `/usr/local/mysql/data/` |
+| Schema | `regent`（开发）、`regent_test`（测试），均 `utf8mb4` / `utf8mb4_0900_ai_ci` |
+| 账号 | `regent`，密码见 `application-local.yml`（已 gitignore，不入库） |
+| 权限 | `ALL` on `regent.*` 与 `regent_test.*`，外加 `SELECT` on `performance_schema.user_variables_by_thread` |
+
+> **为什么不用 root。** 这台实例上还跑着 `quant_system`、`blogger_db`、`sinan_service_mgr` 等真实项目库。
+> 而 Flyway 在**每次应用启动时**自动执行迁移且拥有 DDL 权限——用 root 意味着一个写错的迁移脚本
+> 有能力删掉别的项目的库。专用账号把爆炸半径关在 `regent` schema 之内，已实测无法访问 `blogger_db`。
+> root 只用于建库、授权这类管理动作。
+
+**三个必踩的坑，配置里都已标注：**
+
+1. **`characterEncoding` 必须是 Java 字符集名。** 写成 MySQL 的 `utf8mb4` 会抛
+   `UnsupportedEncodingException: utf8mb4`，连接直接建立失败，而报错完全没提「字符集名写错了」。
+   正确写法是 `characterEncoding=UTF-8`——Connector/J 8 下 UTF-8 即对应 utf8mb4。
+2. **Flyway 需要 `performance_schema.user_variables_by_thread` 的 SELECT 权限。** 它在启动时做能力探测，
+   缺权限会让应用启动直接失败，且报错极具误导性：`Unable to determine value for 'foreign_key_checks' variable`，
+   看着像变量问题，实际是权限问题。
+3. **`allowPublicKeyRetrieval=true` 必需。** MySQL 8 默认 `caching_sha2_password`，本地走非 SSL 连接时
+   缺它会报 `Public Key Retrieval is not allowed`。
+
+**验证记录**：应用启动 1.48s，`/actuator/health` 返回 `{"status":"UP"}`，Flyway 日志
+`Database: jdbc:mysql://.../regent (MySQL 8.0)` → `Successfully validated 0 migrations`，并在 `regent` 库中
+创建了 `flyway_schema_history` 表。迁移链路确认可用，只等 `V1__init_schema.sql` 落下去。
 
 ---
 
@@ -217,8 +248,9 @@ codex exec \
 | 守护 | `deploy/` 下 start-all、stop-all、restart、status 四脚本 |
 | 并发 | 单进程起步；多项目并行时按 project 维度加锁，避免同项目写冲突 |
 
-> **前置条件**：本机当前没有 MySQL 服务（`mysqld` 不存在、3306 未监听、无 Docker，只有 homebrew `mysql-client`）。
-> 选 MySQL 的代价就是它必须 7x24 可用——**DB 挂了整条自动化就停摆**。所以要装一个常驻实例并纳入守护脚本。
+> **前置条件已就绪**：本机 MySQL 8.0.43 常驻于 `127.0.0.1:3306`，`regent` / `regent_test` 两个 schema
+> 与受限账号均已创建并通过启动验证（详见 3.7）。守护脚本仍需把 MySQL 的存活纳入探活范围——
+> **DB 挂了整条自动化就停摆**，这是选 MySQL 换来的代价。
 
 ---
 
@@ -281,7 +313,8 @@ regent:
 
 1. ~~前端选型~~ **已定**：Vue 3 + Vite + Tailwind CSS + reka-ui，对标 macOS 原生观感，详见 `FRONTEND.md`。
    工作区现有前端（`app-audit-frontend`、`r_data_service/web`）**全是 React**，上 Vue 意味着将来维护两套前端规范——该代价已确认接受。
-2. **MySQL 实例位置**：本机新装常驻实例，还是指向现有开发库？（决定守护脚本与 `V1__init_schema.sql` 的执行方式）
+2. ~~MySQL 实例位置~~ **已定**：指向本机常驻实例（MySQL 8.0.43），建 `regent` / `regent_test` 两个独立 schema，
+   不复用其它项目库。详见 3.7。
 3. **工作区根 `.git` 干扰**：`regent/` 位于 `/Users/panyong/shanjie` 下，该根目录存在空 `.git`，会把 `regent/` 纳入其跟踪范围，建议在 `regent/` 内独立 `git init`。
 
 ---

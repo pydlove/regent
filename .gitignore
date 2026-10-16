@@ -29,6 +29,7 @@ LOG_PATH_UNDEFINED
 # ---------- 本地配置与密钥（严禁入库） ----------
 application-local.yml
 application-*-local.yml
+application-test.yml
 *.local.yml
 *.pem
 *.key

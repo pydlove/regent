@@ -56,12 +56,12 @@ deploy/                 start-all / stop-all / restart / status
 ## 当前状态
 
 阶段 1（MVP）尚未开工。已完成：技术栈定义、架构设计、项目骨架。
-待办见 `ARCHITECTURE.md` 第十一节，其中前端 Vue/React 选型与 MySQL 实例位置两项待定。
+待办见 `ARCHITECTURE.md` 第十一节。前端（Vue + Tailwind）与 MySQL 实例两项均已确定，见 `FRONTEND.md` 与 `TECH_STACK.md` 3.7。
 
 ## 前置条件
 
 - JDK 17、Maven 3.9+
-- 一个 7x24 可用的 MySQL 实例（本机当前没有，需先立起来），以及 `regent` / `regent_test` 两个 schema
+- 7x24 可用的 MySQL 实例（本机 8.0.43 已就绪），以及 `regent` / `regent_test` 两个 schema
 - 可用的 `codex` CLI
 
 > ⚠️ 数据库是这套平台的单点依赖：**DB 挂了，整条自动化就停摆**。

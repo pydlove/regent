@@ -1,0 +1,49 @@
+server:
+  address: 127.0.0.1
+  port: 8787
+
+spring:
+  application:
+    name: regent
+  profiles:
+    active: local
+
+  datasource:
+    # 三个参数都是为了绕开 MySQL 8 的经典坑，改动前请先读清楚：
+    #   characterEncoding 必须是 **Java 字符集名**（UTF-8），写成 MySQL 的 utf8mb4 会直接
+    #     抛 UnsupportedEncodingException: utf8mb4 导致连不上。Connector/J 8 下 UTF-8 即对应 utf8mb4。
+    #   allowPublicKeyRetrieval 必需 —— MySQL 8 默认 caching_sha2_password，本地走非 SSL 连接时
+    #     缺这个参数会报 Public Key Retrieval is not allowed。
+    #   connectionTimeZone=UTC 与「DATETIME(3) 统一存 UTC」的约定配套，见 TECH_STACK.md
+    url: jdbc:mysql://127.0.0.1:3306/regent?characterEncoding=UTF-8&connectionTimeZone=UTC&useSSL=false&allowPublicKeyRetrieval=true
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    type: com.alibaba.druid.pool.DruidDataSource
+    username: ${REGENT_DB_USERNAME:regent}
+    password: ${REGENT_DB_PASSWORD:}
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+    # 严禁 clean：它会删库。默认虽已关闭，但这里显式声明，见 AGENTS.md 数据库铁律第 2 条
+    clean-disabled: true
+    # 版本号必须严格递增，禁止分支并行导致的乱序执行
+    out-of-order: false
+
+  jackson:
+    time-zone: UTC
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true

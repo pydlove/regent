@@ -1,0 +1,10 @@
+# 本地开发配置模板。
+# 复制为 application-local.yml 并填入真实凭据 —— 该文件已被 .gitignore 排除，永不入库。
+#
+# 本机已就绪的环境（2026-10-16 由 Codex 创建）：
+#   库：  regent / regent_test（utf8mb4 / utf8mb4_0900_ai_ci）
+#   账号：regent，仅授权 regent.* 与 regent_test.*，看不到实例上其它项目的库
+spring:
+  datasource:
+    username: regent
+    password: 在此填入本地密码
