@@ -271,13 +271,13 @@ codex exec \
 regent:
   policy:
     default-auto-level: L1          # 高于此等级一律升级人工
+    # 分级规则只升不降，故这里**只有**升级规则，没有自动降级白名单。
+    # 原因见 ARCHITECTURE.md 2.5；规则实际存放在 decision_rule 表、可在平台界面维护，
+    # 这里只放首次启动时导入的默认集。
     escalate-patterns:
       - "deploy/**"
       - "**/*.sql"
       - "**/pom.xml"
-    auto-patterns:
-      - "docs/**"
-      - "**/*.md"
   executor:
     max-concurrent-projects: 2
     daily-token-budget: 0           # 0 表示不限制

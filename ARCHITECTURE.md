@@ -111,6 +111,19 @@ public class Task extends AggregateRoot<TaskId> {
 
 ---
 
+### 2.5 决策等级只升不降（刻意的设计约束）
+
+分级规则**只能把等级往上抬，永远不能往下压**。`DecisionLevel.higherOf` 的存在就是为了让「降级」在代码层面根本写不出来。
+
+理由是：执行器报出高等级，通常是因为它在改动内容里识别到了风险。如果允许一条路径通配就否掉这个判断，等于用正则表达式覆盖风险识别 —— 这是整个平台最危险的一个动作，而它换来的只是「少问你几次」。
+
+因此配置里早期设计的 `auto-patterns`（自动降级白名单）**已取消，不实现**。若将来纯文档改动被误报为高等级、噪音确实成为问题，那应当作为独立设计引入，并同时满足三个约束：只能从 L2 降到项目阈值、L3 绝对不可降、全部改动必须落在白名单内，且配套专门测试。
+
+配套的第二个约定：**规则配置非法时失败关闭**。通配表达式写错会抛 `DomainException` 让任务停下，而不是当作「未命中」跳过。跳过一条本该升级的规则会让决策被自动执行，代价远高于报错停下。
+
+---
+
+
 ## 三、Maven 模块划分与依赖方向
 
 ### 3.1 为什么模块切得「粗」
@@ -541,14 +554,22 @@ class ArchitectureTest {
 
 ---
 
-## 十一、下一步
+## 十一、进度与下一步
 
-1. `regent/` 内 `git init`，建聚合 `pom.xml` + 五个子模块 POM，`<parent>` 指向 `api-parent`
-2. 建 MySQL 常驻实例与 `regent` / `regent_test` 两个 schema
-3. 写 `V1__init_schema.sql`（十张表），跑通 Flyway 首次迁移
-4. 落地 `shared/domain` 基础构件 + `shared/kernel` 值对象（含 `DecisionLevel`）
-5. 实现 `governance` 域：`DecisionArbiter` + 单测（先写这个，它是核心域）
-6. 加 `ArchitectureTest` 四条规则
-7. 实现 `execution` 域 + `CodexCliAdapter`，拿一个真实项目端到端试点
+### 已完成
 
-**待定项**（沿用 `TECH_STACK.md` 第十节）：前端 Vue / React 选型；MySQL 实例位置。
+1. ✅ `regent/` 内 `git init`，五模块 POM 骨架，`<parent>` 指向 `api-parent`
+2. ✅ MySQL 8.0.43 实例、`regent` / `regent_test` 两个 schema、权限受限账号（见 `TECH_STACK.md` 3.7）
+3. ✅ `V1__init_schema.sql`（十张表、11 个外键），Flyway 迁移已跑通
+4. ✅ `shared/domain/DomainException` + `shared/kernel/DecisionLevel`
+5. ✅ `governance` 域 `DecisionArbiter` + 27 个单测（含 2.5 的两条安全约束）
+
+> 注：`shared/domain` 目前只落了 `DomainException`。`AggregateRoot` / `Entity` / `ValueObject` /
+> `DomainEvent` 这些基类要等第一个聚合根真正需要它们时再补 —— 预先建一套用不上的基类属于投机抽象。
+
+### 待办
+
+6. 加 `ArchitectureTest` 四条 ArchUnit 规则（依赖已引入 `regent-boot`，但尚无测试类，目前无人看守）
+7. `governance` 的仓储与应用服务：规则从 `decision_rule` 表加载、决策单落 `decision` 表
+8. 实现 `execution` 域 + `CodexCliAdapter`，拿一个真实项目端到端试点
+9. 前端 `regent-web` 脚手架 + 样式基准页（见 `FRONTEND.md` 第九节）
