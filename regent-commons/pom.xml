@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.secsmart.regent</groupId>
+        <artifactId>regent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>regent-commons</artifactId>
+    <name>Regent :: Commons</name>
+    <description>共享内核：聚合根基类、值对象、领域事件、异常。纯 JDK，零依赖。</description>
+
+    <!--
+      本模块刻意不声明任何运行时依赖。
+      共享内核被所有上下文引用，一旦引入框架依赖，污染会扩散到整个项目。
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

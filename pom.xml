@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+      继承 api_parent 的版本矩阵（Spring Boot 3.5.5 BOM、mybatis-plus、druid、lombok 等）。
+      api_parent 已确认是干净的父 POM：<build> 只有 pluginManagement，<profiles> 只配部署地址，
+      没有强制依赖、没有内部仓库声明，因此继承它是安全的。
+
+      relativePath 指向同级目录的 api_parent 工作副本，好处是无需先 mvn install，
+      代价是 api_parent 的本地改动会立刻影响本项目构建。若希望构建与父工程解耦，
+      改为 <relativePath/> 强制走本地仓库（需确保 api_parent 已 install）。
+    -->
+    <parent>
+        <groupId>com.secsmart.api</groupId>
+        <artifactId>api-parent</artifactId>
+        <version>3.0.2_R100-SNAPSHOT</version>
+        <relativePath>../api_parent/pom.xml</relativePath>
+    </parent>
+
+    <groupId>com.secsmart.regent</groupId>
+    <artifactId>regent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>Regent</name>
+    <description>多项目需求自动执行平台，带分级决策升级</description>
+
+    <modules>
+        <module>regent-commons</module>
+        <module>regent-core</module>
+        <module>regent-infrastructure</module>
+        <module>regent-interfaces</module>
+        <module>regent-boot</module>
+    </modules>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <!--
+          api_parent 未管理 surefire，Maven 默认版本 2.12.4 无法执行 JUnit 5，
+          必须在此钉死，否则所有测试会被静默跳过（构建仍然"成功"，最危险的情况）。
+        -->
+        <maven-surefire-plugin.version>3.5.4</maven-surefire-plugin.version>
+        <!-- ArchUnit 不在任何 BOM 管辖范围内，需自行钉版本 -->
+        <archunit.version>1.3.0</archunit.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- 本项目内部模块 -->
+            <dependency>
+                <groupId>com.secsmart.regent</groupId>
+                <artifactId>regent-commons</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.secsmart.regent</groupId>
+                <artifactId>regent-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.secsmart.regent</groupId>
+                <artifactId>regent-infrastructure</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.secsmart.regent</groupId>
+                <artifactId>regent-interfaces</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- 架构守卫：把 ARCHITECTURE.md 的分包规矩变成可执行测试 -->
+            <dependency>
+                <groupId>com.tngtech.archunit</groupId>
+                <artifactId>archunit-junit5</artifactId>
+                <version>${archunit.version}</version>
+                <scope>test</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${maven-surefire-plugin.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+</project>

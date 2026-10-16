@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.secsmart.regent</groupId>
+        <artifactId>regent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>regent-core</artifactId>
+    <name>Regent :: Core</name>
+    <description>领域层与应用层：六个限界上下文的 domain 与 application 包。纯 Java。</description>
+
+    <!--
+      ⚠️ 本模块必须保持"纯 Java"：禁止出现 spring / mybatis / jackson / slf4j 等框架依赖。
+      原因见 AGENTS.md「硬约束：架构纪律」第 1 条 —— 只有保持纯净，决策仲裁这类核心逻辑
+      才能用裸 JUnit 在毫秒级跑上百个用例。
+      这是编译期约束，不要因为"临时方便"在这里加依赖。
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>com.secsmart.regent</groupId>
+            <artifactId>regent-commons</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
