@@ -1,0 +1,38 @@
+# ---------- Maven / Java ----------
+target/
+*.class
+*.jar
+*.war
+.mvn/timing.properties
+!.mvn/wrapper/maven-wrapper.jar
+
+# ---------- IDE ----------
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.swp
+*.swo
+
+# ---------- Node（regent-web） ----------
+node_modules/
+dist/
+.pnpm-store/
+
+# ---------- 运行时产物 ----------
+# 正常一律落在 ~/.regent/，仓库里出现这些文件即为配置错误
+logs/
+*.log
+LOG_PATH_UNDEFINED
+
+# ---------- 本地配置与密钥（严禁入库） ----------
+application-local.yml
+application-*-local.yml
+*.local.yml
+*.pem
+*.key
+*.keystore
+
+# ---------- macOS ----------
+.DS_Store
