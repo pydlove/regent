@@ -3,6 +3,7 @@ package com.pydlove.regent.governance.interfaces.dto;
 import com.pydlove.regent.governance.domain.repository.DecisionView;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * 决策单列表行与详情共用一个形状。
@@ -22,6 +23,7 @@ public record DecisionSummaryResponse(
         String matchedRuleName,
         String status,
         String question,
+        List<String> options,
         String recommendation,
         boolean reversible,
         String blastRadius,
@@ -44,6 +46,7 @@ public record DecisionSummaryResponse(
                 view.matchedRuleName(),
                 view.status(),
                 view.question(),
+                view.options(),
                 view.recommendation(),
                 view.reversible(),
                 view.blastRadius(),

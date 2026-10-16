@@ -1,5 +1,18 @@
 <script setup lang="ts">
-import { ImagePlus, Play, Plus, RefreshCw, RotateCcw, XCircle } from '@lucide/vue'
+import {
+  AlertTriangle,
+  Bot,
+  ChevronLeft,
+  ImagePlus,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  ScrollText,
+  Trash2,
+  XCircle,
+} from '@lucide/vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { ACCEPTED_IMAGE_TYPES, listTaskAttachments, uploadTaskAttachment } from '@/api/attachments'
@@ -7,19 +20,22 @@ import { getDecision } from '@/api/decisions'
 import { ApiError } from '@/api/http'
 import DecisionLevelBadge from '@/components/business/DecisionLevelBadge.vue'
 import DecisionReviewDialog from '@/components/business/DecisionReviewDialog.vue'
+import ImageAttachmentGrid from '@/components/business/ImageAttachmentGrid.vue'
+import ImageAttachmentsDialog from '@/components/business/ImageAttachmentsDialog.vue'
 import NewTaskDialog from '@/components/business/NewTaskDialog.vue'
 import RunDetailDialog from '@/components/business/RunDetailDialog.vue'
 import RunStatusBadge from '@/components/business/RunStatusBadge.vue'
-import TaskAttachmentGrid from '@/components/business/TaskAttachmentGrid.vue'
-import TaskAttachmentsDialog from '@/components/business/TaskAttachmentsDialog.vue'
+import TaskEditDialog from '@/components/business/TaskEditDialog.vue'
 import TaskStatusBadge from '@/components/business/TaskStatusBadge.vue'
 import Button from '@/components/ui/button/Button.vue'
+import Checkbox from '@/components/ui/checkbox/Checkbox.vue'
+import Dialog from '@/components/ui/dialog/Dialog.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
 import Input from '@/components/ui/input/Input.vue'
 import Pagination from '@/components/ui/pagination/Pagination.vue'
-import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
+import Select from '@/components/ui/select/Select.vue'
 import Table from '@/components/ui/table/Table.vue'
 import type { TableColumn } from '@/components/ui/table/table.types'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
@@ -27,9 +43,26 @@ import { useToast } from '@/composables/useToast'
 import { useDecisionStore } from '@/stores/useDecisionStore'
 import { useRunStore } from '@/stores/useRunStore'
 import { useTaskStore } from '@/stores/useTaskStore'
-import type { DecisionSummary, TaskAttachment } from '@/types/api'
-import { canCancel, canDispatch, canReject, canResume, canRetry, type TaskStatus } from '@/types/task'
-import { formatDuration, formatTokens } from '@/utils/format'
+import type {
+  DecisionSummary,
+  ImageAttachment,
+  TaskAttachment,
+  TaskBatchDeleteFailure,
+  TaskBatchDispatchFailure,
+} from '@/types/api'
+import {
+  canCancel,
+  canDelete,
+  canDispatch,
+  canEdit,
+  canReject,
+  canResume,
+  canRetry,
+  retryActionLabel,
+  type DecisionLevel,
+  type TaskStatus,
+} from '@/types/task'
+import { formatDateTime, formatDuration, formatDurationMillis, formatTokens } from '@/utils/format'
 
 /*
  * 视图不判断状态。按钮能不能点一律问 types/task.ts 里的守卫，
@@ -41,27 +74,51 @@ const decisionStore = useDecisionStore()
 const runStore = useRunStore()
 const toast = useToast()
 
-const columns: TableColumn[] = [
+const columns = computed<TableColumn[]>(() => [
+  { key: 'selection', label: '', width: '36px' },
   { key: 'id', label: '#', width: '56px', numeric: true },
   { key: 'title', label: '任务' },
-  { key: 'level', label: '等级', width: '128px' },
+  // 选定具体项目后，项目名对每一行都一样，不再占列表宽度
+  ...(store.projectId === null
+    ? [{ key: 'projectName', label: '项目', width: '144px', hideBelow: 'md' as const }]
+    : []),
+  { key: 'level', label: '等级', width: '128px', hideBelow: 'md' as const },
   { key: 'status', label: '状态', width: '104px' },
-  { key: 'duration', label: '耗时', align: 'right', width: '72px' },
-  { key: 'tokens', label: 'Token', align: 'right', width: '80px' },
-]
+  { key: 'duration', label: '耗时', align: 'right', width: '72px', hideBelow: 'lg' as const },
+  { key: 'tokens', label: 'Token', align: 'right', width: '80px', hideBelow: 'lg' as const },
+])
 
-const filterOptions = [
-  { value: 'ALL', label: '全部' },
+const statusOptions = [
+  { value: 'ALL', label: '全部状态' },
+  { value: 'PENDING', label: '待执行' },
+  { value: 'QUEUED', label: '排队中' },
   { value: 'RUNNING', label: '执行中' },
   { value: 'BLOCKED', label: '待批准' },
   { value: 'DONE', label: '已完成' },
+  { value: 'FAILED', label: '失败' },
+  { value: 'CANCELLED', label: '已终止' },
 ]
 
-// SegmentedControl 的 model 是 string，这里换算成 TaskStatus —— 免得把字符串漏进 store
-const filter = computed({
-  get: () => store.statusFilter as string,
+const levelOptions = [
+  { value: 'ALL', label: '全部等级' },
+  { value: 'L0', label: 'L0 完全自主' },
+  { value: 'L1', label: 'L1 自主留痕' },
+  { value: 'L2', label: 'L2 需人工批准' },
+  { value: 'L3', label: 'L3 强阻塞' },
+]
+
+// Select 的值是 string，换算只放在视图边界，避免把字符串漏进 store 的类型
+const statusFilter = computed({
+  get: () => store.statusFilter,
   set: (value: string) => {
     store.statusFilter = value as TaskStatus | 'ALL'
+  },
+})
+
+const levelFilter = computed({
+  get: () => store.levelFilter,
+  set: (value: string) => {
+    store.levelFilter = value as DecisionLevel | 'ALL'
   },
 })
 
@@ -79,6 +136,68 @@ watch(keywordInput, (value) => {
 })
 
 const selected = computed(() => store.selected)
+const promptOpen = ref(false)
+const editOpen = ref(false)
+
+const openEdit = () => {
+  if (!selected.value || !store.detail || !canEdit(selected.value.status)) return
+  editOpen.value = true
+}
+
+/*
+ * 批量选择只覆盖当前页允许删除的待执行或排队任务。翻页或筛选后清空，避免用户看不到的行仍被选中；
+ * 派发或删除结束后成功项移除，失败项保留，下一次点击可以直接重试同一批失败任务。
+ */
+const selectedIds = ref<Set<number>>(new Set())
+const selectableRows = computed(() => store.items.filter((row) => canDelete(row.status)))
+const selectedCount = computed(() => selectedIds.value.size)
+const selectionState = computed<boolean | 'indeterminate'>(() => {
+  if (selectedCount.value === 0 || selectableRows.value.length === 0) return false
+  return selectableRows.value.every((row) => selectedIds.value.has(row.id))
+    ? true
+    : 'indeterminate'
+})
+
+const isRowSelected = (id: number) => selectedIds.value.has(id)
+
+const setRowSelected = (id: number, checked: boolean) => {
+  const next = new Set(selectedIds.value)
+  if (checked) next.add(id)
+  else next.delete(id)
+  selectedIds.value = next
+}
+
+const toggleAllSelectable = (checked: boolean | 'indeterminate') => {
+  if (checked === 'indeterminate') return
+  selectedIds.value = checked
+    ? new Set(selectableRows.value.map((row) => row.id))
+    : new Set()
+}
+
+watch(
+  () => store.items,
+  (rows) => {
+    const available = new Set(rows.filter((row) => canDelete(row.status)).map((row) => row.id))
+    const retained = [...selectedIds.value].filter((id) => available.has(id))
+    if (retained.length !== selectedIds.value.size) {
+      selectedIds.value = new Set(retained)
+    }
+  },
+)
+
+watch(
+  () => [
+    store.page,
+    store.pageSize,
+    store.statusFilter,
+    store.levelFilter,
+    store.projectId,
+    store.keyword,
+  ],
+  () => {
+    selectedIds.value = new Set()
+  },
+)
 
 /** 当前选中任务正阻塞在哪个决策上。列表项只有决策单号，问题与建议要单独取。 */
 const decision = ref<DecisionSummary | null>(null)
@@ -133,10 +252,10 @@ const retry = async () => {
   if (!task) return
   const failure = await store.retry(task.id)
   if (failure) {
-    toast.warning(`#${task.id} 重试被拒绝`, failure)
+    toast.warning(`#${task.id} ${retryActionLabel(task.status)}被拒绝`, failure)
     return
   }
-  toast.show(`#${task.id} 已回到待执行`, { description: '执行器下一轮会重新派发' })
+  toast.show(`#${task.id} 已回到待执行`, { description: '执行器下一轮会重新接手' })
 }
 
 const dispatch = async () => {
@@ -147,9 +266,128 @@ const dispatch = async () => {
     toast.warning(`#${task.id} 派发被拒绝`, failure)
     return
   }
-  // 认领成功只说明「执行器已经起跑」，结果还在路上，所以随后把运行记录刷出来
+  if (store.selected?.status === 'QUEUED') {
+    toast.show(`#${task.id} 已进入排队`, { description: '执行位空出来后会自动开始，无需再次点击' })
+    return
+  }
+  // 认领成功只说明「codex 已经起跑」，结果还在路上，所以随后把运行记录刷出来
   await runStore.load(task.id)
-  toast.show(`#${task.id} 已派发`, { description: '执行器在后台跑，运行记录每 3 秒自动刷新' })
+  toast.show(`#${task.id} 已派发给 codex`, { description: 'codex 在本机后台执行，任务状态和运行记录每 3 秒自动刷新' })
+}
+
+/** 派发 = 平台在本机拉起 codex CLI。当前只有这一个内部执行器，按钮与提示都要让人知道这一点 */
+const dispatchHint = '在本机拉起 codex CLI 执行；派发目前只支持 codex'
+
+const dispatchingSelected = ref(false)
+
+const batchFailureDescription = (
+  failures: Array<TaskBatchDeleteFailure | TaskBatchDispatchFailure>,
+  action: '未派发' | '未删除',
+) => {
+  const shown = failures
+    .slice(0, 2)
+    .map((failure) => `#${failure.taskId}：${failure.message}`)
+    .join('；')
+  return failures.length > 2 ? `${shown}；另有 ${failures.length - 2} 个${action}` : shown
+}
+
+const dispatchSelected = async () => {
+  const ids = [...selectedIds.value]
+  if (ids.length === 0 || dispatchingSelected.value) return
+
+  const selectedTaskId = selected.value?.id ?? null
+  dispatchingSelected.value = true
+  const outcome = await store.dispatchMany(ids)
+  dispatchingSelected.value = false
+
+  if (!outcome.ok) {
+    toast.warning('批量派发请求失败', outcome.message)
+    return
+  }
+
+  const dispatched = new Set(outcome.result.dispatchedTaskIds)
+  selectedIds.value = new Set(ids.filter((id) => !dispatched.has(id)))
+  if (selectedTaskId !== null && dispatched.has(selectedTaskId)) {
+    await runStore.load(selectedTaskId)
+  }
+
+  const successCount = outcome.result.dispatchedTaskIds.length
+  const failureCount = outcome.result.failures.length
+  if (failureCount === 0) {
+    toast.success(`已提交 ${successCount} 个任务`, '取得执行位的任务会立即起跑，其余按顺序排队等待')
+  } else if (successCount === 0) {
+    toast.warning('没有任务被派发', batchFailureDescription(outcome.result.failures, '未派发'))
+  } else {
+    toast.warning(
+      `已派发 ${successCount} 个，${failureCount} 个未派发`,
+      batchFailureDescription(outcome.result.failures, '未派发'),
+    )
+  }
+}
+
+const deleting = ref(false)
+const deleteOpen = ref(false)
+const deleteTargetIds = ref<number[]>([])
+
+const deleteDialogTitle = computed(() =>
+  deleteTargetIds.value.length === 1
+    ? `删除任务 #${deleteTargetIds.value[0]}？`
+    : `删除 ${deleteTargetIds.value.length} 个任务？`,
+)
+const deleteDialogDescription = computed(() =>
+  deleteTargetIds.value.length === 1
+    ? '任务会从平台列表中移除，无法在平台上恢复。'
+    : '选中的待执行或排队任务会从平台列表中移除，无法在平台上恢复。',
+)
+
+const requestDelete = (ids: number[]) => {
+  const uniqueIds = [...new Set(ids)]
+  if (uniqueIds.length === 0) return
+  deleteTargetIds.value = uniqueIds
+  deleteOpen.value = true
+}
+
+const confirmDelete = async () => {
+  const ids = deleteTargetIds.value
+  if (ids.length === 0 || deleting.value) return
+
+  deleting.value = true
+  if (ids.length === 1) {
+    const failure = await store.remove(ids[0])
+    deleting.value = false
+    if (failure) {
+      toast.warning(`#${ids[0]} 删除被拒绝`, failure)
+      return
+    }
+    selectedIds.value = new Set([...selectedIds.value].filter((id) => id !== ids[0]))
+    deleteOpen.value = false
+    toast.success(`#${ids[0]} 已删除`, '任务已从平台列表移除')
+    return
+  }
+
+  const outcome = await store.removeMany(ids)
+  deleting.value = false
+  if (!outcome.ok) {
+    toast.warning('批量删除请求失败', outcome.message)
+    return
+  }
+
+  const deleted = new Set(outcome.result.deletedTaskIds)
+  selectedIds.value = new Set([...selectedIds.value].filter((id) => !deleted.has(id)))
+  deleteOpen.value = false
+
+  const successCount = outcome.result.deletedTaskIds.length
+  const failureCount = outcome.result.failures.length
+  if (failureCount === 0) {
+    toast.success(`已删除 ${successCount} 个任务`, '任务已从平台列表移除')
+  } else if (successCount === 0) {
+    toast.warning('没有任务被删除', batchFailureDescription(outcome.result.failures, '未删除'))
+  } else {
+    toast.warning(
+      `已删除 ${successCount} 个，${failureCount} 个未删除`,
+      batchFailureDescription(outcome.result.failures, '未删除'),
+    )
+  }
 }
 
 const cancel = async () => {
@@ -173,6 +411,7 @@ const onTaskCreated = async (payload: { id: number; title: string }) => {
   // 筛选条件全归位：带着「已完成」「某个项目」的筛选去看刚建的任务，它必然不在结果里，
   // 而「新建成功却看不到」在用户眼里就是创建失败
   store.statusFilter = 'ALL'
+  store.levelFilter = 'ALL'
   store.projectId = null
   store.keyword = ''
   keywordInput.value = ''
@@ -185,7 +424,7 @@ const onTaskCreated = async (payload: { id: number; title: string }) => {
   if (fresh) await store.select(fresh)
   // 弹框是先建任务再传图，这里按 0 张读一次；传完它会再发 uploaded 事件让我们重拉
   await loadAttachments(payload.id)
-  toast.success(`#${payload.id} 已创建`, '在待执行队列里，点「派发执行」才会真的跑')
+  toast.success(`#${payload.id} 已创建`, '在待执行队列里，点「派发给 codex」才会真的跑')
 }
 
 /*
@@ -207,7 +446,7 @@ const loadAttachments = async (id: number) => {
   }
 }
 
-const openViewer = (attachment: TaskAttachment) => {
+const openViewer = (attachment: ImageAttachment) => {
   viewerId.value = attachment.id
   viewerOpen.value = true
 }
@@ -250,6 +489,21 @@ const onUploaded = (payload: { id: number }) => {
 }
 
 /*
+ * 任务状态来自列表查询，运行记录自己的轮询刷新不到它。手动刷新与自动轮询共用这里，
+ * 保证列表、统计和右侧详情按同一份后端状态收敛。
+ */
+const refreshingTasks = ref(false)
+const refreshTasks = async () => {
+  if (refreshingTasks.value) return
+  refreshingTasks.value = true
+  try {
+    await store.refresh()
+  } finally {
+    refreshingTasks.value = false
+  }
+}
+
+/*
  * 运行记录跟着选中行走：切一行重拉一次，同时把上一条的弹框关掉 ——
  * 弹框里显示的是「某一次尝试」，换了任务还留着它，只会让人对错上下文。
  */
@@ -274,6 +528,8 @@ watch(
   () => store.selected?.id,
   (id) => {
     stopRunsTimer()
+    promptOpen.value = false
+    editOpen.value = false
     runDialogOpen.value = false
     runStore.reset()
     // 看图弹框里显示的是「某一张图」，换了任务还留着它，只会让人对错上下文
@@ -296,20 +552,95 @@ watch(
     if (running) runsTimer = window.setInterval(() => void runStore.refreshQuietly(), 3000)
   },
 )
-onUnmounted(stopRunsTimer)
+
+/*
+ * 当前页只要还有执行中或排队中的任务就轮询列表；状态落定后 computed 自动变 false，
+ * 下一次状态变化时清掉定时器，不会让后台持续空转。
+ */
+const hasActiveTasks = computed(
+  () =>
+    selected.value?.status === 'QUEUED' ||
+    selected.value?.status === 'RUNNING' ||
+    store.items.some((row) => row.status === 'QUEUED' || row.status === 'RUNNING'),
+)
+let tasksTimer: number | undefined
+const stopTasksTimer = () => {
+  window.clearInterval(tasksTimer)
+  tasksTimer = undefined
+}
+watch(
+  hasActiveTasks,
+  (running) => {
+    stopTasksTimer()
+    if (running) tasksTimer = window.setInterval(() => void refreshTasks(), 3000)
+  },
+  { immediate: true },
+)
+
+onUnmounted(() => {
+  stopRunsTimer()
+  stopTasksTimer()
+})
 </script>
 
 <template>
   <div class="flex h-full min-h-0">
     <div class="flex min-w-0 flex-1 flex-col">
-      <div class="flex h-toolbar shrink-0 items-center gap-3 border-b border-separator px-5">
+      <!--
+        手机端筛选行折成两行：标题/计数/筛选一行，操作区（搜索、刷新、新建）占满一行。
+        桌面（lg）恢复 52px 单行，与其它页面顶栏对齐。
+      -->
+      <div
+        class="flex min-h-toolbar shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-separator px-3 py-1.5 lg:h-toolbar lg:flex-nowrap lg:px-5 lg:py-0"
+      >
         <h1 class="text-body font-emphasis text-label">任务</h1>
         <span class="tnum text-body text-label-tertiary">
           {{ store.total }} / {{ store.taskTotal }}
         </span>
-        <SegmentedControl v-model="filter" :items="filterOptions" size="lg" class="ml-2" />
-        <div class="ml-auto flex items-center gap-2">
-          <Input v-model="keywordInput" placeholder="搜索" size="lg" class="w-52" />
+        <Select v-model="statusFilter" :items="statusOptions" size="lg" class="w-32 lg:ml-2" />
+        <Select v-model="levelFilter" :items="levelOptions" size="lg" class="w-36" />
+        <div class="ml-auto flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto">
+          <Tooltip v-if="selectedCount > 0" :content="dispatchHint">
+            <Button
+              variant="primary"
+              size="lg"
+              :disabled="dispatchingSelected"
+              @click="dispatchSelected"
+            >
+              <Icon :as="Play" size="inline" />
+              {{ dispatchingSelected ? '派发中…' : `批量派发给 codex ${selectedCount} 个` }}
+            </Button>
+          </Tooltip>
+          <Button
+            v-if="selectedCount > 0"
+            variant="danger"
+            size="lg"
+            :disabled="deleting"
+            @click="requestDelete([...selectedIds])"
+          >
+            <Icon :as="Trash2" size="inline" />
+            批量删除 {{ selectedCount }} 个
+          </Button>
+          <Input
+            v-model="keywordInput"
+            placeholder="搜索任务标题"
+            size="lg"
+            class="w-full sm:w-52"
+          />
+          <Tooltip content="刷新任务列表">
+            <IconButton
+              label="刷新任务列表"
+              size="lg"
+              :disabled="refreshingTasks"
+              @click="refreshTasks"
+            >
+              <Icon
+                :as="RefreshCw"
+                size="large"
+                :class="refreshingTasks ? 'animate-spin' : ''"
+              />
+            </IconButton>
+          </Tooltip>
           <Tooltip content="新建任务">
             <IconButton label="新建任务" size="lg" @click="createOpen = true">
               <Icon :as="Plus" size="large" />
@@ -326,13 +657,55 @@ onUnmounted(stopRunsTimer)
           :show-empty="false"
           @select="store.select"
         >
+          <template #header="{ column }">
+            <Checkbox
+              v-if="column.key === 'selection'"
+              :model-value="selectionState"
+              :disabled="selectableRows.length === 0"
+              aria-label="选择当前页全部待执行任务"
+              @update:model-value="toggleAllSelectable"
+            />
+            <span v-else>{{ column.label }}</span>
+          </template>
           <template #cell="{ row, column }">
-            <DecisionLevelBadge v-if="column.key === 'level'" :level="row.level" />
-            <TaskStatusBadge v-else-if="column.key === 'status'" :status="row.status" />
-            <span v-else-if="column.key === 'duration'" class="tnum text-label-secondary">
-              {{ formatDuration(row.startedAt, row.finishedAt) }}
+            <div v-if="column.key === 'selection'" class="flex items-center" @click.stop>
+              <Checkbox
+                :model-value="isRowSelected(row.id)"
+                :disabled="!canDelete(row.status)"
+                :aria-label="`选择任务 #${row.id}`"
+                @update:model-value="setRowSelected(row.id, $event === true)"
+              />
+            </div>
+            <span
+              v-else-if="column.key === 'id'"
+              class="tnum text-label-tertiary group-data-[selected=true]:text-white"
+            >
+              {{ row.id }}
             </span>
-            <span v-else-if="column.key === 'tokens'" class="tnum text-label-secondary">
+            <span
+              v-else-if="column.key === 'title'"
+              class="font-emphasis text-label group-data-[selected=true]:text-white"
+            >
+              {{ row.title }}
+            </span>
+            <span
+              v-else-if="column.key === 'projectName'"
+              class="text-label-secondary group-data-[selected=true]:text-white"
+            >
+              {{ row.projectName }}
+            </span>
+            <DecisionLevelBadge v-else-if="column.key === 'level'" :level="row.level" />
+            <TaskStatusBadge v-else-if="column.key === 'status'" :status="row.status" />
+            <span
+              v-else-if="column.key === 'duration'"
+              class="tnum text-label group-data-[selected=true]:text-white"
+            >
+              {{ formatDurationMillis(row.executionMillis) }}
+            </span>
+            <span
+              v-else-if="column.key === 'tokens'"
+              class="tnum text-label group-data-[selected=true]:text-white"
+            >
               {{ formatTokens(row.tokens) }}
             </span>
           </template>
@@ -358,8 +731,26 @@ onUnmounted(stopRunsTimer)
       <Pagination v-model:page="store.page" v-model:page-size="store.pageSize" :total="store.total" />
     </div>
 
-    <aside class="w-72 shrink-0 overflow-y-auto border-l border-separator bg-window p-4">
+    <!--
+      详情面板：桌面是右栏（288px）；手机（<lg）改成整屏覆盖层 ——
+      390px 屏幕放不下「列表 + 288px 侧栏」并排，打开详情就让列表让位，看完点「返回列表」收回。
+    -->
+    <aside
+      :class="[
+        'bg-window',
+        selected
+          ? 'fixed inset-0 z-40 w-full overflow-y-auto border-separator p-4 lg:static lg:inset-auto lg:z-auto lg:w-72 lg:shrink-0 lg:border-l'
+          : 'hidden lg:block lg:w-72 lg:shrink-0 lg:overflow-y-auto lg:border-l lg:border-separator lg:p-4',
+      ]"
+    >
       <template v-if="selected">
+        <button
+          type="button"
+          class="mb-3 inline-flex items-center gap-0.5 text-caption text-accent lg:hidden"
+          @click="store.clearSelection()"
+        >
+          <Icon :as="ChevronLeft" size="inline" />返回列表
+        </button>
         <div class="flex items-center gap-2">
           <span class="tnum text-caption text-label-tertiary">#{{ selected.id }}</span>
           <DecisionLevelBadge :level="selected.level" />
@@ -367,14 +758,30 @@ onUnmounted(stopRunsTimer)
         </div>
         <h2 class="mt-2 text-body font-emphasis text-label">{{ selected.title }}</h2>
 
-        <p v-if="store.detail" class="mt-2 text-caption text-label-secondary">
-          {{ store.detail.prompt }}
-        </p>
+        <div v-if="store.detail" class="mt-2">
+          <div class="flex items-center gap-2">
+            <p class="text-caption font-emphasis text-label-secondary">指令</p>
+            <button
+              type="button"
+              class="ml-auto text-caption text-accent transition-colors duration-100 ease-apple hover:text-accent/80"
+              @click="promptOpen = true"
+            >
+              查看详情
+            </button>
+          </div>
+          <p class="mt-1 line-clamp-4 whitespace-pre-wrap text-caption text-label-secondary">
+            {{ store.detail.prompt }}
+          </p>
+        </div>
 
         <dl class="mt-4 space-y-2">
           <div class="flex items-center gap-2">
             <dt class="whitespace-nowrap text-caption text-label-secondary">项目</dt>
             <dd class="ml-auto text-caption text-label">{{ selected.projectName }}</dd>
+          </div>
+          <div class="flex items-center gap-2">
+            <dt class="whitespace-nowrap text-caption text-label-secondary">优先级</dt>
+            <dd class="tnum ml-auto text-caption text-label">{{ selected.priority }}</dd>
           </div>
           <div class="flex items-center gap-2">
             <dt class="whitespace-nowrap text-caption text-label-secondary">分支</dt>
@@ -383,7 +790,7 @@ onUnmounted(stopRunsTimer)
           <div class="flex items-center gap-2">
             <dt class="whitespace-nowrap text-caption text-label-secondary">耗时</dt>
             <dd class="tnum ml-auto text-caption text-label">
-              {{ formatDuration(selected.startedAt, selected.finishedAt) }}
+              {{ formatDurationMillis(selected.executionMillis) }}
             </dd>
           </div>
           <div class="flex items-center gap-2">
@@ -393,6 +800,24 @@ onUnmounted(stopRunsTimer)
           <div class="flex items-center gap-2">
             <dt class="whitespace-nowrap text-caption text-label-secondary">尝试次数</dt>
             <dd class="tnum ml-auto text-caption text-label">{{ selected.attemptCount }}</dd>
+          </div>
+          <div class="flex items-center gap-2">
+            <dt class="whitespace-nowrap text-caption text-label-secondary">开始执行时间</dt>
+            <dd class="tnum ml-auto whitespace-nowrap text-caption text-label">
+              {{ formatDateTime(store.detail?.startedAt ?? selected.startedAt) }}
+            </dd>
+          </div>
+          <div class="flex items-center gap-2">
+            <dt class="whitespace-nowrap text-caption text-label-secondary">完成时间</dt>
+            <dd class="tnum ml-auto whitespace-nowrap text-caption text-label">
+              {{ formatDateTime(store.detail?.finishedAt ?? selected.finishedAt) }}
+            </dd>
+          </div>
+          <div class="flex items-center gap-2">
+            <dt class="whitespace-nowrap text-caption text-label-secondary">创建时间</dt>
+            <dd class="tnum ml-auto whitespace-nowrap text-caption text-label">
+              {{ formatDateTime(store.detail?.createdAt ?? selected.createdAt) }}
+            </dd>
           </div>
           <div v-if="store.detail?.threadId" class="flex items-center gap-2">
             <dt class="whitespace-nowrap text-caption text-label-secondary">执行线程</dt>
@@ -422,7 +847,7 @@ onUnmounted(stopRunsTimer)
             </Tooltip>
           </div>
 
-          <TaskAttachmentGrid
+          <ImageAttachmentGrid
             v-if="attachments.length > 0"
             :attachments="attachments"
             class="mt-2"
@@ -483,7 +908,7 @@ onUnmounted(stopRunsTimer)
           </p>
           <p v-else-if="runStore.runs.length === 0" class="mt-2 text-caption text-label-tertiary">
             还没有跑过。
-            <template v-if="canDispatch(selected.status)">点下面的「派发执行」让它跑起来。</template>
+            <template v-if="canDispatch(selected.status)">点下面的「派发给 codex」让它跑起来。</template>
           </p>
           <ul v-else class="mt-2 space-y-1">
             <li v-for="run in runStore.runs" :key="run.id">
@@ -496,6 +921,12 @@ onUnmounted(stopRunsTimer)
                 <span class="flex items-center gap-2">
                   <span class="tnum text-caption text-label-tertiary">#{{ run.attemptNo }}</span>
                   <RunStatusBadge :status="run.status" />
+                  <Tooltip
+                    v-if="run.executor === 'agent'"
+                    :content="`外部执行者：${run.agentName ?? '未署名'}`"
+                  >
+                    <Icon :as="Bot" size="inline" class="text-label-tertiary" />
+                  </Tooltip>
                   <span class="tnum ml-auto text-caption text-label-tertiary">
                     {{ formatTokens(run.tokens) }}
                   </span>
@@ -517,6 +948,20 @@ onUnmounted(stopRunsTimer)
         </div>
 
         <div class="mt-4 flex flex-wrap items-center gap-2">
+          <Tooltip
+            v-if="store.detail"
+            :content="canEdit(selected.status) ? '编辑任务指令与优先级' : '已完成的任务不能编辑'"
+          >
+            <span class="inline-flex">
+              <Button
+                size="sm"
+                :disabled="!canEdit(selected.status)"
+                @click="openEdit"
+              >
+                <Icon :as="Pencil" size="inline" />编辑
+              </Button>
+            </span>
+          </Tooltip>
           <Button
             v-if="canResume(selected.status)"
             variant="primary"
@@ -525,16 +970,26 @@ onUnmounted(stopRunsTimer)
           >
             <Icon :as="Play" size="inline" />批准并续跑
           </Button>
-          <Button v-if="canDispatch(selected.status)" variant="primary" size="sm" @click="dispatch">
-            <Icon :as="Play" size="inline" />派发执行
-          </Button>
+          <Tooltip v-if="canDispatch(selected.status)" :content="dispatchHint">
+            <Button variant="primary" size="sm" @click="dispatch">
+              <Icon :as="Play" size="inline" />派发给 codex
+            </Button>
+          </Tooltip>
           <Button v-if="canReject(selected.status)" size="sm" @click="openReview('reject')">
             <Icon :as="XCircle" size="inline" />驳回
           </Button>
           <Button v-if="canRetry(selected.status)" size="sm" @click="retry">
-            <Icon :as="RotateCcw" size="inline" />重试
+            <Icon :as="RotateCcw" size="inline" />{{ retryActionLabel(selected.status) }}
           </Button>
           <Button v-if="canCancel(selected.status)" size="sm" @click="cancel">终止</Button>
+          <Button
+            v-if="canDelete(selected.status)"
+            variant="danger"
+            size="sm"
+            @click="requestDelete([selected.id])"
+          >
+            <Icon :as="Trash2" size="inline" />删除
+          </Button>
           <Button v-if="runStore.runs.length > 0" size="sm" @click="openRun(runStore.runs[0].id)">
             打开日志
           </Button>
@@ -546,11 +1001,47 @@ onUnmounted(stopRunsTimer)
 
     <NewTaskDialog v-model:open="createOpen" @created="onTaskCreated" @uploaded="onUploaded" />
 
-    <TaskAttachmentsDialog
+    <TaskEditDialog v-model:open="editOpen" :task="store.detail" />
+
+    <ImageAttachmentsDialog
       v-model:open="viewerOpen"
       v-model:selected-id="viewerId"
       :attachments="attachments"
     />
+
+    <Dialog
+      v-model:open="promptOpen"
+      layout="log"
+      title="任务指令"
+      :description="selected ? `#${selected.id} 的完整原文` : ''"
+      :icon="ScrollText"
+    >
+      <div
+        class="max-h-[64vh] overflow-y-auto rounded-panel border border-separator-soft bg-content p-3"
+      >
+        <p class="whitespace-pre-wrap break-words text-caption text-label">
+          {{ store.detail?.prompt }}
+        </p>
+      </div>
+      <template #footer>
+        <Button size="sm" @click="promptOpen = false">关闭</Button>
+      </template>
+    </Dialog>
+
+    <Dialog
+      v-model:open="deleteOpen"
+      :title="deleteDialogTitle"
+      :description="deleteDialogDescription"
+      :icon="AlertTriangle"
+      icon-tone="danger"
+    >
+      <template #footer>
+        <Button size="sm" :disabled="deleting" @click="deleteOpen = false">取消</Button>
+        <Button variant="danger" size="sm" :disabled="deleting" @click="confirmDelete">
+          {{ deleting ? '删除中…' : '删除' }}
+        </Button>
+      </template>
+    </Dialog>
 
     <DecisionReviewDialog
       v-model:open="reviewOpen"

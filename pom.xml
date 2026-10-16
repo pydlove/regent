@@ -34,6 +34,7 @@
         <module>regent-infrastructure</module>
         <module>regent-interfaces</module>
         <module>regent-boot</module>
+        <module>regent-relay</module>
     </modules>
 
     <properties>

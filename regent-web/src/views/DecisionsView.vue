@@ -27,10 +27,10 @@ const toast = useToast()
 
 const columns: TableColumn[] = [
   { key: 'taskId', label: '任务', width: '72px', numeric: true },
-  { key: 'level', label: '等级', width: '168px' },
-  { key: 'rule', label: '命中规则', width: '128px' },
+  { key: 'level', label: '等级', width: '168px', hideBelow: 'md' },
+  { key: 'rule', label: '命中规则', width: '128px', hideBelow: 'lg' },
   { key: 'question', label: '待决问题' },
-  { key: 'raisedAt', label: '提出时间', align: 'right', width: '88px' },
+  { key: 'raisedAt', label: '提出时间', align: 'right', width: '88px', hideBelow: 'md' },
   { key: 'actions', label: '', align: 'right', width: '128px' },
 ]
 
@@ -53,10 +53,10 @@ onMounted(() => {
 })
 
 const reviewOpen = ref(false)
-const reviewMode = ref<'approve' | 'reject'>('approve')
+const reviewMode = ref<'view' | 'approve' | 'reject'>('view')
 const active = ref<DecisionSummary | null>(null)
 
-const openReview = (decision: DecisionSummary, mode: 'approve' | 'reject') => {
+const openReview = (decision: DecisionSummary, mode: 'view' | 'approve' | 'reject') => {
   active.value = decision
   reviewMode.value = mode
   reviewOpen.value = true
@@ -93,19 +93,25 @@ const resolvedByText = (by: string | null) => (by === 'AI' ? 'AI' : '人工')
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div class="flex h-toolbar shrink-0 items-center gap-3 border-b border-separator px-5">
+    <div class="flex h-toolbar shrink-0 items-center gap-3 border-b border-separator px-3 lg:px-5">
       <h1 class="text-body font-emphasis text-label">决策</h1>
       <span class="tnum text-body text-label-tertiary">
         {{ store.pendingTotal }} 条待批
       </span>
-      <SegmentedControl v-model="scope" :items="scopeOptions" size="lg" class="ml-2" />
-      <p class="ml-auto text-caption text-label-tertiary">
+      <SegmentedControl v-model="scope" :items="scopeOptions" size="lg" class="lg:ml-2" />
+      <p class="ml-auto hidden text-caption text-label-tertiary lg:block">
         自主决断（L0/L1）只留痕，不在这里打扰你
       </p>
     </div>
 
     <div class="scroll-area min-h-0 flex-1 overflow-auto">
-      <Table :columns="columns" :rows="store.items" row-key="id" :show-empty="false">
+      <Table
+        :columns="columns"
+        :rows="store.items"
+        row-key="id"
+        :show-empty="false"
+        @select="openReview($event, 'view')"
+      >
         <template #cell="{ row, column }">
           <span v-if="column.key === 'taskId'" class="tnum text-label-tertiary">
             #{{ row.taskId }}
@@ -174,6 +180,7 @@ const resolvedByText = (by: string | null) => (by === 'AI' ? 'AI' : '人工')
       :decision="active"
       :mode="reviewMode"
       @done="onReviewed"
+      @review="reviewMode = $event"
     />
   </div>
 </template>

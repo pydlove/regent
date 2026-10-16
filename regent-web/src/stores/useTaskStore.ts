@@ -3,9 +3,27 @@ import { computed, ref, watch } from 'vue'
 
 import { ApiError } from '@/api/http'
 import { listProjects } from '@/api/projects'
-import { cancelTask, dispatchTask, getTask, getTaskStats, listTasks, retryTask } from '@/api/tasks'
-import type { Project, TaskDetail, TaskSummary } from '@/types/api'
-import type { TaskStatus } from '@/types/task'
+import {
+  cancelTask,
+  deleteTask,
+  deleteTasks,
+  dispatchTask,
+  dispatchTasks,
+  getTask,
+  getTaskStats,
+  listTasks,
+  retryTask,
+  updateTask,
+  type UpdateTaskInput,
+} from '@/api/tasks'
+import type {
+  Project,
+  TaskBatchDeleteResult,
+  TaskBatchDispatchResult,
+  TaskDetail,
+  TaskSummary,
+} from '@/types/api'
+import type { DecisionLevel, TaskStatus } from '@/types/task'
 
 /*
  * 任务列表的数据源。真实数据来自后端 /api/tasks，分页、筛选、搜索全部下推到 SQL ——
@@ -21,6 +39,7 @@ import type { TaskStatus } from '@/types/task'
 
 const EMPTY_COUNTS: Record<TaskStatus, number> = {
   PENDING: 0,
+  QUEUED: 0,
   RUNNING: 0,
   BLOCKED: 0,
   DONE: 0,
@@ -28,10 +47,35 @@ const EMPTY_COUNTS: Record<TaskStatus, number> = {
   CANCELLED: 0,
 }
 
+const PROJECT_STORAGE_KEY = 'regent-project-id'
+
+function readStoredProjectId(): number | null {
+  try {
+    const raw = localStorage.getItem(PROJECT_STORAGE_KEY)
+    if (raw === null) return null
+
+    const parsed = Number(raw)
+    if (Number.isSafeInteger(parsed) && parsed > 0) return parsed
+
+    localStorage.removeItem(PROJECT_STORAGE_KEY)
+  } catch {
+    // 禁用本地存储时仍允许使用筛选，只是本次会话不会跨刷新保留
+  }
+  return null
+}
+
 function messageOf(error: unknown): string {
   if (error instanceof ApiError) return error.message
   return '无法连接后端，请确认服务已启动（默认 127.0.0.1:8787）'
 }
+
+export type BatchDispatchOutcome =
+  | { ok: true; result: TaskBatchDispatchResult }
+  | { ok: false; message: string }
+
+export type BatchDeleteOutcome =
+  | { ok: true; result: TaskBatchDeleteResult }
+  | { ok: false; message: string }
 
 export const useTaskStore = defineStore('tasks', () => {
   const items = ref<TaskSummary[]>([])
@@ -41,8 +85,9 @@ export const useTaskStore = defineStore('tasks', () => {
   const pageSize = ref(20)
 
   const statusFilter = ref<TaskStatus | 'ALL'>('ALL')
+  const levelFilter = ref<DecisionLevel | 'ALL'>('ALL')
   /** null 表示全部项目。工具栏的筛选与新建任务弹框共用 projects 这一份列表 */
-  const projectId = ref<number | null>(null)
+  const projectId = ref<number | null>(readStoredProjectId())
   const projects = ref<Project[]>([])
   const keyword = ref('')
 
@@ -62,6 +107,7 @@ export const useTaskStore = defineStore('tasks', () => {
     try {
       const result = await listTasks({
         status: statusFilter.value,
+        level: levelFilter.value,
         projectId: projectId.value,
         keyword: keyword.value,
         page: page.value,
@@ -113,6 +159,27 @@ export const useTaskStore = defineStore('tasks', () => {
     }
   }
 
+  /** 列表与统计一起重拉；选中行还在结果里时同步摘要和详情，不清空右侧面板。 */
+  const refresh = async () => {
+    const selectedId = selected.value?.id ?? null
+    await Promise.all([load(), loadStats()])
+    if (selectedId === null || selected.value?.id !== selectedId) return
+
+    const fresh = items.value.find((row) => row.id === selectedId)
+    if (!fresh) {
+      clearSelection()
+      return
+    }
+
+    selected.value = fresh
+    try {
+      const freshDetail = await getTask(fresh.id)
+      if (selected.value?.id === fresh.id) detail.value = freshDetail
+    } catch (e) {
+      if (selected.value?.id === fresh.id) error.value = messageOf(e)
+    }
+  }
+
   const clearSelection = () => {
     selected.value = null
     detail.value = null
@@ -122,7 +189,7 @@ export const useTaskStore = defineStore('tasks', () => {
   const retry = async (id: number): Promise<string | null> => {
     try {
       await retryTask(id)
-      await Promise.all([load(), loadStats()])
+      await refresh()
       return null
     } catch (e) {
       return messageOf(e)
@@ -134,12 +201,32 @@ export const useTaskStore = defineStore('tasks', () => {
     try {
       await dispatchTask(id)
       await Promise.all([load(), loadStats()])
-      // 详情用列表里那一行重新取：状态已经从 PENDING 变成 RUNNING，本地改字段会让界面与库分叉
+      // 详情用列表里那一行重新取：状态可能变成 QUEUED / RUNNING，本地改字段会让界面与库分叉
       const fresh = items.value.find((row) => row.id === id)
       if (fresh) await select(fresh)
       return null
     } catch (e) {
       return messageOf(e)
+    }
+  }
+
+  /** 批量派发结果只用于界面提示；成功和失败都已写入后端，随后统一重拉列表与统计。 */
+  const dispatchMany = async (ids: number[]): Promise<BatchDispatchOutcome> => {
+    const selectedId = selected.value?.id ?? null
+    try {
+      const result = await dispatchTasks(ids)
+      await Promise.all([load(), loadStats()])
+      if (
+        selectedId !== null &&
+        selected.value?.id === selectedId &&
+        result.dispatchedTaskIds.includes(selectedId)
+      ) {
+        const fresh = items.value.find((row) => row.id === selectedId)
+        if (fresh) await select(fresh)
+      }
+      return { ok: true, result }
+    } catch (e) {
+      return { ok: false, message: messageOf(e) }
     }
   }
 
@@ -153,10 +240,57 @@ export const useTaskStore = defineStore('tasks', () => {
     }
   }
 
+  /** 编辑任务内容。成功后统一重拉，确保标题、优先级排序与详情同步收敛。 */
+  const edit = async (id: number, input: UpdateTaskInput): Promise<string | null> => {
+    try {
+      await updateTask(id, input)
+      await refresh()
+      return null
+    } catch (e) {
+      return messageOf(e)
+    }
+  }
+
+  /** 删除单个任务。成功后如果删的是当前选中行，关闭右侧详情。 */
+  const remove = async (id: number): Promise<string | null> => {
+    try {
+      await deleteTask(id)
+      const selectedId = selected.value?.id ?? null
+      await Promise.all([load(), loadStats()])
+      if (selectedId === id) clearSelection()
+      return null
+    } catch (e) {
+      return messageOf(e)
+    }
+  }
+
+  /** 批量删除结果用于提示；后端已逐项处理，随后统一重拉列表与统计。 */
+  const removeMany = async (ids: number[]): Promise<BatchDeleteOutcome> => {
+    const selectedId = selected.value?.id ?? null
+    try {
+      const result = await deleteTasks(ids)
+      await Promise.all([load(), loadStats()])
+      if (selectedId !== null && result.deletedTaskIds.includes(selectedId)) {
+        clearSelection()
+      }
+      return { ok: true, result }
+    } catch (e) {
+      return { ok: false, message: messageOf(e) }
+    }
+  }
+
   // 筛选条件一变就回第 1 页：停在原页码上会得到一张空表，而且看不出为什么空
-  watch([statusFilter, projectId, keyword], () => {
+  watch([statusFilter, levelFilter, projectId, keyword], () => {
     page.value = 1
     void load()
+  })
+  watch(projectId, (value) => {
+    try {
+      if (value === null) localStorage.removeItem(PROJECT_STORAGE_KEY)
+      else localStorage.setItem(PROJECT_STORAGE_KEY, String(value))
+    } catch {
+      // 本地存储不可用不影响当前筛选，刷新后回退即可
+    }
   })
   watch([page, pageSize], () => {
     void load()
@@ -169,6 +303,7 @@ export const useTaskStore = defineStore('tasks', () => {
     page,
     pageSize,
     statusFilter,
+    levelFilter,
     projectId,
     projects,
     keyword,
@@ -182,9 +317,14 @@ export const useTaskStore = defineStore('tasks', () => {
     loadProjects,
     loadStats,
     select,
+    refresh,
     clearSelection,
     retry,
     dispatch,
+    dispatchMany,
     cancel,
+    edit,
+    remove,
+    removeMany,
   }
 })

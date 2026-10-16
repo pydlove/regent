@@ -12,7 +12,8 @@ import { tv } from '@/components/ui/tv'
  *   - 按钮在右下角，并且「取消在左、默认动作在右」。破坏性动作才用红色实心。
  */
 export const dialogPanelVariants = tv({
-  base: 'bg-material backdrop-blur-[30px] backdrop-saturate-150 shadow-window animate-panel-in rounded-window p-5',
+  /* max-w 兜住手机：640px 的日志弹框在 390px 的屏幕上不能横向溢出，宁可收窄自己不撑破视口 */
+  base: 'bg-material backdrop-blur-[30px] backdrop-saturate-150 shadow-window animate-panel-in rounded-window p-5 max-w-[calc(100vw-24px)]',
   variants: {
     layout: {
       /* 问「要不要做」：窄一点，一行说明就够 */

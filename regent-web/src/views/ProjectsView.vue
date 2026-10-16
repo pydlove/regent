@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ListChecks, Plus, RefreshCw } from '@lucide/vue'
+import { ChevronLeft, ListChecks, Plus, RefreshCw } from '@lucide/vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/http'
+import { getProjectGitBranch } from '@/api/projects'
 import { listTasks } from '@/api/tasks'
 import DecisionLevelBadge from '@/components/business/DecisionLevelBadge.vue'
 import TaskStatusBadge from '@/components/business/TaskStatusBadge.vue'
@@ -34,9 +35,10 @@ const { openDialog: openProjectDialog, lastRegistered } = useProjectDialog()
 
 const columns: TableColumn[] = [
   { key: 'name', label: '项目' },
-  { key: 'code', label: '标识', width: '152px' },
-  { key: 'path', label: '工作区路径', width: '220px' },
-  { key: 'level', label: '自动决策', width: '136px' },
+  { key: 'code', label: '标识', width: '152px', hideBelow: 'lg' },
+  { key: 'path', label: '工作区路径', width: '220px', hideBelow: 'md' },
+  { key: 'gitBranch', label: 'Git 分支', width: '180px', hideBelow: 'lg' },
+  { key: 'level', label: '自动决策', width: '136px', hideBelow: 'md' },
   { key: 'status', label: '状态', width: '88px' },
   { key: 'tasks', label: '任务', align: 'right', width: '64px' },
 ]
@@ -60,6 +62,8 @@ const taskCounts = ref<Record<number, number>>({})
 
 /** 选中项目的最近任务。只给选中的那一个拉列表，不给每一行拉 */
 const projectTasks = ref<TaskSummary[]>([])
+const projectBranches = ref<Record<number, string | null>>({})
+let branchRequestSequence = 0
 
 const loadProjectTasks = async () => {
   const id = selectedId.value
@@ -72,6 +76,26 @@ const loadProjectTasks = async () => {
   } catch {
     // 这是详情里的补充信息，取不到就空着，不拿红字顶掉整个面板
     projectTasks.value = []
+  }
+}
+
+const loadProjectBranches = async () => {
+  const requestSequence = ++branchRequestSequence
+  const projects = store.projects
+  projectBranches.value = {}
+  const branches = await Promise.all(
+    projects.map(async (project) => {
+      try {
+        const result = await getProjectGitBranch(project.id)
+        return [project.id, result.branchName] as const
+      } catch {
+        // 分支是工作区补充信息，单个项目读取失败时只把该行留空
+        return [project.id, null] as const
+      }
+    }),
+  )
+  if (requestSequence === branchRequestSequence) {
+    projectBranches.value = Object.fromEntries(branches)
   }
 }
 
@@ -88,11 +112,13 @@ const load = async () => {
         }),
       ),
     )
-    // 选中项目丢了（换库、或者列表刷新后不在了）就退回第一个，别让右侧空着
-    if (!store.projects.some((project) => project.id === selectedId.value)) {
+    // 选中项目丢了（换库、或者列表刷新后不在了）就退回第一个，别让右侧空着。
+    // 手机端例外：选中即整屏详情，落地页应该是列表本身，不自动弹出
+    const compact = window.matchMedia('(max-width: 1023px)').matches
+    if (!compact && !store.projects.some((project) => project.id === selectedId.value)) {
       selectedId.value = store.projects[0]?.id ?? null
     }
-    await loadProjectTasks()
+    await Promise.all([loadProjectTasks(), loadProjectBranches()])
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : '无法连接后端，请确认服务已启动（默认 127.0.0.1:8787）'
   } finally {
@@ -110,10 +136,11 @@ watch(lastRegistered, async (project) => {
   selectedId.value = project.id
 })
 
-/** 跳到任务页并带上这个项目的筛选：从「这个项目的任务」到「这些任务的详情」只要一步 */
-const openInTasks = () => {
-  if (!selected.value) return
-  store.projectId = selected.value.id
+/** 跳到任务页并带上这个项目的筛选：双击项目行或点检查器按钮走同一条路 */
+const openInTasks = (project = selected.value) => {
+  if (!project) return
+  selectedId.value = project.id
+  store.projectId = project.id
   void router.push('/tasks')
 }
 </script>
@@ -143,9 +170,16 @@ const openInTasks = () => {
           :selected-id="selectedId"
           :show-empty="false"
           @select="selectedId = $event.id"
+          @row-dblclick="openInTasks"
         >
           <template #cell="{ row, column }">
-            <DecisionLevelBadge v-if="column.key === 'level'" :level="row.defaultDecisionLevel" />
+            <span
+              v-if="column.key === 'gitBranch'"
+              class="font-mono text-caption text-label-secondary group-data-[selected=true]:text-white"
+            >
+              {{ projectBranches[row.id as number] || '—' }}
+            </span>
+            <DecisionLevelBadge v-else-if="column.key === 'level'" :level="row.defaultDecisionLevel" />
             <StatusDot
               v-else-if="column.key === 'status'"
               :dot="row.enabled ? 'bg-success' : 'bg-neutral'"
@@ -179,8 +213,23 @@ const openInTasks = () => {
       </div>
     </div>
 
-    <aside class="w-72 shrink-0 overflow-y-auto border-l border-separator bg-window p-4">
+    <!-- 与任务页同一套：桌面右栏，手机整屏覆盖层（390px 放不下并排两栏） -->
+    <aside
+      :class="[
+        'bg-window',
+        selected
+          ? 'fixed inset-0 z-40 w-full overflow-y-auto border-separator p-4 lg:static lg:inset-auto lg:z-auto lg:w-72 lg:shrink-0 lg:border-l'
+          : 'hidden lg:block lg:w-72 lg:shrink-0 lg:overflow-y-auto lg:border-l lg:border-separator lg:p-4',
+      ]"
+    >
       <template v-if="selected">
+        <button
+          type="button"
+          class="mb-3 inline-flex items-center gap-0.5 text-caption text-accent lg:hidden"
+          @click="selectedId = null"
+        >
+          <Icon :as="ChevronLeft" size="inline" />返回列表
+        </button>
         <div class="flex items-center gap-2">
           <span class="text-caption text-label-tertiary">{{ selected.code }}</span>
           <StatusDot
@@ -201,6 +250,12 @@ const openInTasks = () => {
           <div class="flex items-center gap-2">
             <dt class="whitespace-nowrap text-caption text-label-secondary">自动决策</dt>
             <dd class="ml-auto"><DecisionLevelBadge :level="selected.defaultDecisionLevel" /></dd>
+          </div>
+          <div v-if="projectBranches[selected.id]" class="flex items-start gap-2">
+            <dt class="whitespace-nowrap text-caption text-label-secondary">Git 分支</dt>
+            <dd class="min-w-0 break-all text-right font-mono text-caption text-label">
+              {{ projectBranches[selected.id] }}
+            </dd>
           </div>
           <div class="flex items-center gap-2">
             <dt class="whitespace-nowrap text-caption text-label-secondary">任务总数</dt>
@@ -242,7 +297,7 @@ const openInTasks = () => {
             </li>
           </ul>
 
-          <Button class="mt-3" size="sm" block @click="openInTasks">
+          <Button class="mt-3" size="sm" block @click="openInTasks()">
             <Icon :as="ListChecks" size="inline" />在任务页查看
           </Button>
         </div>

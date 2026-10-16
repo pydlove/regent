@@ -26,6 +26,12 @@ import java.util.List;
  */
 public class TaskRun {
 
+    /** 平台自己拉起的本机 codex。执行者身份的默认值，也是绝大多数记录的取值。 */
+    public static final String EXECUTOR_INTERNAL = "codex-cli";
+
+    /** 外部执行者：codex 桌面版、别的 CLI、别的模型工具。它靠租约证明自己还活着。 */
+    public static final String EXECUTOR_AGENT = "agent";
+
     /** 尚未持久化时为 null，由仓储 insert 后通过 {@link #assignIdentity} 回填。 */
     private TaskRunId id;
     private final TaskId taskId;
@@ -39,6 +45,9 @@ public class TaskRun {
     private String rawResult;
     private boolean schemaValid;
     private List<String> changedFiles;
+    private String executor;
+    private String agentName;
+    private Instant leaseExpiresAt;
 
     private final Instant startedAt;
     private Instant finishedAt;
@@ -55,6 +64,7 @@ public class TaskRun {
         this.tokens = TokenUsage.ZERO;
         this.changedFiles = List.of();
         this.schemaValid = true;
+        this.executor = EXECUTOR_INTERNAL;
         this.startedAt = requireNotNull(startedAt, "开始时间");
         this.createdAt = requireNotNull(createdAt, "创建时间");
     }
@@ -79,6 +89,9 @@ public class TaskRun {
         run.rawResult = snapshot.rawResult();
         run.schemaValid = snapshot.schemaValid();
         run.changedFiles = snapshot.changedFiles() == null ? List.of() : List.copyOf(snapshot.changedFiles());
+        run.executor = snapshot.executor() == null ? EXECUTOR_INTERNAL : snapshot.executor();
+        run.agentName = snapshot.agentName();
+        run.leaseExpiresAt = snapshot.leaseExpiresAt();
         run.finishedAt = snapshot.finishedAt();
         return run;
     }
@@ -102,6 +115,51 @@ public class TaskRun {
         this.schemaValid = result.schemaValid();
         this.changedFiles = result.changedFiles();
         this.finishedAt = now();
+        this.leaseExpiresAt = null;
+    }
+
+    /**
+     * 外部执行者认领这次尝试。
+     *
+     * <p>租约是这条路唯一的活性证明：外部执行者跑在别人的进程里，平台既看不见它、
+     * 也杀不掉它。它一旦不回话，租约到期就由回收任务把这次尝试判为失联 ——
+     * 没有租约的话，一个人中途关掉编辑器，任务会永远停在「执行中」。
+     */
+    public void claimBy(String agentName, Instant leaseExpiresAt) {
+        requireRunning("执行记录已收场，不能再被认领");
+        this.executor = EXECUTOR_AGENT;
+        this.agentName = requireText(agentName, "执行者");
+        this.leaseExpiresAt = requireNotNull(leaseExpiresAt, "租约到期时间");
+    }
+
+    /** 续租。执行者每次心跳续一次；不是自己的租约不能续。 */
+    public void renewLease(String agentName, Instant leaseExpiresAt) {
+        requireRunning("执行记录已收场，不能再续租");
+        if (!isLeaseHolder(agentName)) {
+            throw new DomainException("这条执行记录不属于该执行者，不能续租：" + agentName);
+        }
+        this.leaseExpiresAt = requireNotNull(leaseExpiresAt, "租约到期时间");
+    }
+
+    /** 这条记录的租约是不是这个执行者持有的。 */
+    public boolean isLeaseHolder(String agentName) {
+        return EXECUTOR_AGENT.equals(executor) && this.agentName != null && this.agentName.equals(agentName);
+    }
+
+    /** 租约是否已到期。没有租约（内部执行者、或已收场）永远返回 false。 */
+    public boolean isLeaseExpiredAt(Instant now) {
+        return leaseExpiresAt != null && !leaseExpiresAt.isAfter(now);
+    }
+
+    /** 有没有外部执行者正拿着它。 */
+    public boolean hasLease() {
+        return EXECUTOR_AGENT.equals(executor) && leaseExpiresAt != null;
+    }
+
+    private void requireRunning(String message) {
+        if (status != RunStatus.RUNNING) {
+            throw new DomainException(message + "，当前状态：" + status);
+        }
     }
 
     /** 持久化后回填数据库生成的主键。重复分配直接报错。 */
@@ -154,6 +212,21 @@ public class TaskRun {
 
     public List<String> getChangedFiles() {
         return changedFiles;
+    }
+
+    /** 这条记录是谁跑的：{@link #EXECUTOR_INTERNAL} 或 {@link #EXECUTOR_AGENT}。 */
+    public String getExecutor() {
+        return executor;
+    }
+
+    /** 外部执行者的自称，仅用于界面显示与追责；内部执行者为 null。 */
+    public String getAgentName() {
+        return agentName;
+    }
+
+    /** 租约到期时间；没有外部执行者持有（或已收场）时为 null。 */
+    public Instant getLeaseExpiresAt() {
+        return leaseExpiresAt;
     }
 
     public Instant getStartedAt() {

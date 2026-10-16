@@ -13,7 +13,7 @@
     <sql id="columns">
         d.id, d.task_id, t.title AS task_title, d.project_id, p.name AS project_name,
         d.ai_level, d.effective_level, r.name AS matched_rule_name, d.status, d.question,
-        d.recommendation, d.reversible, d.blast_radius, d.resolved_by, d.resolved_choice,
+        d.options, d.recommendation, d.reversible, d.blast_radius, d.resolved_by, d.resolved_choice,
         d.resolution_note, d.raised_at, d.resolved_at
     </sql>
 

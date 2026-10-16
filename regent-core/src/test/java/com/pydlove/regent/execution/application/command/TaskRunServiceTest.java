@@ -13,6 +13,8 @@ import com.pydlove.regent.governance.domain.model.DecisionId;
 import com.pydlove.regent.governance.domain.model.DecisionRaise;
 import com.pydlove.regent.governance.domain.model.DecisionStatus;
 import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.project.domain.model.EnvironmentEntry;
+import com.pydlove.regent.project.domain.model.EnvironmentScope;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 import com.pydlove.regent.support.ExecutionFakes;
@@ -44,9 +46,11 @@ class TaskRunServiceTest {
     private final ExecutionFakes.Runs runs = new ExecutionFakes.Runs();
     private final ExecutionFakes.Events events = new ExecutionFakes.Events();
     private final ExecutionFakes.Decisions decisions = new ExecutionFakes.Decisions();
+    private final ExecutionFakes.Bugs bugs = new ExecutionFakes.Bugs();
     private final ExecutionFakes.Rules rules = new ExecutionFakes.Rules();
     private final ExecutionFakes.Projects projects = new ExecutionFakes.Projects();
     private final ExecutionFakes.Attachments attachments = new ExecutionFakes.Attachments();
+    private final ExecutionFakes.Environments environments = new ExecutionFakes.Environments();
     private final ExecutionFakes.Executor executor = new ExecutionFakes.Executor();
 
     private TaskRunService service;
@@ -56,8 +60,9 @@ class TaskRunServiceTest {
         tasks.wire(runs);
         events.wire(runs);
         projects.put(ExecutionFakes.Projects.profile(1L, DecisionLevel.L1, true));
-        service = new TaskRunService(tasks, runs, events, attachments, projects, decisions,
-                new DecisionRaiseService(rules, decisions), executor, Duration.ofMinutes(30));
+        service = new TaskRunService(tasks, runs, events, attachments, projects, environments,
+                new RunSettlementService(tasks, decisions, new DecisionRaiseService(rules, decisions), bugs),
+                executor, Duration.ofMinutes(30));
     }
 
     /** 已认领的任务：分支已切、等待第一次执行。 */
@@ -192,6 +197,29 @@ class TaskRunServiceTest {
     @Nested
     @DisplayName("续跑与重试的指令")
     class OpeningPrompt {
+
+        @Test
+        @DisplayName("有效环境按项目覆盖全局，值只进进程环境不进指令")
+        void injectsEffectiveEnvironment() {
+            claimedTask();
+            environments.add(EnvironmentEntry.create(
+                    EnvironmentScope.GLOBAL, null, "DB_HOST", "global-db", List.of("数据库"), "全局数据库"));
+            environments.add(EnvironmentEntry.create(
+                    EnvironmentScope.PROJECT, PROJECT, "DB_HOST", "project-db", List.of(), "项目数据库"));
+            environments.add(EnvironmentEntry.create(
+                    EnvironmentScope.PROJECT, PROJECT, "DB_PASSWORD", "secret", List.of(), null));
+            executor.script(ExecutionFakes.Executor.success("做完了"));
+
+            service.execute(TASK);
+
+            ExecRequest request = executor.requests.get(0);
+            assertEquals("project-db", request.environmentVariables().get("DB_HOST"));
+            assertEquals("secret", request.environmentVariables().get("DB_PASSWORD"));
+            assertTrue(request.prompt().contains("`DB_HOST`"), request.prompt());
+            assertTrue(request.prompt().contains("项目数据库"), request.prompt());
+            assertFalse(request.prompt().contains("project-db"), request.prompt());
+            assertFalse(request.prompt().contains("secret"), request.prompt());
+        }
 
         @Test
         void 批准后用人工的结论作为指令() {

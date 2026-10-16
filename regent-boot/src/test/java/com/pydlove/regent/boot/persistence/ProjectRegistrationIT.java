@@ -7,6 +7,8 @@ import com.pydlove.regent.execution.domain.model.TaskSource;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.project.application.command.ProjectRegistrationService;
 import com.pydlove.regent.project.application.command.RegisterProjectCommand;
+import com.pydlove.regent.project.application.query.DirectoryListing;
+import com.pydlove.regent.project.application.query.DirectoryListingService;
 import com.pydlove.regent.project.domain.model.Project;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
@@ -24,6 +26,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -61,6 +64,9 @@ class ProjectRegistrationIT {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private DirectoryListingService directoryListingService;
 
     private static RegisterProjectCommand command(String code, String path) {
         return new RegisterProjectCommand(code, "IT 注册项目", path, "Java 17 / Maven", "mvn -q test",
@@ -134,5 +140,16 @@ class ProjectRegistrationIT {
     void rejectsTaskForUnknownProject() {
         assertThrows(EntityNotFoundException.class, () -> taskCommandService.createManual(
                 new CreateTaskCommand(ProjectId.of(987_654L), "不该落库", 0)));
+    }
+
+    @Test
+    @DisplayName("目录浏览：注册表单的路径选择器在后端拿得到真实目录树（顺带守住 bean 装配）")
+    void listsDirectoriesForThePicker(@TempDir Path workspace) throws Exception {
+        Files.createDirectory(workspace.resolve("alpha"));
+
+        DirectoryListing listing = directoryListingService.list(workspace.toString());
+
+        assertEquals(workspace.toString(), listing.path());
+        assertEquals(List.of("alpha"), listing.entries().stream().map(DirectoryListing.Entry::name).toList());
     }
 }

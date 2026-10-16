@@ -42,6 +42,9 @@ public final class TaskRunDataMapper {
         data.setTokenCachedInput(run.getTokens().cachedInput());
         data.setTokenOutput(run.getTokens().output());
         data.setBranchName(run.getBranchName());
+        data.setExecutor(run.getExecutor());
+        data.setAgentName(run.getAgentName());
+        data.setLeaseExpiresAt(toDb(run.getLeaseExpiresAt()));
         data.setSummary(run.getSummary());
         data.setRawResult(run.getRawResult());
         data.setSchemaValid(run.isSchemaValid());
@@ -67,6 +70,9 @@ public final class TaskRunDataMapper {
                 data.getRawResult(),
                 Boolean.TRUE.equals(data.getSchemaValid()),
                 fromJson(data.getChangedFiles()),
+                data.getExecutor(),
+                data.getAgentName(),
+                fromDb(data.getLeaseExpiresAt()),
                 fromDb(data.getStartedAt()),
                 fromDb(data.getFinishedAt()),
                 fromDb(data.getCreatedAt())));

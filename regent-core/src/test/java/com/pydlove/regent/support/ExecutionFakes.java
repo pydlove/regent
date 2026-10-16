@@ -1,5 +1,11 @@
 package com.pydlove.regent.support;
 
+import com.pydlove.regent.bug.domain.model.Bug;
+import com.pydlove.regent.bug.domain.model.BugAttachment;
+import com.pydlove.regent.bug.domain.model.BugAttachmentId;
+import com.pydlove.regent.bug.domain.model.BugId;
+import com.pydlove.regent.bug.domain.repository.BugAttachmentRepository;
+import com.pydlove.regent.bug.domain.repository.BugRepository;
 import com.pydlove.regent.execution.domain.model.AttachmentId;
 import com.pydlove.regent.execution.domain.model.ExecDecision;
 import com.pydlove.regent.execution.domain.model.ExecRequest;
@@ -13,7 +19,6 @@ import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskRunId;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.execution.domain.port.AgentExecutor;
-import com.pydlove.regent.execution.domain.port.AttachmentStorage;
 import com.pydlove.regent.execution.domain.port.BranchManager;
 import com.pydlove.regent.execution.domain.port.RunEventListener;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
@@ -26,10 +31,17 @@ import com.pydlove.regent.governance.domain.model.DecisionRule;
 import com.pydlove.regent.governance.domain.repository.DecisionRepository;
 import com.pydlove.regent.governance.domain.repository.DecisionRuleRepository;
 import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.project.domain.model.EnvironmentEntry;
+import com.pydlove.regent.project.domain.model.EnvironmentId;
+import com.pydlove.regent.project.domain.model.EnvironmentScope;
+import com.pydlove.regent.project.domain.repository.EnvironmentEntryRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
+import com.pydlove.regent.shared.domain.TransactionRunner;
+import com.pydlove.regent.shared.domain.port.AttachmentStorage;
+import com.pydlove.regent.shared.kernel.AttachmentScope;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 import com.pydlove.regent.shared.kernel.TokenUsage;
 
@@ -45,6 +57,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * 执行链路的内存替身。
@@ -90,17 +103,17 @@ public final class ExecutionFakes {
 
         public static ExecResult success(String summary) {
             return new ExecResult(RunStatus.SUCCESS, 0, "th-fake-1", TokenUsage.of(100, 20, 30),
-                    summary, summary, true, List.of("README.md"), null);
+                    summary, summary, true, List.of("README.md"), List.of(), null);
         }
 
         public static ExecResult failed(String summary) {
             return new ExecResult(RunStatus.FAILED, 1, "th-fake-1", TokenUsage.of(10, 0, 5),
-                    summary, summary, true, List.of(), null);
+                    summary, summary, true, List.of(), List.of(), null);
         }
 
         public static ExecResult blocked(DecisionLevel level, boolean reversible) {
             return new ExecResult(RunStatus.BLOCKED, 0, "th-fake-1", TokenUsage.of(50, 0, 10),
-                    "停下来问一句", null, true, List.of("pom.xml"),
+                    "停下来问一句", null, true, List.of("pom.xml"), List.of(),
                     new ExecDecision(level, "要不要动依赖？", List.of("动", "不动"), "不动", reversible, "构建"));
         }
     }
@@ -134,11 +147,66 @@ public final class ExecutionFakes {
         }
     }
 
+    public static final class Environments implements EnvironmentEntryRepository {
+
+        private final Map<Long, EnvironmentEntry> store = new LinkedHashMap<>();
+        private long sequence;
+
+        public void add(EnvironmentEntry entry) {
+            if (entry.getId() == null) {
+                entry.assignIdentity(EnvironmentId.of(++sequence));
+            }
+            store.put(entry.getId().value(), entry);
+        }
+
+        @Override
+        public Optional<EnvironmentEntry> findById(EnvironmentId id) {
+            return Optional.ofNullable(store.get(id.value()));
+        }
+
+        @Override
+        public List<EnvironmentEntry> findAll() {
+            return List.copyOf(store.values());
+        }
+
+        @Override
+        public List<EnvironmentEntry> findApplicableTo(ProjectId projectId) {
+            return store.values().stream()
+                    .filter(entry -> entry.getScope() == EnvironmentScope.GLOBAL
+                            || entry.getProjectId().equals(projectId))
+                    .toList();
+        }
+
+        @Override
+        public boolean existsByKey(EnvironmentScope scope,
+                                   ProjectId projectId,
+                                   String key,
+                                   EnvironmentId excludingId) {
+            return store.values().stream()
+                    .filter(entry -> excludingId == null || !entry.getId().equals(excludingId))
+                    .anyMatch(entry -> entry.getScope() == scope
+                            && java.util.Objects.equals(entry.getProjectId(), projectId)
+                            && entry.getKey().equals(key));
+        }
+
+        @Override
+        public void save(EnvironmentEntry entry) {
+            add(entry);
+        }
+
+        @Override
+        public void delete(EnvironmentId id) {
+            store.remove(id.value());
+        }
+    }
+
     public static final class Tasks implements TaskRepository {
 
         private final Map<Long, Task> store = new LinkedHashMap<>();
         private Runs runs;
         public int saves;
+        public int editableUpdates;
+        public final List<TaskId> deleted = new ArrayList<>();
         private long sequence;
 
         public void wire(Runs runs) {
@@ -170,11 +238,39 @@ public final class ExecutionFakes {
         }
 
         @Override
+        public void updateEditable(Task task) {
+            store.put(task.getId().value(), task);
+            editableUpdates++;
+        }
+
+        @Override
+        public void delete(TaskId id) {
+            store.remove(id.value());
+            deleted.add(id);
+        }
+
+        @Override
         public List<Task> findDispatchable(int limit) {
             return store.values().stream()
                     .filter(task -> task.getStatus() == TaskStatus.PENDING
+                            || task.getStatus() == TaskStatus.QUEUED
                             || (task.getStatus() == TaskStatus.RUNNING && awaitingContinuation(task)))
                     .limit(limit)
+                    .toList();
+        }
+
+        @Override
+        public List<Task> findQueued(int limit) {
+            return store.values().stream()
+                    .filter(task -> task.getStatus() == TaskStatus.QUEUED)
+                    .limit(limit)
+                    .toList();
+        }
+
+        @Override
+        public List<Task> findDispatchableInProject(ProjectId projectId, int limit) {
+            return findDispatchable(limit).stream()
+                    .filter(task -> task.getProjectId().equals(projectId))
                     .toList();
         }
 
@@ -191,7 +287,13 @@ public final class ExecutionFakes {
     public static final class Runs implements TaskRunRepository {
 
         private final Map<Long, TaskRun> store = new LinkedHashMap<>();
+        private Tasks tasks;
         private long sequence;
+
+        /** 接上任务仓储：租约是按项目算的，而项目挂在任务上，替身也得顺着这条线找。 */
+        public void wire(Tasks tasks) {
+            this.tasks = tasks;
+        }
 
         public TaskRun get(long id) {
             return store.get(id);
@@ -218,6 +320,34 @@ public final class ExecutionFakes {
             return store.values().stream()
                     .filter(run -> run.getTaskId().equals(taskId))
                     .toList();
+        }
+
+        @Override
+        public boolean hasActiveLease(ProjectId projectId, Instant now) {
+            return store.values().stream().anyMatch(run -> run.hasLease() && !run.isLeaseExpiredAt(now)
+                    && tasks != null && tasks.findById(run.getTaskId())
+                            .map(task -> task.getProjectId().equals(projectId))
+                            .orElse(false));
+        }
+
+        @Override
+        public List<TaskRun> findExpiredLeases(Instant now) {
+            return store.values().stream()
+                    .filter(run -> run.getStatus() == RunStatus.RUNNING && run.isLeaseExpiredAt(now))
+                    .toList();
+        }
+
+        @Override
+        public List<TaskRun> findActiveLeases(Instant now) {
+            return store.values().stream()
+                    .filter(run -> run.getStatus() == RunStatus.RUNNING && run.hasLease())
+                    .filter(run -> !run.isLeaseExpiredAt(now))
+                    .toList();
+        }
+
+        @Override
+        public void renewLease(TaskRunId runId, Instant leaseExpiresAt) {
+            // 续租不动替身：到期时间是 TaskRun.renewLease 在内存里改的，这里再改一遍是重复
         }
 
         @Override
@@ -294,6 +424,59 @@ public final class ExecutionFakes {
         }
     }
 
+    /** 只记账的缺陷仓储：验证执行器上报的缺陷确实落成独立聚合。 */
+    public static final class Bugs implements BugRepository {
+
+        private final Map<Long, Bug> store = new LinkedHashMap<>();
+        private long sequence;
+
+        public List<Bug> all() {
+            return List.copyOf(store.values());
+        }
+
+        @Override
+        public Optional<Bug> findById(BugId id) {
+            return Optional.ofNullable(store.get(id.value()));
+        }
+
+        @Override
+        public Optional<Bug> findByIdForUpdate(BugId id) {
+            return findById(id);
+        }
+
+        @Override
+        public void save(Bug bug) {
+            if (bug.getId() == null) {
+                bug.assignIdentity(BugId.of(++sequence));
+            }
+            store.put(bug.getId().value(), bug);
+        }
+    }
+
+    /** 只记账的 Bug 附件仓储。 */
+    public static final class BugAttachments implements BugAttachmentRepository {
+
+        private final Map<Long, BugAttachment> store = new LinkedHashMap<>();
+        private long sequence;
+
+        @Override
+        public BugAttachment save(BugAttachment attachment) {
+            BugAttachment persisted = attachment.withIdentity(BugAttachmentId.of(++sequence));
+            store.put(persisted.id().value(), persisted);
+            return persisted;
+        }
+
+        @Override
+        public Optional<BugAttachment> findById(BugAttachmentId id) {
+            return Optional.ofNullable(store.get(id.value()));
+        }
+
+        @Override
+        public List<BugAttachment> findByBug(BugId bugId) {
+            return store.values().stream().filter(item -> item.bugId().equals(bugId)).toList();
+        }
+    }
+
     public static final class Rules implements DecisionRuleRepository {
 
         private final List<DecisionRule> rules = new ArrayList<>();
@@ -343,8 +526,10 @@ public final class ExecutionFakes {
         private long sequence;
 
         @Override
-        public String store(TaskId taskId, String extension, byte[] content) {
-            String path = "/tmp/regent-fake-attachments/task-" + taskId.value() + "/f" + (++sequence) + extension;
+        public String store(AttachmentScope scope, long ownerId, String extension, byte[] content) {
+            String path = "/tmp/regent-fake-attachments/"
+                    + scope.name().toLowerCase(java.util.Locale.ROOT) + "-" + ownerId
+                    + "/f" + (++sequence) + extension;
             stored.put(path, content);
             return path;
         }
@@ -379,10 +564,52 @@ public final class ExecutionFakes {
         }
 
         @Override
+        public Optional<ProjectProfile> findByCode(String code) {
+            return store.values().stream().filter(profile -> profile.code().equals(code)).findFirst();
+        }
+
+        @Override
         public List<ProjectProfile> findAll() {
             return store.values().stream()
                     .sorted(Comparator.comparingLong(profile -> profile.id().value()))
                     .toList();
+        }
+    }
+
+    /** 事务替身：可直接执行，也可把提交后动作暂存下来单独验证启动时机。 */
+    public static final class Transactions implements TransactionRunner {
+
+        private final List<Runnable> afterCommit = new ArrayList<>();
+        private final List<Runnable> afterRollback = new ArrayList<>();
+        public boolean deferAfterCommit;
+        public int transactions;
+
+        @Override
+        public <T> T inTransaction(Supplier<T> action) {
+            transactions++;
+            return action.get();
+        }
+
+        @Override
+        public void afterCompletion(Runnable onCommit, Runnable onRollback) {
+            if (deferAfterCommit) {
+                afterCommit.add(onCommit);
+                afterRollback.add(onRollback);
+                return;
+            }
+            onCommit.run();
+        }
+
+        public void runAfterCommit() {
+            List.copyOf(afterCommit).forEach(Runnable::run);
+            afterCommit.clear();
+            afterRollback.clear();
+        }
+
+        public void runAfterRollback() {
+            List.copyOf(afterRollback).forEach(Runnable::run);
+            afterCommit.clear();
+            afterRollback.clear();
         }
     }
 
@@ -441,6 +668,9 @@ public final class ExecutionFakes {
     public static Task task(long id, ProjectId projectId, TaskStatus status) {
         Task task = Task.manual(projectId, "任务 " + id, "把这件事做完", 0);
         task.assignIdentity(TaskId.of(id));
+        if (status == TaskStatus.QUEUED) {
+            task.queue();
+        }
         if (status == TaskStatus.RUNNING || status == TaskStatus.BLOCKED) {
             task.dispatch("codex/task-" + id);
         }

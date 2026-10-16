@@ -28,10 +28,16 @@ const entries = computed(() => [
 
 <template>
   <!-- 折叠时收到 0，不退化成图标竖条 —— 那是 Windows/Web 的习惯，见 FRONTEND.md 第七节 -->
+  <!--
+    手机端（<lg）改用抽屉式覆盖：侧边栏浮在正文上，不挤压 390px 的列表。
+    桌面上仍是占位的折叠/展开两态，动画从宽度走；手机上从位移走，互不干扰。
+  -->
   <aside
     :class="[
-      'shrink-0 overflow-hidden border-r border-separator bg-material backdrop-blur-[30px] backdrop-saturate-150 transition-[width] duration-200 ease-apple',
-      collapsed ? 'w-0 border-r-0' : 'w-sidebar',
+      'shrink-0 overflow-hidden border-r border-separator bg-material backdrop-blur-[30px] backdrop-saturate-150 transition-[width,transform] duration-200 ease-apple max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-30 max-lg:w-sidebar max-lg:shadow-window',
+      collapsed
+        ? 'max-lg:-translate-x-full max-lg:border-r-0 lg:w-0 lg:border-r-0'
+        : 'max-lg:translate-x-0 lg:w-sidebar',
     ]"
   >
     <nav class="scroll-area flex h-full flex-col gap-px overflow-y-auto p-2">

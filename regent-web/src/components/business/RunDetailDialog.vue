@@ -3,6 +3,8 @@ import { ScrollText } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 
 import RunStatusBadge from '@/components/business/RunStatusBadge.vue'
+import RunHumanEntry from '@/components/business/RunHumanEntry.vue'
+import { translateRunEvents } from '@/components/business/runEvents'
 import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
@@ -14,12 +16,12 @@ import { formatDuration, formatRelative, formatTokens } from '@/utils/format'
 /*
  * 某一次执行的详情：事实在前，原文在后。
  *
- * 「事实」是给人扫一眼的（跑成什么样、花了多少、动了哪些文件），「原文」是给人查问题的
- * （事件流与末条消息）。所以默认停在事件流上，而且每条折叠到三行 ——
- * 一条 `item.completed` 里塞几千字是常态，全展开会让人滑到怀疑人生。
+ * 三个页签对应三种读法：「执行过程」是翻成人话的事件流（见 runEvents.ts），默认停在它上面；
+ * 「原始事件」逐条原样呈现，排错时以它为准；「出参原文」是平台读取结论的末条消息。
  *
- * 这一层只做展示与折叠，不做任何解析加工：payload 原样呈现，是不是 JSON、里面写了什么，
- * 由看日志的人自己判断。日志被「美化」过之后，排错时就会骗人。
+ * 原始事件页签刻意不做任何加工：payload 原样呈现，是不是 JSON、里面写了什么，由看日志的
+ * 人自己判断 —— 日志被「美化」过之后，排错时就会骗人。人话视图只做提取与合并，认不准的
+ * 事件原样落到「其他事件」，两侧永远能对上。
  */
 const props = withDefaults(
   defineProps<{
@@ -32,21 +34,45 @@ const props = withDefaults(
 
 const open = defineModel<boolean>('open', { default: false })
 
-const tab = ref<'events' | 'raw'>('events')
+const tab = ref<'process' | 'events' | 'raw'>('process')
 const expanded = ref<number[]>([])
 
-// 每次重新打开都回到事件流、收起全部长条目：上一次翻到哪跟这一次要看的东西没关系
+// 每次重新打开都回到执行过程、收起全部长条目：上一次翻到哪跟这一次要看的东西没关系
 watch(open, (value) => {
   if (value) {
-    tab.value = 'events'
+    tab.value = 'process'
     expanded.value = []
   }
 })
 
 const run = computed(() => props.detail?.run ?? null)
 
+/** 外部执行者跑在平台看不见的进程里，界面必须能把它与本机 codex 分开 —— 它失联的样子是一条停在原地的租约 */
+const isExternal = computed(() => run.value?.executor === 'agent')
+
+const executorLabel = computed(() => {
+  if (!run.value) {
+    return ''
+  }
+  return isExternal.value ? `外部执行者 · ${run.value.agentName ?? '未署名'}` : '本机 codex（平台拉起）'
+})
+
+const leaseLabel = computed(() => {
+  const expiresAt = run.value?.leaseExpiresAt
+  if (!expiresAt) {
+    return '已收场，不再占用工作区'
+  }
+  return `${formatRelative(expiresAt)} 到期`
+})
+
+/** 人话视图里条目的「谁在说」 */
+const speaker = computed(() => (isExternal.value ? (run.value?.agentName ?? '执行者') : 'codex'))
+
+const humanItems = computed(() => translateRunEvents(props.detail?.events ?? []))
+
 const tabItems = computed(() => [
-  { value: 'events', label: `事件流（${props.detail?.events.length ?? 0}）` },
+  { value: 'process', label: '执行过程' },
+  { value: 'events', label: `原始事件（${props.detail?.events.length ?? 0}）` },
   { value: 'raw', label: '出参原文' },
 ])
 
@@ -91,6 +117,7 @@ const tokenBreakdown = computed(() => {
     <template v-else-if="run">
       <div class="flex items-center gap-2">
         <RunStatusBadge :status="run.status" />
+        <Badge v-if="isExternal" tone="neutral">外部执行者</Badge>
         <Badge v-if="!run.schemaValid" tone="warning">出参不合约定</Badge>
         <span v-if="run.exitCode !== null" class="tnum text-caption text-label-tertiary">
           退出码 {{ run.exitCode }}
@@ -108,6 +135,14 @@ const tokenBreakdown = computed(() => {
         <div class="flex items-center gap-2">
           <dt class="text-caption text-label-secondary">构成</dt>
           <dd class="tnum ml-auto truncate text-caption text-label-secondary">{{ tokenBreakdown }}</dd>
+        </div>
+        <div class="col-span-2 flex items-center gap-2">
+          <dt class="text-caption text-label-secondary">执行者</dt>
+          <dd class="ml-auto truncate text-caption text-label">{{ executorLabel }}</dd>
+        </div>
+        <div v-if="isExternal" class="col-span-2 flex items-center gap-2">
+          <dt class="text-caption text-label-secondary">租约</dt>
+          <dd class="tnum ml-auto text-caption text-label-secondary">{{ leaseLabel }}</dd>
         </div>
       </dl>
 
@@ -134,7 +169,23 @@ const tokenBreakdown = computed(() => {
       <SegmentedControl v-model="tab" :items="tabItems" size="sm" class="mt-4" />
 
       <div
-        v-if="tab === 'events'"
+        v-if="tab === 'process'"
+        class="mt-2 max-h-[46vh] overflow-y-auto rounded-panel border border-separator-soft bg-content px-3.5 py-1"
+      >
+        <p v-if="humanItems.length === 0" class="p-2 text-caption text-label-tertiary">
+          这次执行没有留下事件流。
+        </p>
+        <div
+          v-for="item in humanItems"
+          :key="item.seq"
+          class="py-2"
+        >
+          <RunHumanEntry :item="item" :speaker="speaker" />
+        </div>
+      </div>
+
+      <div
+        v-else-if="tab === 'events'"
         class="mt-2 max-h-[46vh] overflow-y-auto rounded-panel border border-separator-soft bg-content p-2"
       >
         <p v-if="detail && detail.events.length === 0" class="p-2 text-caption text-label-tertiary">

@@ -41,6 +41,7 @@
 | 测试执行 | `maven-surefire-plugin` | **3.5.4，必须显式钉版本** | `api_parent` 未管理 surefire；Maven 默认 2.12.4 无法执行 JUnit 5，测试会被静默跳过且构建仍然「成功」 |
 | 质量 | maven-surefire / maven-scm / 父 POM 插件链 | — | 复用父 POM 既有插件配置 |
 | 守护 | 复用 `py-deploy` 的 start/stop/status 模式 | — | `java -jar` + 开机自启 |
+| 公网中继 | JDK `HttpServer` + `HttpClient` | Java 17 | 独立模块 `regent-relay`，无第三方运行时依赖；服务器无状态，本机主动长轮询 |
 
 ---
 
@@ -130,6 +131,8 @@ spring:
 | 表 | 迁移 | 职责 |
 |---|---|---|
 | `task_attachment` | `V3__task_attachment.sql` | 任务图片附件：展示用文件名、`image/*` 类型、字节数、平台侧存储路径（磁盘文件名只有 UUID + 扩展名） |
+| `bug_attachment` | `V8__bug_attachment.sql` | Bug 单图片附件：复现截图与现场证据，存储规则与任务附件一致，外键挂 `bug` |
+| `environment_entry` | `V9__environment_entry.sql` | 任务环境信息：全局或项目归属、环境键、任意文本值、标签与描述；项目同键值覆盖全局 |
 
 全部用 `utf8mb4`，主键用 `BIGINT`，状态字段用 `VARCHAR` 存枚举名（不用 MySQL `ENUM`，避免改枚举要动表结构）。时间统一 `DATETIME(3)` 存 UTC。
 
@@ -183,6 +186,7 @@ regent/
 │       └── codex/               # 出参 schema 与上报约定（见第五节）
 ├── regent-interfaces/           # REST、DTO、调度入口
 ├── regent-boot/                 # Spring Boot 启动与装配
+├── regent-relay/                # 公网中继与本地连接器，零第三方运行时依赖
 ├── regent-web/                  # 前端（Vue 3 + Tailwind，见 FRONTEND.md）
 └── deploy/                      # 本地启停脚本 + 远程发布脚本
 ```
@@ -202,15 +206,17 @@ DTO 收在 `regent-interfaces` 的 `interfaces/dto` 包下，**没有单独的 `
 两个文件随 classpath 打包；执行时由 `SchemaFileProvider` 首次调用落到 `~/.regent/`，因为
 `codex exec --output-schema` **只接受文件路径**，不接受内联 schema。运行产物一律不落仓库。
 
-出参只有四个字段（`status` / `summary` / `changedFiles` / `decision`），没有 `bugs` / `verify` ——
-缺陷与验证结论目前都写在 `summary` 里，等 Bug 写路径真正落地再扩 schema：
+出参有五个字段（`status` / `summary` / `changedFiles` / `decision` / `bugs`）。
+`bugs` 是执行器发现的缺陷清单，平台会把每项落成来源任务可追溯的 Bug 单；
+没有发现缺陷时传空数组。验证结论仍写在 `summary` 里，暂未拆成独立字段：
 
 ```java
 public record CodexExecResult(
     Status status,                 // DONE / BLOCKED / FAILED
     String summary,
     List<String> changedFiles,
-    DecisionDto decision           // 只有 BLOCKED 时是对象，其余为 null
+    DecisionDto decision,          // 只有 BLOCKED 时是对象，其余为 null
+    List<BugDto> bugs              // 本轮发现的缺陷，没有则为空
 ) {}
 
 public record DecisionDto(
@@ -220,6 +226,14 @@ public record DecisionDto(
     String recommendation,
     boolean reversible,
     String blastRadius
+) {}
+
+public record BugDto(
+    String title,                  // 一句可执行的缺陷标题
+    Severity severity,             // BLOCKER / MAJOR / MINOR / TRIVIAL
+    String reproduction,           // 不知道就留空
+    String filePath,               // 相对项目根，不知道就留空
+    String detail
 ) {}
 ```
 
@@ -318,7 +332,7 @@ regent:
   execution:
     codex-command: ${REGENT_CODEX_COMMAND:codex}
     timeout: ${REGENT_EXEC_TIMEOUT:PT30M}     # 单次执行的墙钟上限，ISO-8601
-    max-concurrency: ${REGENT_MAX_CONCURRENCY:1}   # 默认 1，并行会互相覆盖工作区
+    max-concurrency: ${REGENT_MAX_CONCURRENCY:1}   # 仅首次默认；界面保存后以数据库配置为准
     branch-enabled: ${REGENT_BRANCH_ENABLED:true}  # 一任务一分支；关掉则在当前分支上跑
     dispatch:                                 # 派发心跳。关了就只能靠人点「派发执行」
       enabled: ${REGENT_DISPATCH_ENABLED:true}

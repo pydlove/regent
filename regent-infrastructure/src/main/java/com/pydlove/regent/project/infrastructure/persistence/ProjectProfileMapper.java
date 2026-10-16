@@ -9,5 +9,7 @@ public interface ProjectProfileMapper {
 
     ProjectProfileRow selectById(@Param("id") long id);
 
+    ProjectProfileRow selectByCode(@Param("code") String code);
+
     List<ProjectProfileRow> selectAll();
 }

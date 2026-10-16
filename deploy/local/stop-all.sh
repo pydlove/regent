@@ -4,6 +4,11 @@ source "$(dirname "$0")/_common.sh"
 
 stop_by_pidfile "前端" "$FRONTEND_PID_FILE"
 stop_by_pidfile "后端" "$BACKEND_PID_FILE"
+if relay_agent_loaded; then
+    warn "公网中继连接器由 launchd 托管，未停止（要停：deploy/local/relay-agent.sh uninstall）"
+else
+    stop_by_pidfile "公网中继连接器" "$RELAY_PID_FILE"
+fi
 
 # pid 文件可能丢（比如手动起过），兜底按端口清理
 for pair in "前端:$FRONTEND_PORT" "后端:$BACKEND_PORT"; do

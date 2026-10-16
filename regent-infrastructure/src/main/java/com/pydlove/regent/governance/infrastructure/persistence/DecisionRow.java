@@ -24,6 +24,7 @@ public class DecisionRow {
     private String matchedRuleName;
     private String status;
     private String question;
+    private String options;
     private String recommendation;
     private Boolean reversible;
     private String blastRadius;

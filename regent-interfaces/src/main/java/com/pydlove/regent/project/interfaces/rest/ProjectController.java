@@ -3,14 +3,18 @@ package com.pydlove.regent.project.interfaces.rest;
 import com.pydlove.regent.project.application.command.ProjectRegistrationService;
 import com.pydlove.regent.project.application.command.RegisterProjectCommand;
 import com.pydlove.regent.project.application.query.DirectoryListingService;
+import com.pydlove.regent.project.application.query.ProjectGitBranchQueryService;
 import com.pydlove.regent.project.domain.model.Project;
+import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.project.interfaces.dto.DirectoryListingResponse;
 import com.pydlove.regent.project.interfaces.dto.ProjectCreateRequest;
+import com.pydlove.regent.project.interfaces.dto.ProjectGitBranchResponse;
 import com.pydlove.regent.project.interfaces.dto.ProjectResponse;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -32,13 +36,16 @@ public class ProjectController {
     private final ProjectProfileRepository projectProfileRepository;
     private final ProjectRegistrationService projectRegistrationService;
     private final DirectoryListingService directoryListingService;
+    private final ProjectGitBranchQueryService projectGitBranchQueryService;
 
     public ProjectController(ProjectProfileRepository projectProfileRepository,
                              ProjectRegistrationService projectRegistrationService,
-                             DirectoryListingService directoryListingService) {
+                             DirectoryListingService directoryListingService,
+                             ProjectGitBranchQueryService projectGitBranchQueryService) {
         this.projectProfileRepository = projectProfileRepository;
         this.projectRegistrationService = projectRegistrationService;
         this.directoryListingService = directoryListingService;
+        this.projectGitBranchQueryService = projectGitBranchQueryService;
     }
 
     /**
@@ -60,6 +67,12 @@ public class ProjectController {
         return projectProfileRepository.findAll().stream()
                 .map(ProjectResponse::from)
                 .toList();
+    }
+
+    @GetMapping("/{id}/git-branch")
+    public ProjectGitBranchResponse gitBranch(@PathVariable long id) {
+        return new ProjectGitBranchResponse(
+                projectGitBranchQueryService.currentBranch(ProjectId.of(id)).orElse(null));
     }
 
     /**

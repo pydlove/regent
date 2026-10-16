@@ -4,6 +4,7 @@ import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
+import com.pydlove.regent.execution.domain.service.ExecutionConcurrencyGate;
 import com.pydlove.regent.governance.application.command.DecisionRaiseService;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
@@ -35,12 +36,15 @@ class TaskDispatchServiceTest {
     private final ExecutionFakes.Runs runs = new ExecutionFakes.Runs();
     private final ExecutionFakes.Events events = new ExecutionFakes.Events();
     private final ExecutionFakes.Decisions decisions = new ExecutionFakes.Decisions();
+    private final ExecutionFakes.Bugs bugs = new ExecutionFakes.Bugs();
     private final ExecutionFakes.Rules rules = new ExecutionFakes.Rules();
     private final ExecutionFakes.Projects projects = new ExecutionFakes.Projects();
     private final ExecutionFakes.Attachments attachments = new ExecutionFakes.Attachments();
     private final ExecutionFakes.Branches branches = new ExecutionFakes.Branches();
     private final ExecutionFakes.Executor executor = new ExecutionFakes.Executor();
     private final ExecutionFakes.Workers workers = new ExecutionFakes.Workers();
+    private final ExecutionFakes.Transactions transactions = new ExecutionFakes.Transactions();
+    private final ExecutionConcurrencyGate concurrencyGate = new ExecutionConcurrencyGate(64);
 
     private TaskDispatchService service;
 
@@ -49,15 +53,50 @@ class TaskDispatchServiceTest {
         tasks.wire(runs);
         events.wire(runs);
         projects.put(ExecutionFakes.Projects.profile(1L, DecisionLevel.L1, true));
-        TaskRunService runService = new TaskRunService(tasks, runs, events, attachments, projects, decisions,
-                new DecisionRaiseService(rules, decisions), executor, Duration.ofMinutes(30));
-        service = new TaskDispatchService(tasks, projects, branches, runService, workers);
+        TaskRunService runService = new TaskRunService(tasks, runs, events, attachments, projects,
+                new ExecutionFakes.Environments(),
+                new RunSettlementService(tasks, decisions, new DecisionRaiseService(rules, decisions), bugs),
+                executor, Duration.ofMinutes(30));
+        service = new TaskDispatchService(
+                tasks, projects, branches, runService, workers, concurrencyGate, transactions);
     }
 
     private Task add(TaskStatus status) {
-        Task task = ExecutionFakes.task(1L, PROJECT, status);
+        return add(1L, status);
+    }
+
+    private Task add(long id, TaskStatus status) {
+        Task task = ExecutionFakes.task(id, PROJECT, status);
         tasks.add(task);
         return task;
+    }
+
+    @Test
+    void 批量派发时单项失败不阻断后续任务() {
+        add(1L, TaskStatus.PENDING);
+        add(2L, TaskStatus.DONE);
+        add(3L, TaskStatus.PENDING);
+
+        TaskDispatchBatchResult result = service.dispatchBatch(List.of(
+                TaskId.of(1L), TaskId.of(2L), TaskId.of(3L)));
+
+        assertEquals(List.of(TaskId.of(1L), TaskId.of(3L)), result.dispatchedTaskIds());
+        assertEquals(1, result.failures().size());
+        assertEquals(TaskId.of(2L), result.failures().get(0).taskId());
+        assertEquals(2, workers.size());
+        assertEquals(TaskStatus.DONE, tasks.get(2L).getStatus());
+    }
+
+    @Test
+    void 批量派发时重复任务ID只处理一次() {
+        add(TaskStatus.PENDING);
+
+        TaskDispatchBatchResult result = service.dispatchBatch(List.of(
+                TaskId.of(1L), TaskId.of(1L)));
+
+        assertEquals(List.of(TaskId.of(1L)), result.dispatchedTaskIds());
+        assertTrue(result.failures().isEmpty());
+        assertEquals(1, workers.size());
     }
 
     @Nested
@@ -75,6 +114,31 @@ class TaskDispatchServiceTest {
             assertEquals(List.of("codex/task-1"), branches.created);
             assertEquals(1, workers.size(), "执行必须交给工作线程，不能挂在调用线程上");
             assertEquals(TaskStatus.RUNNING, tasks.get(1L).getStatus());
+        }
+
+        @Test
+        void 事务内派发时等工作线程提交后再启动() {
+            transactions.deferAfterCommit = true;
+            add(TaskStatus.PENDING);
+
+            service.dispatchAfterCommit(TaskId.of(1L));
+
+            assertEquals(0, workers.size());
+            transactions.runAfterCommit();
+            assertEquals(1, workers.size());
+        }
+
+        @Test
+        void 事务回滚时释放执行位且不启动线程() {
+            transactions.deferAfterCommit = true;
+            concurrencyGate.updateLimit(1);
+            add(TaskStatus.PENDING);
+
+            service.dispatchAfterCommit(TaskId.of(1L));
+            transactions.runAfterRollback();
+
+            assertEquals(0, concurrencyGate.activeCount());
+            assertEquals(0, workers.size());
         }
 
         @Test
@@ -117,6 +181,39 @@ class TaskDispatchServiceTest {
         }
 
         @Test
+        void 达到并发上限时任务进入排队() {
+            concurrencyGate.updateLimit(1);
+            add(1L, TaskStatus.PENDING);
+            add(2L, TaskStatus.PENDING);
+
+            service.dispatch(TaskId.of(1L));
+
+            Task queued = service.dispatch(TaskId.of(2L));
+
+            assertEquals(TaskStatus.QUEUED, queued.getStatus());
+            assertEquals(TaskStatus.QUEUED, tasks.get(2L).getStatus());
+            assertEquals(0, queued.getAttemptCount(), "等待执行位不算一次执行尝试");
+            assertTrue(queued.getStartedAt().isEmpty());
+            assertEquals(1, workers.size(), "只有取得执行位的任务才能提交给工作线程");
+        }
+
+        @Test
+        void 排队任务在前的任务收场后自动补位() {
+            executor.script(ExecutionFakes.Executor.success("完成"));
+            concurrencyGate.updateLimit(1);
+            add(1L, TaskStatus.PENDING);
+            add(2L, TaskStatus.PENDING);
+
+            service.dispatch(TaskId.of(1L));
+            service.dispatch(TaskId.of(2L));
+            workers.runAll();
+
+            assertEquals(TaskStatus.DONE, tasks.get(1L).getStatus());
+            assertEquals(TaskStatus.RUNNING, tasks.get(2L).getStatus());
+            assertEquals(2, workers.size());
+        }
+
+        @Test
         void 续跑会把工作区切回原分支并开启新尝试() {
             Task task = add(TaskStatus.RUNNING);
             task.recordThreadId("th-1");
@@ -149,6 +246,14 @@ class TaskDispatchServiceTest {
         }
 
         @Test
+        void 扫描认领排队任务() {
+            add(TaskStatus.QUEUED);
+
+            assertEquals(1, service.dispatchCandidates(10));
+            assertEquals(TaskStatus.RUNNING, tasks.get(1L).getStatus());
+        }
+
+        @Test
         void 扫描不领起没有待续跑信号的任务() {
             Task task = add(TaskStatus.RUNNING);
             task.recordThreadId("th-1");
@@ -167,6 +272,17 @@ class TaskDispatchServiceTest {
             assertEquals(0, service.dispatchCandidates(10));
             assertEquals(0, service.dispatchCandidates(10), "同一分钟内不该把同样的失败再试一遍");
             assertEquals(TaskStatus.PENDING, tasks.get(1L).getStatus());
+        }
+
+        @Test
+        void 扫描不会超过并发上限() {
+            concurrencyGate.updateLimit(1);
+            add(1L, TaskStatus.PENDING);
+            add(2L, TaskStatus.PENDING);
+
+            assertEquals(1, service.dispatchCandidates(10));
+            assertEquals(TaskStatus.RUNNING, tasks.get(1L).getStatus());
+            assertEquals(TaskStatus.PENDING, tasks.get(2L).getStatus());
         }
     }
 }

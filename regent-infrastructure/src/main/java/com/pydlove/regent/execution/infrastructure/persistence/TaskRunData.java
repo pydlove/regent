@@ -23,6 +23,9 @@ public class TaskRunData {
     private Long tokenCachedInput;
     private Long tokenOutput;
     private String branchName;
+    private String executor;
+    private String agentName;
+    private LocalDateTime leaseExpiresAt;
     private String summary;
     private String rawResult;
     private Boolean schemaValid;

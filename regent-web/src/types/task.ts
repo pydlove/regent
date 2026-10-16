@@ -1,12 +1,14 @@
 /*
  * 前端的领域词汇。刻意与后端 ARCHITECTURE.md 2.3 的 TaskStatus 状态机逐字对齐：
  *
- *   PENDING ──dispatch──▶ RUNNING ──success──▶ DONE
- *                              │
- *                              ├──needDecision──▶ BLOCKED ──approved──▶ RUNNING (resume)
- *                              │                     │
- *                              │                     └──rejected──▶ CANCELLED
- *                              └──error──▶ FAILED ──retry──▶ PENDING
+ *   PENDING ──queue──▶ QUEUED ──dispatch──▶ RUNNING ──success──▶ DONE
+ *      │                                      │
+ *      └────────────dispatch────────────────┘
+ *                                             ├──needDecision──▶ BLOCKED ──approved──▶ RUNNING (resume)
+ *                                             │                     │
+ *                                             │                     └──rejected──▶ CANCELLED
+ *                                             └──error──▶ FAILED ──retry──▶ PENDING
+ *                                                                       CANCELLED ──重新执行──▶ PENDING
  *
  * 对齐的意义不是好看：状态名一旦两边不一致，接真实接口时就要在每个边界做翻译，
  * 而翻译层正是「前端显示的和后端存的不是一回事」这类 bug 的温床。
@@ -17,7 +19,7 @@
 
 export type DecisionLevel = 'L0' | 'L1' | 'L2' | 'L3'
 
-export type TaskStatus = 'PENDING' | 'RUNNING' | 'BLOCKED' | 'DONE' | 'FAILED' | 'CANCELLED'
+export type TaskStatus = 'PENDING' | 'QUEUED' | 'RUNNING' | 'BLOCKED' | 'DONE' | 'FAILED' | 'CANCELLED'
 
 export type TaskSource = 'REQUIREMENT' | 'BUG_FIX' | 'MANUAL'
 
@@ -41,7 +43,7 @@ export const runInProgress = (s: RunStatus) => s === 'RUNNING'
 /** 没成：失败与超时在界面上都算「这一次白跑了」，只有原因不同。 */
 export const runIsFailure = (s: RunStatus) => s === 'FAILED' || s === 'TIMEOUT'
 
-/** 终态：进到这里就没有出路了，UI 上任何操作按钮都必须禁用 */
+/** 不再自行流转：DONE 不可重开；CANCELLED 只允许人工重新执行 */
 export const TERMINAL_STATUSES: readonly TaskStatus[] = ['DONE', 'CANCELLED']
 
 /*
@@ -55,4 +57,7 @@ export const canBlock = (s: TaskStatus) => s === 'RUNNING'
 export const canResume = (s: TaskStatus) => s === 'BLOCKED'
 export const canReject = (s: TaskStatus) => s === 'BLOCKED'
 export const canCancel = (s: TaskStatus) => !TERMINAL_STATUSES.includes(s)
-export const canRetry = (s: TaskStatus) => s === 'FAILED'
+export const canRetry = (s: TaskStatus) => s === 'FAILED' || s === 'CANCELLED'
+export const retryActionLabel = (s: TaskStatus) => (s === 'CANCELLED' ? '重新执行' : '重试')
+export const canDelete = (s: TaskStatus) => s === 'PENDING' || s === 'QUEUED'
+export const canEdit = (s: TaskStatus) => s !== 'DONE'

@@ -67,7 +67,7 @@ regent:
     codex-command: ${REGENT_CODEX_COMMAND:codex}
     # 单次执行的墙钟上限，ISO-8601（PT30M = 三十分钟）
     timeout: ${REGENT_EXEC_TIMEOUT:PT30M}
-    # 同时执行的任务数。默认 1：一条执行链路独占工作区，并行会互相覆盖改动
+    # 首次启动的并发上限默认值。界面保存后以 execution_setting 表为准，运行时立即生效
     max-concurrency: ${REGENT_MAX_CONCURRENCY:1}
     # 是否给每个任务开独立分支。关掉之后在当前分支上执行，并如实记录当前分支名
     branch-enabled: ${REGENT_BRANCH_ENABLED:true}
@@ -77,6 +77,21 @@ regent:
       interval-ms: 15000
       initial-delay-ms: 20000
       batch-size: 3
+  agent:
+    # 外部执行者（codex 桌面版、别的 CLI、别的模型工具）走 /api/agent/* 认领任务。
+    # 契约全文：GET /api/agent/contract.md。要让它独占派发，把上面 dispatch.enabled 关掉 ——
+    # 内部心跳开着时，两边会抢同一批待执行任务。
+    #
+    # 租约时长（秒）：多久不心跳就按失联处理，判这次尝试失败并放开工作区。
+    # 心跳间隔建议不超过它的三分之一，见 agent-protocol.md
+    lease-seconds: ${REGENT_AGENT_LEASE_SECONDS:900}
+    # 回给执行者的契约地址。它按这个地址去读协议全文与出参 schema
+    contract-url: ${REGENT_AGENT_CONTRACT_URL:http://127.0.0.1:8787/api/agent/contract}
+    lease-sweep:
+      # 失联回收。关掉之后：执行者中途消失，任务会一直停在「执行中」并占着工作区
+      enabled: ${REGENT_AGENT_LEASE_SWEEP_ENABLED:true}
+      interval-ms: 60000
+      initial-delay-ms: 45000
 
 mybatis-plus:
   mapper-locations: classpath*:mapper/**/*.xml

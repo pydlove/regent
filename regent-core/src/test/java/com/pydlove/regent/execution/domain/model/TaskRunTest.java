@@ -30,7 +30,7 @@ class TaskRunTest {
 
     private ExecResult success() {
         return new ExecResult(RunStatus.SUCCESS, 0, "th-1", TokenUsage.of(100, 20, 30),
-                "做完了", "做完了", true, List.of("a.txt", "b/c.txt"), null);
+                "做完了", "做完了", true, List.of("a.txt", "b/c.txt"), List.of(), null);
     }
 
     @Nested
@@ -92,7 +92,7 @@ class TaskRunTest {
         void 出参不合法时按失败收敛() {
             TaskRun run = running();
             ExecResult broken = new ExecResult(RunStatus.SUCCESS, 0, "th-1", TokenUsage.ZERO,
-                    null, "{\"没按约定来\":true}", false, List.of(), null);
+                    null, "{\"没按约定来\":true}", false, List.of(), List.of(), null);
 
             run.finish(broken);
 
@@ -104,7 +104,7 @@ class TaskRunTest {
         void 阻塞收敛要保留结论() {
             TaskRun run = running();
             ExecResult blocked = new ExecResult(RunStatus.BLOCKED, 0, "th-1", TokenUsage.of(1, 0, 1),
-                    "停下来问一句", null, true, List.of(),
+                    "停下来问一句", null, true, List.of(), List.of(),
                     new ExecDecision(com.pydlove.regent.shared.kernel.DecisionLevel.L2, "要不要动依赖？",
                             List.of("动"), "不动", true, "构建"));
 
@@ -125,13 +125,13 @@ class TaskRunTest {
         @Test
         void 结果不能是进行中() {
             assertThrows(DomainException.class, () -> new ExecResult(RunStatus.RUNNING, 0, "th-1",
-                    TokenUsage.ZERO, "还在跑", null, true, List.of(), null));
+                    TokenUsage.ZERO, "还在跑", null, true, List.of(), List.of(), null));
         }
 
         @Test
         void 阻塞结果必须带上待决策问题() {
             assertThrows(DomainException.class, () -> new ExecResult(RunStatus.BLOCKED, 0, "th-1",
-                    TokenUsage.ZERO, "停下来了", null, true, List.of(), null));
+                    TokenUsage.ZERO, "停下来了", null, true, List.of(), List.of(), null));
         }
     }
 
@@ -139,7 +139,8 @@ class TaskRunTest {
     void 重建后字段一致() {
         TaskRunSnapshot snapshot = new TaskRunSnapshot(TaskRunId.of(3L), TASK, 2, "codex/task-7",
                 RunStatus.BLOCKED, 0, TokenUsage.of(5, 1, 2), "等人工", "原文", true,
-                List.of("x.txt"), Instant.parse("2026-10-16T02:00:00Z"),
+                List.of("x.txt"), TaskRun.EXECUTOR_INTERNAL, null, null,
+                Instant.parse("2026-10-16T02:00:00Z"),
                 Instant.parse("2026-10-16T02:05:00Z"), Instant.parse("2026-10-16T02:00:00Z"));
 
         TaskRun run = TaskRun.restore(snapshot);

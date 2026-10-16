@@ -14,13 +14,17 @@ import java.util.Locale;
 public enum TaskStatus {
 
     PENDING,
+    QUEUED,
     RUNNING,
     BLOCKED,
     DONE,
     FAILED,
     CANCELLED;
 
-    /** 终态：进到这里就没有出路。FAILED 不算终态，它可以被人工重试拉回 PENDING。 */
+    /**
+     * 是否会自行继续流转。DONE 是唯一不可重开的终态；CANCELLED 也不再自行流转，
+     * 但允许人工重新执行回 PENDING。FAILED 同样可以人工重试。
+     */
     public boolean isTerminal() {
         return this == DONE || this == CANCELLED;
     }

@@ -5,6 +5,7 @@ import com.pydlove.regent.shared.domain.DomainException;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -18,6 +19,7 @@ import java.util.Objects;
  * @param imagePaths     随本次指令一起交给模型的图片绝对路径（任务附件）。
  *                       是路径不是字节：图片由平台落在自己的存储目录里，执行器只需按路径挂上去，
  *                       把几兆的字节在领域对象里搬来搬去没有任何意义
+ * @param environmentVariables 注入执行器进程的环境变量；同名项目值已在应用层覆盖全局值
  */
 public record ExecRequest(
         ProjectId projectId,
@@ -25,7 +27,18 @@ public record ExecRequest(
         String prompt,
         String resumeThreadId,
         Duration timeout,
-        List<String> imagePaths) {
+        List<String> imagePaths,
+        Map<String, String> environmentVariables) {
+
+    /** 不附加环境变量的兼容构造器，现有调用方可继续只描述一次基础执行。 */
+    public ExecRequest(ProjectId projectId,
+                       String projectPath,
+                       String prompt,
+                       String resumeThreadId,
+                       Duration timeout,
+                       List<String> imagePaths) {
+        this(projectId, projectPath, prompt, resumeThreadId, timeout, imagePaths, Map.of());
+    }
 
     public ExecRequest {
         Objects.requireNonNull(projectId, "所属项目不能为空");
@@ -40,6 +53,7 @@ public record ExecRequest(
             throw new DomainException("超时时间必须为正：" + timeout);
         }
         imagePaths = imagePaths == null ? List.of() : List.copyOf(imagePaths);
+        environmentVariables = environmentVariables == null ? Map.of() : Map.copyOf(environmentVariables);
     }
 
     public boolean hasImages() {

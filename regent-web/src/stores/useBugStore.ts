@@ -1,35 +1,40 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { ref, watch } from 'vue'
 
 import {
-  canMarkFixed,
-  canRequestFix,
-  canVerify,
-  canWontFix,
-  isResolved,
-  type Bug,
-  type BugSeverity,
-} from '@/types/bug'
+  createBug,
+  listBugs,
+  requestBugFix,
+  type BugScope,
+  type CreateBugInput,
+} from '@/api/bugs'
+import { ApiError } from '@/api/http'
+import type { Bug } from '@/types/bug'
 
 /*
  * 缺陷单。和 useTaskStore 同一套写法：迁移收在方法里，方法开头先过守卫。
  *
- * 后端还没有缺陷查询接口，所以这里**从空列表开始**，页面如实呈现空态 ——
- * 不用种子数据充数：界面上出现的东西必须真的存在。等 Bug 查询接口落地后，
- * 在这里加一个 load() 把它接上，下面的写路径方法原样可用。
+ * 列表来自真实接口。分页与筛选下推 SQL；创建成功后重新拉取，不用本地临时行冒充落库结果。
  *
- * 「派生修复任务」这一步刻意不放在这里 —— 它要同时改 Bug 和 Task 两个聚合，
- * 属于应用服务的编排（见 AGENTS.md 硬约束 3）。所以这里只实现 requestFix 这半个动作，
- * 由调用方先向 Task 侧要一个新任务，再把 id 交进来。
+ * 「派生修复任务」由后端应用服务编排；这里只负责调用接口并重新拉取真实状态。
  */
 
-const clock = () => new Date().toTimeString().slice(0, 8)
+function messageOf(error: unknown): string {
+  if (error instanceof ApiError) return error.message
+  return '无法连接后端，请确认服务已启动（默认 127.0.0.1:8787）'
+}
 
 export const useBugStore = defineStore('bugs', () => {
   const bugs = ref<Bug[]>([])
+  const total = ref(0)
+  const openTotal = ref(0)
+  const page = ref(1)
+  const pageSize = ref(20)
+  const scope = ref<BugScope>('OPEN')
+  const keyword = ref('')
 
-  /** 尚需人管的总数：含「待验证」——那一档正等着人来验，藏起来等于没人验。 */
-  const openBugs = computed(() => bugs.value.filter((b) => !isResolved(b.status)))
+  const loading = ref(false)
+  const error = ref<string | null>(null)
 
   const byId = (id: number) => {
     const bug = bugs.value.find((b) => b.id === id)
@@ -37,55 +42,77 @@ export const useBugStore = defineStore('bugs', () => {
     return bug
   }
 
-  /** 守卫不过就抛，对应后端的 requireState(...)。视图先用 types/bug.ts 的 can* 判断再调。 */
-  const require = (ok: boolean, message: string) => {
-    if (!ok) throw new Error(message)
-  }
-
-  /** 报缺陷。接后端后由执行器调（BugReported）；列表为空时序号从 1 起。 */
-  const report = (title: string, severity: BugSeverity, sourceTaskId: number, reproduction: string) => {
-    const id = bugs.value.reduce((max, b) => Math.max(max, b.id), 0) + 1
-    const bug: Bug = {
-      id,
-      title,
-      severity,
-      status: 'OPEN',
-      sourceTaskId,
-      fixTaskId: null,
-      reproduction,
-      reportedAt: clock(),
+  const load = async () => {
+    loading.value = true
+    error.value = null
+    try {
+      const result = await listBugs({
+        scope: scope.value,
+        keyword: keyword.value,
+        page: page.value,
+        size: pageSize.value,
+      })
+      bugs.value = result.items
+      total.value = result.total
+      if (result.totalPages > 0 && page.value > result.totalPages) {
+        page.value = result.totalPages
+      }
+    } catch (e) {
+      error.value = messageOf(e)
+      bugs.value = []
+      total.value = 0
+    } finally {
+      loading.value = false
     }
-    bugs.value = [bug, ...bugs.value]
-    return bug
   }
 
-  /** 记录已派生的修复任务。任务本身由调用方向 Task 侧创建，这里只回填外键。 */
-  const requestFix = (id: number, fixTaskId: number) => {
-    const bug = byId(id)
-    require(canRequestFix(bug.status), '只有未处理的缺陷可以派发修复任务')
-    bug.status = 'FIXING'
-    bug.fixTaskId = fixTaskId
+  const loadOpenCount = async () => {
+    try {
+      const result = await listBugs({ scope: 'OPEN', page: 1, size: 1 })
+      openTotal.value = result.total
+    } catch {
+      // 角标是补充信息，取不到不影响 Bug 列表本身。
+    }
   }
 
-  /** 修复任务跑完 ≠ 问题没了，所以只到 FIXED，还要人验证过才 CLOSED。 */
-  const markFixed = (id: number) => {
-    const bug = byId(id)
-    require(canMarkFixed(bug.status), '只有修复中的缺陷可以标记为已修复')
-    bug.status = 'FIXED'
+  const createManual = async (input: CreateBugInput) => {
+    const created = await createBug(input)
+    await Promise.all([load(), loadOpenCount()])
+    return created
   }
 
-  const verify = (id: number) => {
-    const bug = byId(id)
-    require(canVerify(bug.status), '只有已修复的缺陷可以验证关闭')
-    bug.status = 'CLOSED'
+  const requestFix = async (id: number) => {
+    const updated = await requestBugFix(id)
+    await Promise.all([load(), loadOpenCount()])
+    return updated
   }
 
-  const wontFix = (id: number, reason: string) => {
-    const bug = byId(id)
-    require(canWontFix(bug.status), '已关闭的缺陷不能重复处置')
-    bug.status = 'WONTFIX'
-    bug.wontFixReason = reason
-  }
+  watch(scope, () => {
+    page.value = 1
+    void load()
+  })
+  watch([page, pageSize], () => {
+    void load()
+  })
+  watch(keyword, () => {
+    page.value = 1
+    void load()
+  })
 
-  return { bugs, openBugs, byId, report, requestFix, markFixed, verify, wontFix }
+  return {
+    bugs,
+    total,
+    openTotal,
+    page,
+    pageSize,
+    scope,
+    keyword,
+    loading,
+    error,
+    byId,
+    load,
+    loadOpenCount,
+    createManual,
+    requestFix,
+  }
 })

@@ -1,2 +1,2 @@
 #!/bin/bash
-systemctl stop regent
+systemctl stop regent-relay

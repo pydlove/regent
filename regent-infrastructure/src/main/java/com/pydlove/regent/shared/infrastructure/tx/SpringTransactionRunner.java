@@ -4,6 +4,8 @@ import com.pydlove.regent.shared.domain.TransactionRunner;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.function.Supplier;
 
@@ -28,5 +30,23 @@ public class SpringTransactionRunner implements TransactionRunner {
     @Override
     public <T> T inTransaction(Supplier<T> action) {
         return template.execute(status -> action.get());
+    }
+
+    @Override
+    public void afterCompletion(Runnable onCommit, Runnable onRollback) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            onCommit.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == TransactionSynchronization.STATUS_COMMITTED) {
+                    onCommit.run();
+                } else if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                    onRollback.run();
+                }
+            }
+        });
     }
 }

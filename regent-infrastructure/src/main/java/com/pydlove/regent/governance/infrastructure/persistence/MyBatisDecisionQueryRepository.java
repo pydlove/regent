@@ -58,6 +58,7 @@ public class MyBatisDecisionQueryRepository implements DecisionQueryRepository {
                 row.getMatchedRuleName(),
                 row.getStatus(),
                 row.getQuestion(),
+                DecisionDataMapper.parseOptions(row.getOptions()),
                 row.getRecommendation(),
                 Boolean.TRUE.equals(row.getReversible()),
                 row.getBlastRadius(),

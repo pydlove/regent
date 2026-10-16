@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Configuration;
  */
 @Configuration
 @MapperScan({
+        "com.pydlove.regent.bug.infrastructure.persistence",
         "com.pydlove.regent.execution.infrastructure.persistence",
         "com.pydlove.regent.governance.infrastructure.persistence",
         "com.pydlove.regent.project.infrastructure.persistence"

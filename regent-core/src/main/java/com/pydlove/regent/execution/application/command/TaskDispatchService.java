@@ -5,16 +5,21 @@ import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.execution.domain.port.BranchManager;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
+import com.pydlove.regent.execution.domain.service.ExecutionConcurrencyGate;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
+import com.pydlove.regent.shared.domain.TransactionRunner;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -30,13 +35,15 @@ import java.util.concurrent.ExecutorService;
  *       挂在 HTTP 请求上只会收获一个超时。</li>
  * </ul>
  *
- * <p>因此 {@code RUNNING} 的准确含义是「已被平台认领」：可能正在排在工作队列里。
- * 真正的「进程在跑」写在 {@code task_run.started_at} 上。
+ * <p>因此 {@code RUNNING} 的准确含义是「已取得执行许可并被平台认领」。平台级并发闸门
+ * 保证同一时刻只有配置数量的任务处于这个状态；真正的「进程在跑」写在
+ * {@code task_run.started_at} 上。
  *
- * <h2>三道闸</h2>
+ * <h2>四道闸</h2>
  * ① 同一进程内不重复认领（{@code inFlight}）；② 认领失败冷却两分钟，避免调度器每个心跳
  * 都去重试一个必然失败的任务（比如分支名冲突）把日志刷满；③ 项目暂停时不派发新任务，
- * 但不拦已经批准的续跑 —— 暂停的含义是「别再开始新的」。
+ * 但不拦已经批准的续跑 —— 暂停的含义是「别再开始新的」。并发闸门在认领前取得，
+ * 因而界面里的上限管的是真正开始执行的任务，而不是线程池队列长度。
  */
 public class TaskDispatchService {
 
@@ -48,6 +55,8 @@ public class TaskDispatchService {
     private final BranchManager branchManager;
     private final TaskRunService taskRunService;
     private final ExecutorService workers;
+    private final ExecutionConcurrencyGate concurrencyGate;
+    private final TransactionRunner transactionRunner;
 
     private final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
     private final Map<Long, Instant> cooldownUntil = new ConcurrentHashMap<>();
@@ -56,44 +65,127 @@ public class TaskDispatchService {
                                ProjectProfileRepository projectProfileRepository,
                                BranchManager branchManager,
                                TaskRunService taskRunService,
-                               ExecutorService workers) {
+                               ExecutorService workers,
+                               ExecutionConcurrencyGate concurrencyGate,
+                               TransactionRunner transactionRunner) {
         this.taskRepository = taskRepository;
         this.projectProfileRepository = projectProfileRepository;
         this.branchManager = branchManager;
         this.taskRunService = taskRunService;
         this.workers = workers;
+        this.concurrencyGate = concurrencyGate;
+        this.transactionRunner = transactionRunner;
     }
 
     /**
-     * 认领一个任务并异步执行。返回认领后的任务，调用方据此立刻回显状态。
+     * 认领一个任务并异步执行；执行位不足时改为排队。返回变更后的任务，调用方据此回显状态。
      *
      * @throws DomainException 状态不允许派发、项目已暂停、分支准备失败
      */
     public Task dispatch(TaskId taskId) {
+        return dispatch(taskId, false);
+    }
+
+    /**
+     * 在调用方事务提交后启动工作线程。
+     *
+     * <p>跨聚合用例会先在同一个事务里写任务与上游聚合；直接起线程时，工作线程可能拿另一条
+     * 连接读不到尚未提交的数据。普通人工派发没有这层上游写入，继续走 {@link #dispatch(TaskId)}。
+     */
+    public Task dispatchAfterCommit(TaskId taskId) {
+        return dispatch(taskId, true);
+    }
+
+    private Task dispatch(TaskId taskId, boolean afterCommit) {
         Task task = taskRepository.findById(taskId)
                 .orElseThrow(() -> new EntityNotFoundException("任务不存在：" + taskId));
         ProjectProfile project = projectProfileRepository.findById(task.getProjectId())
                 .orElseThrow(() -> new EntityNotFoundException("任务所属项目不存在：" + task.getProjectId()));
 
         if (!inFlight.add(taskId.value())) {
+            if (task.getStatus() == TaskStatus.QUEUED) {
+                return task;
+            }
             throw new DomainException("任务 " + taskId + " 正在执行中，不要重复派发");
         }
+        Optional<ExecutionConcurrencyGate.Permit> permit = concurrencyGate.tryAcquire();
+        if (permit.isEmpty()) {
+            inFlight.remove(taskId.value());
+            return queue(task, project);
+        }
+        ExecutionConcurrencyGate.Permit acquired = permit.orElseThrow();
         try {
             prepare(task, project);
             taskRepository.save(task);
         } catch (RuntimeException e) {
+            acquired.release();
             inFlight.remove(taskId.value());
             throw e;
         }
 
-        workers.execute(() -> {
-            try {
-                taskRunService.execute(taskId);
-            } finally {
-                inFlight.remove(taskId.value());
+        try {
+            if (afterCommit) {
+                transactionRunner.afterCompletion(
+                        () -> submit(taskId, acquired),
+                        () -> cleanup(taskId, acquired));
+            } else {
+                submit(taskId, acquired);
             }
-        });
+        } catch (RuntimeException e) {
+            cleanup(taskId, acquired);
+            throw e;
+        }
         return task;
+    }
+
+    private void submit(TaskId taskId, ExecutionConcurrencyGate.Permit acquired) {
+        try {
+            workers.execute(() -> {
+                try {
+                    taskRunService.execute(taskId);
+                } finally {
+                    cleanup(taskId, acquired);
+                    drainQueuedTask();
+                }
+            });
+        } catch (RuntimeException e) {
+            cleanup(taskId, acquired);
+            throw e;
+        }
+    }
+
+    private void cleanup(TaskId taskId, ExecutionConcurrencyGate.Permit acquired) {
+        acquired.release();
+        inFlight.remove(taskId.value());
+    }
+
+    /**
+     * 逐个派发一组任务。
+     *
+     * <p>顺序处理而不是并发提交：同一个项目的分支准备会操作同一个工作区，批量并发切分支
+     * 更容易互相踩踏。重复 ID 先去重，单项失败也只记录该任务并继续后面的任务。
+     */
+    public TaskDispatchBatchResult dispatchBatch(List<TaskId> taskIds) {
+        if (taskIds == null || taskIds.isEmpty()) {
+            throw new IllegalArgumentException("至少选择一个任务");
+        }
+        LinkedHashSet<TaskId> uniqueTaskIds = new LinkedHashSet<>(taskIds);
+        if (uniqueTaskIds.contains(null)) {
+            throw new IllegalArgumentException("任务 ID 不能为空");
+        }
+
+        List<TaskId> dispatched = new ArrayList<>();
+        List<TaskDispatchBatchResult.Failure> failures = new ArrayList<>();
+        for (TaskId taskId : uniqueTaskIds) {
+            try {
+                dispatch(taskId);
+                dispatched.add(taskId);
+            } catch (RuntimeException e) {
+                String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                failures.add(new TaskDispatchBatchResult.Failure(taskId, message));
+            }
+        }
+        return new TaskDispatchBatchResult(dispatched, failures);
     }
 
     /**
@@ -106,6 +198,9 @@ public class TaskDispatchService {
         List<Task> candidates = taskRepository.findDispatchable(limit);
         int claimed = 0;
         for (Task candidate : candidates) {
+            if (!concurrencyGate.hasAvailableSlot()) {
+                break;
+            }
             TaskId taskId = candidate.getId();
             if (inFlight.contains(taskId.value()) || isCoolingDown(taskId)) {
                 continue;
@@ -114,6 +209,9 @@ public class TaskDispatchService {
                 dispatch(taskId);
                 claimed++;
             } catch (RuntimeException e) {
+                if (!concurrencyGate.hasAvailableSlot()) {
+                    break;
+                }
                 cooldown(taskId);
             }
         }
@@ -122,7 +220,7 @@ public class TaskDispatchService {
 
     /** 认领：把任务状态推进到「已派发」，并把分支准备好。 */
     private void prepare(Task task, ProjectProfile project) {
-        if (task.getStatus() == TaskStatus.PENDING) {
+        if (task.getStatus() == TaskStatus.PENDING || task.getStatus() == TaskStatus.QUEUED) {
             project.requireDispatchable();
             task.dispatch(branchManager.createFor(project.path(), task.getId()));
             return;
@@ -135,6 +233,43 @@ public class TaskDispatchService {
             return;
         }
         throw new DomainException("任务当前状态不可派发：" + task.getId() + "，状态：" + task.getStatus());
+    }
+
+    /**
+     * 没有空闲执行位时把首次执行请求落成 QUEUED。它不是一次执行尝试，
+     * 因而不占并发许可；调度扫描或前一个任务收场后会再取出来起跑。
+     */
+    private Task queue(Task task, ProjectProfile project) {
+        if (task.getStatus() == TaskStatus.QUEUED) {
+            return task;
+        }
+        if (task.getStatus() != TaskStatus.PENDING) {
+            throw new DomainException("任务当前状态不可排队：" + task.getId() + "，状态：" + task.getStatus());
+        }
+        project.requireDispatchable();
+        task.queue();
+        taskRepository.save(task);
+        return task;
+    }
+
+    /** 每释放一个执行位就补一个用户明确排队的任务；PENDING 仍只由自动派发开关控制。 */
+    private void drainQueuedTask() {
+        if (!concurrencyGate.hasAvailableSlot()) {
+            return;
+        }
+        List<Task> queued = taskRepository.findQueued(1);
+        if (queued.isEmpty()) {
+            return;
+        }
+        TaskId taskId = queued.get(0).getId();
+        if (isCoolingDown(taskId)) {
+            return;
+        }
+        try {
+            dispatch(taskId);
+        } catch (RuntimeException e) {
+            cooldown(taskId);
+        }
     }
 
     private boolean isCoolingDown(TaskId taskId) {

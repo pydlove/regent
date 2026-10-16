@@ -4,7 +4,7 @@
   "description": "Regent 平台要求执行器在每一轮结束时上报的唯一一条结构化消息。字段一个都不能少，也不能多：诊断信息属于 summary，不属于新字段。",
   "type": "object",
   "additionalProperties": false,
-  "required": ["status", "summary", "changedFiles", "decision"],
+  "required": ["status", "summary", "changedFiles", "decision", "bugs"],
   "properties": {
     "status": {
       "type": "string",
@@ -51,6 +51,38 @@
         "blastRadius": {
           "type": "string",
           "description": "影响范围：哪些模块、哪些环境、哪些人会受影响。"
+        }
+      }
+    },
+    "bugs": {
+      "type": "array",
+      "description": "本轮发现的缺陷。发现缺陷不等于任务失败，也不代表已经修复；没有发现就传空数组。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "severity", "reproduction", "filePath", "detail"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "一句可执行的缺陷标题，说明哪里坏了。"
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["BLOCKER", "MAJOR", "MINOR", "TRIVIAL"],
+            "description": "BLOCKER=阻塞主流程；MAJOR=严重；MINOR=一般；TRIVIAL=轻微。"
+          },
+          "reproduction": {
+            "type": "string",
+            "description": "复现步骤或触发条件；不知道就传空字符串，不要编。"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "定位到的文件，相对项目根；没有就传空字符串。"
+          },
+          "detail": {
+            "type": "string",
+            "description": "判断依据或影响范围；没有就传空字符串。"
+          }
         }
       }
     }

@@ -69,7 +69,7 @@ public final class DecisionDataMapper {
                 data.getMatchedRuleId(),
                 DecisionStatus.parse(data.getStatus()),
                 data.getQuestion(),
-                fromJson(data.getOptions()),
+                parseOptions(data.getOptions()),
                 data.getRecommendation(),
                 Boolean.TRUE.equals(data.getReversible()),
                 data.getBlastRadius(),
@@ -93,7 +93,7 @@ public final class DecisionDataMapper {
         }
     }
 
-    private static List<String> fromJson(String json) {
+    static List<String> parseOptions(String json) {
         if (json == null || json.isBlank()) {
             return List.of();
         }

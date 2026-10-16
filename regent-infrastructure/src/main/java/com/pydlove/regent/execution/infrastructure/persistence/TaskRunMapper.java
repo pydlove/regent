@@ -2,6 +2,7 @@ package com.pydlove.regent.execution.infrastructure.persistence;
 
 import org.apache.ibatis.annotations.Param;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -17,7 +18,19 @@ public interface TaskRunMapper {
 
     List<TaskRunData> selectByTask(@Param("taskId") long taskId);
 
+    List<TaskRunData> selectExpiredLeases(@Param("executor") String executor,
+                                          @Param("now") LocalDateTime now);
+
+    List<TaskRunData> selectActiveLeases(@Param("executor") String executor,
+                                         @Param("now") LocalDateTime now);
+
+    int countActiveLeasesByProject(@Param("projectId") long projectId,
+                                   @Param("executor") String executor,
+                                   @Param("now") LocalDateTime now);
+
     int insert(TaskRunData data);
 
     int update(TaskRunData data);
+
+    int updateLease(@Param("id") long id, @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);
 }

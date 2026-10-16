@@ -19,6 +19,17 @@ public interface TransactionRunner {
     /** 在事务中执行并返回结果。实现必须保证异常时回滚，并把原异常继续抛出。 */
     <T> T inTransaction(Supplier<T> action);
 
+    /**
+     * 注册事务完成后的提交或回滚动作；当前没有事务时执行提交动作。
+     *
+     * <p>异步执行器不能在事务提交前启动：工作线程会拿另一条连接读取任务和运行记录，
+     * 此时调用方尚未提交的数据对它不可见。跨聚合用例把「提交后启动、回滚后清理」
+     * 交给这个端口，核心域仍不需要知道 Spring 的事务同步机制。
+     */
+    default void afterCompletion(Runnable onCommit, Runnable onRollback) {
+        onCommit.run();
+    }
+
     default void inTransaction(Runnable action) {
         inTransaction(() -> {
             action.run();

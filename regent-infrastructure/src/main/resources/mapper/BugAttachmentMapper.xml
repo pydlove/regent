@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.bug.infrastructure.persistence.BugAttachmentMapper">
+
+    <sql id="columns">
+        id, bug_id, filename, content_type, size_bytes, storage_path, created_at
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO bug_attachment (bug_id, filename, content_type, size_bytes, storage_path, created_at)
+        VALUES (#{bugId}, #{filename}, #{contentType}, #{sizeBytes}, #{storagePath}, #{createdAt})
+    </insert>
+
+    <select id="selectById" resultType="com.pydlove.regent.bug.infrastructure.persistence.BugAttachmentData">
+        SELECT <include refid="columns"/>
+        FROM bug_attachment
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByBug" resultType="com.pydlove.regent.bug.infrastructure.persistence.BugAttachmentData">
+        SELECT <include refid="columns"/>
+        FROM bug_attachment
+        WHERE bug_id = #{bugId}
+        ORDER BY id
+    </select>
+
+</mapper>

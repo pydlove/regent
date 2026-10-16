@@ -19,6 +19,12 @@ export class ApiError extends Error {
   }
 }
 
+/*
+ * 公网中继用这个自定义头拦跨站表单写请求。
+ * 同源请求不会触发预检；跨站表单又无法设置自定义头，因此中继可以把它当作轻量 CSRF 标记。
+ */
+const RELAY_REQUEST_HEADER = { 'X-Regent-Relay-Request': '1' }
+
 async function toApiError(response: Response): Promise<ApiError> {
   try {
     const body = (await response.json()) as ApiErrorBody
@@ -44,7 +50,9 @@ function withQuery(path: string, params?: Record<string, QueryValue>): string {
 }
 
 export async function get<T>(path: string, params?: Record<string, QueryValue>): Promise<T> {
-  const response = await fetch(withQuery(path, params), { headers: { Accept: 'application/json' } })
+  const response = await fetch(withQuery(path, params), {
+    headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/json' },
+  })
   if (!response.ok) throw await toApiError(response)
   return (await response.json()) as T
 }
@@ -52,7 +60,7 @@ export async function get<T>(path: string, params?: Record<string, QueryValue>):
 export async function post<T>(path: string): Promise<T> {
   const response = await fetch(`/api${path}`, {
     method: 'POST',
-    headers: { Accept: 'application/json' },
+    headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/json' },
   })
   if (!response.ok) throw await toApiError(response)
   return (await response.json()) as T
@@ -68,9 +76,37 @@ export async function post<T>(path: string): Promise<T> {
 export async function postJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`/api${path}`, {
     method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    headers: {
+      ...RELAY_REQUEST_HEADER,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify(body ?? {}),
   })
   if (!response.ok) throw await toApiError(response)
   return (await response.json()) as T
+}
+
+/** 带 JSON 请求体的 PUT：用于整体替换一组可编辑字段。 */
+export async function putJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`/api${path}`, {
+    method: 'PUT',
+    headers: {
+      ...RELAY_REQUEST_HEADER,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body ?? {}),
+  })
+  if (!response.ok) throw await toApiError(response)
+  return (await response.json()) as T
+}
+
+/** 无响应体的 DELETE。204 是删除接口的正常返回，不能按 JSON 解析。 */
+export async function deleteRequest(path: string): Promise<void> {
+  const response = await fetch(`/api${path}`, {
+    method: 'DELETE',
+    headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/json' },
+  })
+  if (!response.ok) throw await toApiError(response)
 }

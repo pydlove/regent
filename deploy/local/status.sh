@@ -24,5 +24,16 @@ echo "Regent 本地服务状态"
 echo "----------------------------------------"
 check "后端" "$BACKEND_PORT" "$BACKEND_PID_FILE" "http://127.0.0.1:$BACKEND_PORT/actuator/health"
 check "前端" "$FRONTEND_PORT" "$FRONTEND_PID_FILE" "http://127.0.0.1:$FRONTEND_PORT/"
+if relay_agent_loaded; then
+    info "公网中继连接器  launchd 托管中"
+elif [ -f "$RELAY_PID_FILE" ] && pid_alive "$(cat "$RELAY_PID_FILE")"; then
+    info "公网中继连接器  运行中 (PID: $(cat "$RELAY_PID_FILE"))"
+else
+    if [ -f "$RELAY_ENV_FILE" ]; then
+        warn "公网中继连接器  未运行（已配对但没起，跑 deploy/local/start-relay.sh）"
+    else
+        warn "公网中继连接器  未运行（未配对，先跑 deploy/local/connect-relay.sh）"
+    fi
+fi
 echo "----------------------------------------"
 printf '%b\n' "${DIM}日志目录 ${LOG_DIR}${NC}"

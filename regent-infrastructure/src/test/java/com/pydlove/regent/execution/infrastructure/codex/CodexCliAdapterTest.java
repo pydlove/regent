@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -43,7 +44,9 @@ class CodexCliAdapterTest {
     private static final String 指令原文 = "把 README 的措辞改得更准确，别动别的文件";
 
     private static final String DONE_REPORT =
-            "{\"status\":\"DONE\",\"summary\":\"改完了\",\"changedFiles\":[\"README.md\"],\"decision\":null}";
+            "{\"status\":\"DONE\",\"summary\":\"改完了\",\"changedFiles\":[\"README.md\"],\"decision\":null,"
+                    + "\"bugs\":[{\"title\":\"分页错位\",\"severity\":\"MINOR\",\"reproduction\":\"翻页\","
+                    + "\"filePath\":\"src/page.ts\",\"detail\":\"offset 算错\"}]}";
 
     private static final String 事件流 = """
             printf '{"type":"thread.started","thread_id":"th-1"}\\n'
@@ -56,6 +59,7 @@ class CodexCliAdapterTest {
     private Path script;
     private Path argsFile;
     private Path promptsFile;
+    private Path environmentFile;
 
     @BeforeEach
     void 准备环境() throws IOException {
@@ -64,6 +68,7 @@ class CodexCliAdapterTest {
         script = workspace.resolve("fake-codex.sh");
         argsFile = workspace.resolve("args.log");
         promptsFile = workspace.resolve("prompts.log");
+        environmentFile = workspace.resolve("environment.log");
     }
 
     @AfterEach
@@ -85,6 +90,8 @@ class CodexCliAdapterTest {
         assertEquals("th-1", result.threadId(), "会话 ID 必须从 thread.started 里取到");
         assertEquals("改完了", result.summary());
         assertEquals(List.of("README.md"), result.changedFiles());
+        assertEquals("分页错位", result.bugs().get(0).title());
+        assertEquals("MINOR", result.bugs().get(0).severity());
         assertTrue(result.schemaValid());
         assertEquals(100, result.tokens().input(), "token 必须从 turn.completed 的 usage 里取到");
         assertEquals(20, result.tokens().cachedInput());
@@ -176,6 +183,23 @@ class CodexCliAdapterTest {
         });
 
         assertFalse(参数().contains("-i "), 参数());
+    }
+
+    @Test
+    @DisplayName("环境变量注入子进程，值不进入 argv 或指令")
+    void 注入环境变量() throws IOException {
+        写脚本("printf '%s' \"$REGENT_DB_HOST\" > \"" + environmentFile + "\"\n"
+                + 回放(DONE_REPORT) + 事件流 + "exit 0");
+        ExecRequest request = new ExecRequest(ProjectId.of(1L), workspace.toString(), 指令原文, null,
+                Duration.ofSeconds(30), List.of(), Map.of("REGENT_DB_HOST", "db.internal"));
+
+        ExecResult result = adapter().execute(request, (type, payload) -> {
+        });
+
+        assertEquals(RunStatus.SUCCESS, result.status());
+        assertEquals("db.internal", Files.readString(environmentFile, StandardCharsets.UTF_8));
+        assertFalse(参数().contains("db.internal"), 参数());
+        assertFalse(指令().get(0).contains("db.internal"), 指令().get(0));
     }
 
     @Test

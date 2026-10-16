@@ -1,10 +1,12 @@
 #!/bin/bash
-# 一键起本地全套：后端 + 前端。
+# 一键起本地全套：后端 + 前端 + 已配置的公网中继连接器。
 source "$(dirname "$0")/_common.sh"
 
 "$SCRIPT_DIR/start-backend.sh"
 echo
 "$SCRIPT_DIR/start-frontend.sh"
+echo
+"$SCRIPT_DIR/start-relay.sh"
 echo
 echo "========================================"
 echo "  前端  http://127.0.0.1:$FRONTEND_PORT/"

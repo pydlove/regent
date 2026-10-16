@@ -16,6 +16,8 @@ export type BugSeverity = 'BLOCKER' | 'MAJOR' | 'MINOR' | 'TRIVIAL'
 
 export type BugStatus = 'OPEN' | 'FIXING' | 'FIXED' | 'CLOSED' | 'WONTFIX'
 
+export type BugSource = 'MANUAL' | 'AI_DISCOVERED'
+
 /** 终态：不再有任何操作可做 */
 export const BUG_TERMINAL_STATUSES: readonly BugStatus[] = ['CLOSED', 'WONTFIX']
 
@@ -28,18 +30,25 @@ export const isResolved = (s: BugStatus) => BUG_TERMINAL_STATUSES.includes(s)
 
 export type Bug = {
   id: number
+  projectId: number
+  projectName: string
+  requirementId: number | null
+  /** 人工录入为 null；AI 发现时指向发现它的执行任务 */
+  sourceTaskId: number | null
+  /** 派生出来的修复任务，没有则为 null */
+  fixTaskId: number | null
+  source: BugSource
   title: string
   severity: BugSeverity
   status: BugStatus
-  /** 缺陷是在哪条任务里发现的。只存 ID，不持有任务对象 */
-  sourceTaskId: number
-  /** 派生出来的修复任务，没有则为 null */
-  fixTaskId: number | null
-  /** 复现步骤。缺陷单没有这个字段，就等于让人凭空猜 */
-  reproduction: string
-  reportedAt: string
+  /** 复现步骤。没有填写时为 null，界面必须如实显示，不替用户猜 */
+  reproduction: string | null
+  filePath: string | null
+  detail: string | null
+  foundAt: string
+  fixedAt: string | null
   /** 判为不修复时留的理由 */
-  wontFixReason?: string
+  wontFixReason: string | null
 }
 
 /*

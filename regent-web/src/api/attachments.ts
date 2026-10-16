@@ -1,5 +1,5 @@
 import { ApiError, get } from '@/api/http'
-import type { ApiErrorBody, TaskAttachment } from '@/types/api'
+import type { ApiErrorBody, BugAttachment, TaskAttachment } from '@/types/api'
 
 /*
  * 任务附件（图片）。
@@ -18,11 +18,14 @@ import type { ApiErrorBody, TaskAttachment } from '@/types/api'
  */
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
-/** 收图白名单，与后端 TaskAttachmentService.IMAGE_TYPES 对齐。SVG 不在其中，理由见后端注释。 */
+/** 收图白名单，与后端 ImageUploadPolicy 对齐。SVG 不在其中，理由见后端注释。 */
 export const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 
 export const listTaskAttachments = (taskId: number) =>
   get<TaskAttachment[]>(`/tasks/${taskId}/attachments`)
+
+export const listBugAttachments = (bugId: number) =>
+  get<BugAttachment[]>(`/bugs/${bugId}/attachments`)
 
 export type UploadOptions = {
   /** 0–100。仅在浏览器给出总长度时回调 */
@@ -35,14 +38,31 @@ export function uploadTaskAttachment(
   file: File,
   options: UploadOptions = {},
 ): Promise<TaskAttachment> {
+  return uploadImage(`/api/tasks/${taskId}/attachments`, file, options)
+}
+
+export function uploadBugAttachment(
+  bugId: number,
+  file: File,
+  options: UploadOptions = {},
+): Promise<BugAttachment> {
+  return uploadImage(`/api/bugs/${bugId}/attachments`, file, options)
+}
+
+function uploadImage<T>(
+  endpoint: string,
+  file: File,
+  options: UploadOptions = {},
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const form = new FormData()
     // 字段名 file 与后端 @RequestParam("file") 是一对，改这里要同时改那边
     form.append('file', file)
 
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', `/api/tasks/${taskId}/attachments`)
+    xhr.open('POST', endpoint)
     xhr.setRequestHeader('Accept', 'application/json')
+    xhr.setRequestHeader('X-Regent-Relay-Request', '1')
 
     xhr.upload.onprogress = (event) => {
       // lengthComputable 为 false 时算不出比例：宁可不报，也不要让进度环停在假读数上
@@ -56,7 +76,7 @@ export function uploadTaskAttachment(
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
-          resolve(JSON.parse(xhr.responseText) as TaskAttachment)
+          resolve(JSON.parse(xhr.responseText) as T)
         } catch {
           reject(new ApiError(xhr.status, 'UNKNOWN', `上传成功但响应读不懂（HTTP ${xhr.status}）`))
         }

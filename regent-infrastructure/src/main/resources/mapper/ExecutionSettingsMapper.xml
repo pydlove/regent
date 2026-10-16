@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.execution.infrastructure.persistence.ExecutionSettingsMapper">
+
+    <select id="select" resultType="com.pydlove.regent.execution.infrastructure.persistence.ExecutionSettingsRow">
+        SELECT id, max_concurrent_tasks, updated_at
+        FROM execution_setting
+        WHERE id = 1
+    </select>
+
+    <insert id="upsert">
+        INSERT INTO execution_setting (id, max_concurrent_tasks, updated_at)
+        VALUES (#{id}, #{maxConcurrentTasks}, #{updatedAt})
+        ON DUPLICATE KEY UPDATE
+            max_concurrent_tasks = VALUES(max_concurrent_tasks),
+            updated_at = VALUES(updated_at)
+    </insert>
+
+</mapper>

@@ -1,7 +1,10 @@
 package com.pydlove.regent.execution.interfaces.rest;
 
 import com.pydlove.regent.execution.application.command.CreateTaskCommand;
+import com.pydlove.regent.execution.application.command.EditTaskCommand;
 import com.pydlove.regent.execution.application.command.TaskCommandService;
+import com.pydlove.regent.execution.application.command.TaskDeleteBatchResult;
+import com.pydlove.regent.execution.application.command.TaskDispatchBatchResult;
 import com.pydlove.regent.execution.application.command.TaskDispatchService;
 import com.pydlove.regent.execution.application.query.TaskQueryService;
 import com.pydlove.regent.execution.application.query.TaskRunQueryService;
@@ -10,18 +13,28 @@ import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.execution.domain.repository.TaskListItemPage;
 import com.pydlove.regent.execution.domain.repository.TaskQuery;
+import com.pydlove.regent.execution.interfaces.dto.TaskBatchDeleteRequest;
+import com.pydlove.regent.execution.interfaces.dto.TaskBatchDeleteResponse;
+import com.pydlove.regent.execution.interfaces.dto.TaskBatchDispatchRequest;
+import com.pydlove.regent.execution.interfaces.dto.TaskBatchDispatchResponse;
 import com.pydlove.regent.execution.interfaces.dto.TaskCreateRequest;
 import com.pydlove.regent.execution.interfaces.dto.TaskDetailResponse;
 import com.pydlove.regent.execution.interfaces.dto.TaskRunSummaryResponse;
 import com.pydlove.regent.execution.interfaces.dto.TaskSummaryResponse;
+import com.pydlove.regent.execution.interfaces.dto.TaskTrendPointResponse;
+import com.pydlove.regent.execution.interfaces.dto.TaskUpdateRequest;
 import com.pydlove.regent.interfaces.dto.PageResponse;
 import com.pydlove.regent.project.domain.model.ProjectId;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.LinkedHashMap;
@@ -56,18 +69,20 @@ public class TaskController {
 
     @GetMapping
     public PageResponse<TaskSummaryResponse> list(@RequestParam(required = false) String status,
+                                                  @RequestParam(required = false) String level,
                                                   @RequestParam(required = false) Long projectId,
                                                   @RequestParam(required = false) String keyword,
                                                   @RequestParam(required = false) Integer page,
                                                   @RequestParam(required = false) Integer size) {
-        TaskListItemPage result = taskQueryService.list(TaskQuery.of(status, projectId, keyword, page, size));
+        TaskListItemPage result = taskQueryService.list(
+                TaskQuery.of(status, level, projectId, keyword, page, size));
         return PageResponse.of(
                 result.items().stream().map(TaskSummaryResponse::from).toList(),
                 result.total(), result.page(), result.size());
     }
 
     /**
-     * 状态分布。返回固定六个键（缺失的状态为 0），前端可以直接按状态名取数，
+     * 状态分布。返回全部状态键（缺失的状态为 0），前端可以直接按状态名取数，
      * 不需要写「key 不存在时当作 0」的兜底。
      */
     @GetMapping("/stats")
@@ -79,6 +94,14 @@ public class TaskController {
             counts.putIfAbsent(status.name(), 0L);
         }
         return counts;
+    }
+
+    /**
+     * 近 N 天收场趋势（含今天），日期连续、无数据的日子补 0，看板柱状图直接用。
+     */
+    @GetMapping("/trend")
+    public List<TaskTrendPointResponse> trend(@RequestParam(defaultValue = "7") int days) {
+        return taskQueryService.completionTrend(days).stream().map(TaskTrendPointResponse::from).toList();
     }
 
     @GetMapping("/{id}")
@@ -104,7 +127,16 @@ public class TaskController {
         return TaskDetailResponse.from(task);
     }
 
-    /** 人工重试：FAILED → PENDING。守卫在聚合里，这里不做判断。 */
+    /** 编辑任务的指令与优先级。已完成任务由聚合守卫拒绝。 */
+    @PutMapping("/{id}")
+    public TaskDetailResponse update(@PathVariable long id, @RequestBody TaskUpdateRequest request) {
+        return TaskDetailResponse.from(taskCommandService.edit(new EditTaskCommand(
+                TaskId.of(id),
+                request.prompt(),
+                request.priority())));
+    }
+
+    /** 人工重试或重新执行：FAILED / CANCELLED → PENDING。守卫在聚合里，这里不做判断。 */
     @PostMapping("/{id}/retry")
     public TaskDetailResponse retry(@PathVariable long id) {
         return TaskDetailResponse.from(taskCommandService.retry(TaskId.of(id)));
@@ -116,6 +148,27 @@ public class TaskController {
         return TaskDetailResponse.from(taskCommandService.cancel(TaskId.of(id)));
     }
 
+    /** 删除待执行或排队中的任务。其他状态会被聚合守卫拒绝。 */
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable long id) {
+        taskCommandService.delete(TaskId.of(id));
+    }
+
+    /** 批量删除待执行或排队中的任务。单项失败通过响应体返回，不影响同一批里的其他任务。 */
+    @PostMapping("/batch-delete")
+    public TaskBatchDeleteResponse deleteBatch(@RequestBody TaskBatchDeleteRequest request) {
+        if (request.taskIds() == null) {
+            throw new IllegalArgumentException("缺少 taskIds：至少选择一个任务");
+        }
+        if (request.taskIds().contains(null)) {
+            throw new IllegalArgumentException("任务 ID 不能为空");
+        }
+        TaskDeleteBatchResult result = taskCommandService.deleteBatch(
+                request.taskIds().stream().map(TaskId::of).toList());
+        return TaskBatchDeleteResponse.from(result);
+    }
+
     /**
      * 派发执行。
      *
@@ -125,6 +178,17 @@ public class TaskController {
     @PostMapping("/{id}/dispatch")
     public TaskDetailResponse dispatch(@PathVariable long id) {
         return TaskDetailResponse.from(taskDispatchService.dispatch(TaskId.of(id)));
+    }
+
+    /** 批量派发任务。单项失败通过响应体返回，避免一个坏任务让整批请求失败。 */
+    @PostMapping("/dispatch")
+    public TaskBatchDispatchResponse dispatchBatch(@RequestBody TaskBatchDispatchRequest request) {
+        if (request.taskIds() == null) {
+            throw new IllegalArgumentException("缺少 taskIds：至少选择一个任务");
+        }
+        TaskDispatchBatchResult result = taskDispatchService.dispatchBatch(
+                request.taskIds().stream().map(TaskId::of).toList());
+        return TaskBatchDispatchResponse.from(result);
     }
 
     /** 运行记录：每次尝试一行，最新的在前。 */

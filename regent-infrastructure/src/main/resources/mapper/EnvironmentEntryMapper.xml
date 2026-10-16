@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.project.infrastructure.persistence.EnvironmentEntryMapper">
+
+    <sql id="columns">
+        id, project_id, item_key, item_value, tags, description, created_at, updated_at
+    </sql>
+
+    <select id="selectById" resultType="com.pydlove.regent.project.infrastructure.persistence.EnvironmentRow">
+        SELECT <include refid="columns"/>
+        FROM environment_entry
+        WHERE id = #{id} AND deleted = 0
+    </select>
+
+    <select id="selectAll" resultType="com.pydlove.regent.project.infrastructure.persistence.EnvironmentRow">
+        SELECT <include refid="columns"/>
+        FROM environment_entry
+        WHERE deleted = 0
+        ORDER BY project_id IS NOT NULL, item_key, id
+    </select>
+
+    <select id="selectApplicableTo"
+            resultType="com.pydlove.regent.project.infrastructure.persistence.EnvironmentRow">
+        SELECT <include refid="columns"/>
+        FROM environment_entry
+        WHERE deleted = 0
+          AND (project_id IS NULL OR project_id = #{projectId})
+        ORDER BY project_id IS NOT NULL, item_key, id
+    </select>
+
+    <select id="countByKey" resultType="int">
+        SELECT COUNT(*)
+        FROM environment_entry
+        WHERE deleted = 0
+          AND item_key = #{itemKey}
+        <choose>
+            <when test="projectId == null">
+                AND project_id IS NULL
+            </when>
+            <otherwise>
+                AND project_id = #{projectId}
+            </otherwise>
+        </choose>
+        <if test="excludingId != null">
+            AND id != #{excludingId}
+        </if>
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO environment_entry (project_id, item_key, item_value, tags, description,
+                                       deleted, created_at, updated_at)
+        VALUES (#{projectId}, #{itemKey}, #{itemValue}, #{tags}, #{description},
+                0, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <update id="update">
+        UPDATE environment_entry
+        SET project_id = #{projectId},
+            item_key = #{itemKey},
+            item_value = #{itemValue},
+            tags = #{tags},
+            description = #{description},
+            updated_at = #{updatedAt}
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="softDelete">
+        UPDATE environment_entry
+        SET deleted = id,
+            updated_at = UTC_TIMESTAMP(3)
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+</mapper>

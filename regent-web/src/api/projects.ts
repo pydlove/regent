@@ -1,5 +1,5 @@
 import { get, postJson } from '@/api/http'
-import type { DirectoryListing, Project } from '@/types/api'
+import type { DirectoryListing, Project, ProjectGitBranch } from '@/types/api'
 import type { DecisionLevel } from '@/types/task'
 
 export type CreateProjectInput = {
@@ -19,6 +19,10 @@ export const listProjects = () => get<Project[]>('/projects')
  * 而不是等到第一次派发。失败原因原样透传给用户。
  */
 export const createProject = (input: CreateProjectInput) => postJson<Project>('/projects', input)
+
+/** 当前分支是工作区运行时状态，只在详情选中项目时查询。 */
+export const getProjectGitBranch = (id: number) =>
+  get<ProjectGitBranch>(`/projects/${id}/git-branch`)
 
 /**
  * 列子目录，给注册表单的路径字段当选择器。

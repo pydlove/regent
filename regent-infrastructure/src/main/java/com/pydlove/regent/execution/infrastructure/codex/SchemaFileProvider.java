@@ -53,6 +53,17 @@ public class SchemaFileProvider {
         return target;
     }
 
+    /**
+     * 出参 JSON Schema 原文。
+     *
+     * <p>与 {@link #schemaFile()} 读的是同一份资源：文件版给 {@code codex exec --output-schema}，
+     * 原文版给 {@code GET /api/agent/contract} 吐给外部执行者。两处必须是同一份字节，
+     * 否则外部执行者按 A 写、平台按 B 校验，而错误只会表现为「出参不合法」。
+     */
+    public String schemaJson() {
+        return readResource(SCHEMA_RESOURCE);
+    }
+
     /** 平台上报约定。追加在任务指令之后，告诉模型该按什么规矩汇报。 */
     public String contract() {
         String cached = contract.get();

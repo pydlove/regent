@@ -17,6 +17,15 @@ public interface ProjectProfileRepository {
     Optional<ProjectProfile> findById(ProjectId id);
 
     /**
+     * 按项目标识取画像。
+     *
+     * <p>外部执行者手里只有人能说出口的那个标识（{@code regent}），没有内部 ID：
+     * 「去 regent 这个项目上找活干」必须能落到一行数据上，所以这条查询是协议的一部分，
+     * 不是顺手的便利方法。
+     */
+    Optional<ProjectProfile> findByCode(String code);
+
+    /**
      * 全部启用与暂停的项目，按 ID 排序。
      *
      * <p>不做分页：项目是这个平台里数量最少的东西（个位数），给它做分页属于照猫画虎。

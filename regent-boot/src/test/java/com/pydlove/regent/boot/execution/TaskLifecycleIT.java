@@ -1,5 +1,10 @@
 package com.pydlove.regent.boot.execution;
 
+import com.pydlove.regent.bug.domain.model.Bug;
+import com.pydlove.regent.bug.domain.model.BugSeverity;
+import com.pydlove.regent.bug.domain.model.BugStatus;
+import com.pydlove.regent.bug.domain.repository.BugRepository;
+import com.pydlove.regent.execution.application.command.BugFixDispatchService;
 import com.pydlove.regent.execution.application.command.TaskAttachmentService;
 import com.pydlove.regent.execution.application.command.TaskDispatchService;
 import com.pydlove.regent.execution.application.command.UploadedAttachment;
@@ -9,6 +14,7 @@ import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskAttachment;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskRun;
+import com.pydlove.regent.execution.domain.model.TaskSource;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
@@ -79,13 +85,13 @@ class TaskLifecycleIT {
     private static final String BLOCKED_REPORT = """
             {"status":"BLOCKED","summary":"改动构建插件前需要确认","changedFiles":["pom.xml"],\
             "decision":{"level":"L2","question":"要不要升级构建插件？","options":["升级","先不动"],\
-            "recommendation":"先不动","reversible":true,"blastRadius":"构建流程"}}""";
+            "recommendation":"先不动","reversible":true,"blastRadius":"构建流程"},"bugs":[]}""";
 
     /** 最小的合法 PNG：8 字节签名 + 两字节数据，够过魔数校验。 */
     private static final byte[] PNG = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01};
 
     private static final String DONE_REPORT = """
-            {"status":"DONE","summary":"改完了","changedFiles":["README.md"],"decision":null}""";
+            {"status":"DONE","summary":"改完了","changedFiles":["README.md"],"decision":null,"bugs":[]}""";
 
     @Autowired
     private TaskRepository taskRepository;
@@ -107,6 +113,12 @@ class TaskLifecycleIT {
 
     @Autowired
     private DecisionApprovalService decisionApprovalService;
+
+    @Autowired
+    private BugFixDispatchService bugFixDispatchService;
+
+    @Autowired
+    private BugRepository bugRepository;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -282,6 +294,28 @@ class TaskLifecycleIT {
         TaskRun latest = taskRunRepository.findLatestByTask(task.getId()).orElseThrow();
         assertEquals(2, latest.getAttemptNo());
         assertEquals(RunStatus.SUCCESS, latest.getStatus());
+    }
+
+    @Test
+    @DisplayName("缺陷派发修复任务：创建 BUG_FIX 任务并回填 fix_task_id")
+    void 缺陷派发修复任务() {
+        Bug bug = Bug.reportManually(
+                ProjectId.of(PROJECT_ID),
+                "导出文件名乱码",
+                BugSeverity.MAJOR,
+                "下载含中文名的导出文件",
+                "src/export/CsvExporter.java",
+                "响应头编码错误");
+        bugRepository.save(bug);
+
+        Task task = bugFixDispatchService.dispatchFix(bug.getId());
+
+        assertEquals(TaskSource.BUG_FIX, task.getSource());
+        assertEquals(bug.getId(), task.getBugId().orElseThrow());
+        assertEquals(TaskStatus.RUNNING, task.getStatus());
+        Bug reloaded = bugRepository.findById(bug.getId()).orElseThrow();
+        assertEquals(BugStatus.FIXING, reloaded.getStatus());
+        assertEquals(task.getId(), reloaded.getFixTaskId().orElseThrow());
     }
 
     // ------------------------------------------------------------------

@@ -13,6 +13,7 @@ import Select from '@/components/ui/select/Select.vue'
  * 一是显得像两个功能，二是和工具栏里的图标按钮撞脸。这里按前者做。
  *
  * 左边只放读数（1–20 / 共 49 条），右边放「每页多少」和翻页。
+ * 版权文字独占中间一列，位置不受两侧内容宽度影响。
  * 读数用 50% 的标签色（secondary）而不是 25%（tertiary）：这一条里唯一的文字信息就是它，
  * 压到 25% 在白底上已经发虚，而这数字是用户真要读的（「一共多少条」）。
  */
@@ -28,6 +29,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{ 'update:page': [number]; 'update:pageSize': [number] }>()
 
+const currentYear = new Date().getFullYear()
 const pageCount = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)))
 const rangeStart = computed(() => (props.total === 0 ? 0 : (props.page - 1) * props.pageSize + 1))
 const rangeEnd = computed(() => Math.min(props.page * props.pageSize, props.total))
@@ -58,13 +60,20 @@ const stepClass =
 </script>
 
 <template>
-  <div class="flex h-footer shrink-0 items-center gap-3 border-t border-separator bg-window px-5">
-    <p class="tnum text-caption text-label-secondary">
+  <div
+    class="grid h-footer shrink-0 grid-cols-[1fr_auto] items-center gap-3 border-t border-separator bg-window px-3 lg:grid-cols-[1fr_auto_1fr] lg:px-5"
+  >
+    <p class="justify-self-start tnum text-caption text-label-secondary">
       <template v-if="total > 0">{{ rangeStart }}–{{ rangeEnd }} / 共 {{ total }} 条</template>
       <template v-else>没有可显示的记录</template>
     </p>
 
-    <div class="ml-auto flex items-center gap-3">
+    <!-- 手机放不下三列，版权那列先收起来（<lg），桌面仍是严格居中的中线 -->
+    <p class="hidden text-center text-caption text-label-tertiary lg:block">
+      Copyright © {{ currentYear }} Regent AI
+    </p>
+
+    <div class="justify-self-end flex items-center gap-3">
       <Select v-model="sizeModel" :items="sizeItems" class="w-[88px]" :disabled="total === 0" />
 
       <span class="tnum text-caption text-label-secondary">{{ page }} / {{ pageCount }}</span>

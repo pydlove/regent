@@ -1,6 +1,14 @@
 package com.pydlove.regent.boot.config;
 
+import com.pydlove.regent.bug.application.command.BugAttachmentService;
+import com.pydlove.regent.bug.application.command.BugCommandService;
+import com.pydlove.regent.bug.application.query.BugQueryService;
+import com.pydlove.regent.bug.domain.repository.BugAttachmentRepository;
+import com.pydlove.regent.bug.domain.repository.BugQueryRepository;
+import com.pydlove.regent.bug.domain.repository.BugRepository;
+import com.pydlove.regent.execution.application.command.BugFixDispatchService;
 import com.pydlove.regent.execution.application.command.TaskCommandService;
+import com.pydlove.regent.execution.application.command.TaskDispatchService;
 import com.pydlove.regent.execution.application.query.TaskQueryService;
 import com.pydlove.regent.execution.application.query.TaskRunQueryService;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
@@ -15,12 +23,21 @@ import com.pydlove.regent.governance.domain.repository.DecisionQueryRepository;
 import com.pydlove.regent.governance.domain.repository.DecisionRepository;
 import com.pydlove.regent.governance.domain.repository.DecisionRuleRepository;
 import com.pydlove.regent.project.application.command.ProjectRegistrationService;
+import com.pydlove.regent.project.application.command.EnvironmentEntryService;
 import com.pydlove.regent.project.application.query.DirectoryListingService;
+import com.pydlove.regent.project.application.query.ProjectGitBranchQueryService;
+import com.pydlove.regent.project.domain.repository.EnvironmentEntryRepository;
+import com.pydlove.regent.project.domain.port.ProjectGitBranchReader;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.project.domain.repository.ProjectRepository;
+import com.pydlove.regent.project.infrastructure.git.GitProjectGitBranchReader;
 import com.pydlove.regent.shared.domain.TransactionRunner;
+import com.pydlove.regent.shared.domain.port.AttachmentStorage;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.time.ZoneId;
 
 /**
  * 应用服务的显式装配。
@@ -33,9 +50,37 @@ import org.springframework.context.annotation.Configuration;
 public class ApplicationConfig {
 
     @Bean
+    public BugCommandService bugCommandService(BugRepository bugRepository,
+                                               ProjectProfileRepository projectProfileRepository) {
+        return new BugCommandService(bugRepository, projectProfileRepository);
+    }
+
+    @Bean
+    public BugFixDispatchService bugFixDispatchService(BugRepository bugRepository,
+                                                       TaskRepository taskRepository,
+                                                       TaskDispatchService taskDispatchService,
+                                                       TransactionRunner transactionRunner) {
+        return new BugFixDispatchService(
+                bugRepository, taskRepository, taskDispatchService, transactionRunner);
+    }
+
+    @Bean
+    public BugQueryService bugQueryService(BugQueryRepository bugQueryRepository) {
+        return new BugQueryService(bugQueryRepository);
+    }
+
+    @Bean
+    public BugAttachmentService bugAttachmentService(BugRepository bugRepository,
+                                                     BugAttachmentRepository attachmentRepository,
+                                                     AttachmentStorage attachmentStorage,
+                                                     @Value("${regent.attachments.max-bytes}") long maxBytes) {
+        return new BugAttachmentService(bugRepository, attachmentRepository, attachmentStorage, maxBytes);
+    }
+
+    @Bean
     public TaskQueryService taskQueryService(TaskRepository taskRepository,
                                              TaskQueryRepository taskQueryRepository) {
-        return new TaskQueryService(taskRepository, taskQueryRepository);
+        return new TaskQueryService(taskRepository, taskQueryRepository, ZoneId.systemDefault());
     }
 
     /**
@@ -53,6 +98,13 @@ public class ApplicationConfig {
         return new ProjectRegistrationService(projectRepository);
     }
 
+    @Bean
+    public EnvironmentEntryService environmentEntryService(
+            EnvironmentEntryRepository environmentEntryRepository,
+            ProjectProfileRepository projectProfileRepository) {
+        return new EnvironmentEntryService(environmentEntryRepository, projectProfileRepository);
+    }
+
     /**
      * 路径选择器的读侧。它和注册用例一样只碰 {@code java.nio.file}，不经过任何仓储 ——
      * 所以这里没有依赖要递进去。
@@ -60,6 +112,18 @@ public class ApplicationConfig {
     @Bean
     public DirectoryListingService directoryListingService() {
         return new DirectoryListingService();
+    }
+
+    @Bean
+    public ProjectGitBranchReader projectGitBranchReader() {
+        return new GitProjectGitBranchReader();
+    }
+
+    @Bean
+    public ProjectGitBranchQueryService projectGitBranchQueryService(
+            ProjectProfileRepository projectProfileRepository,
+            ProjectGitBranchReader projectGitBranchReader) {
+        return new ProjectGitBranchQueryService(projectProfileRepository, projectGitBranchReader);
     }
 
     @Bean

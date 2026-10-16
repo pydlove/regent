@@ -7,6 +7,10 @@ import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+
 /**
  * 任务写侧用例。
  *
@@ -75,11 +79,56 @@ public class TaskCommandService {
         return task;
     }
 
+    /** 编辑任务的指令与优先级；标题继续从指令首行推导，避免两处内容分叉。 */
+    public Task edit(EditTaskCommand command) {
+        Task task = load(command.taskId());
+        int priority = command.priority() == null ? 0 : command.priority();
+        task.edit(deriveTitle(command.prompt()), command.prompt(), priority);
+        taskRepository.updateEditable(task);
+        return task;
+    }
+
     public Task cancel(TaskId id) {
         Task task = load(id);
         task.cancel();
         taskRepository.save(task);
         return task;
+    }
+
+    /** 删除待执行或排队中的任务。状态守卫在聚合里，落库时仓储再做一次并发兜底。 */
+    public void delete(TaskId id) {
+        Task task = load(id);
+        task.requireDeletable();
+        taskRepository.delete(id);
+    }
+
+    /**
+     * 逐个删除一组任务。
+     *
+     * <p>与批量派发保持同一语义：重复 ID 只处理一次，单项状态已变化或不存在只记录该项失败，
+     * 不阻断同一批里的其他任务。
+     */
+    public TaskDeleteBatchResult deleteBatch(List<TaskId> taskIds) {
+        if (taskIds == null || taskIds.isEmpty()) {
+            throw new IllegalArgumentException("至少选择一个任务");
+        }
+        LinkedHashSet<TaskId> uniqueTaskIds = new LinkedHashSet<>(taskIds);
+        if (uniqueTaskIds.contains(null)) {
+            throw new IllegalArgumentException("任务 ID 不能为空");
+        }
+
+        List<TaskId> deleted = new ArrayList<>();
+        List<TaskDeleteBatchResult.Failure> failures = new ArrayList<>();
+        for (TaskId taskId : uniqueTaskIds) {
+            try {
+                delete(taskId);
+                deleted.add(taskId);
+            } catch (RuntimeException e) {
+                String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                failures.add(new TaskDeleteBatchResult.Failure(taskId, message));
+            }
+        }
+        return new TaskDeleteBatchResult(deleted, failures);
     }
 
     private Task load(TaskId id) {

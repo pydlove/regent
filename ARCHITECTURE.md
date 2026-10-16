@@ -34,6 +34,7 @@ DDD 的第一步是回答「哪里值得投入最多精力」。这个平台的�
 | 聚合根 | 上下文 | 说明 |
 |---|---|---|
 | `Project` | `project` | 项目画像，含决策等级覆盖配置 |
+| `EnvironmentEntry` | `project` | 可全局或按项目归属的任务执行环境信息（键值、标签、描述） |
 | `Requirement` | `requirement` | 需求，持有 `List<TaskId>` **弱引用** |
 | `Task` | `execution` | 执行单元，含状态机与 `codex_thread_id` |
 | `TaskRun` | `execution` | 单次执行记录，token 消耗、分支名、退出码 |
@@ -59,26 +60,36 @@ DDD 的第一步是回答「哪里值得投入最多精力」。这个平台的�
 ### 2.3 任务状态机（领域不变量所在）
 
 ```
-PENDING ──dispatch──▶ RUNNING ──success──▶ DONE
-                         │
-                         ├──needDecision──▶ BLOCKED ──approved──▶ RUNNING (resume)
-                         │                     │
-                         │                     └──rejected──▶ CANCELLED
-                         └──error──▶ FAILED ──retry──▶ PENDING
+PENDING ──queue──▶ QUEUED ──dispatch──▶ RUNNING ──success──▶ DONE
+   │                                      │
+   └────────────dispatch──────────────────┘
+                                          ├──needDecision──▶ BLOCKED ──approved──▶ RUNNING (resume)
+                                          │                     │
+                                          │                     └──rejected──▶ CANCELLED
+                                          └──error──▶ FAILED ──retry──▶ PENDING
+                                                                 CANCELLED ──retry──▶ PENDING
 ```
 
-终态：`DONE`、`CANCELLED`。`FAILED` 可经人工重试回到 `PENDING`。
+不可重开的终态只有 `DONE`。`FAILED` 与 `CANCELLED` 都可经人工操作回到 `PENDING`；
+其中 `CANCELLED` 只是停止当前执行，不删除历史运行记录、分支或会话，重新执行时仍可接续原有上下文。
 
-状态迁移**只能通过领域方法**发生，绝不允许 `task.setStatus(...)`：
+`QUEUED` 表示用户已提交执行、但尚未取得执行位；它不算一次执行尝试。状态迁移**只能通过领域方法**发生，
+绝不允许 `task.setStatus(...)`：
 
 ```java
 public class Task extends AggregateRoot<TaskId> {
 
     private TaskStatus status;
 
-    /** 派发执行。只有 PENDING 可派发。 */
+    /** 排队等待执行位。 */
+    public void queue() {
+        requireState(TaskStatus.PENDING, "只有待执行任务可以进入排队");
+        this.status = TaskStatus.QUEUED;
+    }
+
+    /** 派发执行。PENDING 与 QUEUED 都可派发。 */
     public void dispatch(BranchName branch) {
-        requireState(TaskStatus.PENDING, "只有待执行任务可以派发");
+        requireStateIn("只有待执行或排队中的任务可以派发", TaskStatus.PENDING, TaskStatus.QUEUED);
         this.status = TaskStatus.RUNNING;
         this.branch = branch;
         registerEvent(new TaskStarted(this.id, branch, Instant.now()));
@@ -136,7 +147,7 @@ public class Task extends AggregateRoot<TaskId> {
 
 **结论：Maven 模块只承担「物理边界」职责，限界上下文用包来承载。** 模块边界只有一个目的——**强制领域层不依赖框架**。这是 DDD 里投入产出比最高的一条编译期约束，其余边界交给包约定 + 架构测试守。
 
-### 3.2 五个模块
+### 3.2 六个模块
 
 | 模块 | 内容 | 允许依赖 | 禁用 |
 |---|---|---|---|
@@ -145,6 +156,7 @@ public class Task extends AggregateRoot<TaskId> {
 | `regent-infrastructure` | 所有上下文的 `infrastructure` 包、MyBatis XML、**Flyway 迁移脚本** | `regent-core` | — |
 | `regent-interfaces` | 所有上下文的 `interfaces` 包、REST、调度入口、CLI | `regent-core` | — |
 | `regent-boot` | `main`、Spring 装配、`application-*.yml` | 全部 | — |
+| `regent-relay` | 公网中继 server 与本地 connector，独立部署，不承载领域模型 | 仅 JDK | 不参与 DDD 依赖链，不访问数据库或领域对象 |
 
 `regent-core` 是整套设计的腰眼：**它是纯 Java，可以脱离 Spring 和数据库直接用 JUnit 跑**。决策仲裁这种关键逻辑能在毫秒级单测里跑上百个用例，这是它必须纯净的唯一理由。
 
@@ -191,9 +203,10 @@ regent/
 │
 ├── regent-commons/              # ┐
 ├── regent-core/                 # │
-├── regent-infrastructure/       # ├─ 五个 Maven 模块，内部结构见 4.2
+├── regent-infrastructure/       # ├─ 五个领域构建模块，内部结构见 4.2
 ├── regent-interfaces/           # │
 ├── regent-boot/                 # ┘
+├── regent-relay/                # 独立部署模块，不参与 DDD 领域依赖链
 ├── regent-web/                  # 前端工程，独立于 Maven（待定 Vue/React）
 │
 ├── doc/                         # 项目文档，集中于根目录
@@ -213,7 +226,7 @@ regent/
 
 | 顶层项 | 职责 | 对齐来源 |
 |---|---|---|
-| `regent-*`（五个） | Maven 模块，唯一构建单元 | `app_audit` 的多模块聚合 |
+| `regent-*`（六个） | Maven 模块，唯一构建单元；其中 `regent-relay` 是独立部署工具 | `app_audit` 的多模块聚合 |
 | `regent-web` | 前端 npm 工程，**不参与 Maven 构建** | `app-audit-frontend` 的独立工程形态 |
 | `doc/` | 需求 / 设计 / 开发 / 数据库 / 测试 / bug 六类文档集中存放 | `app_audit/doc/` 同名同构 |
 | `openspec/` | 规格驱动开发产物 | `app_audit`、`safe-guard`、`test_maf` |
@@ -567,7 +580,7 @@ class ArchitectureTest {
    resume / complete / fail / retry / cancel），49 个单测，`regent-core` 零框架依赖
 7. ✅ 仓储一分为二：`TaskRepository`（取聚合来改）与 `TaskQueryRepository`（读模型直出
    `TaskListItem`）；实现在 `regent-infrastructure`，SQL 收在 `mapper/*.xml`
-8. ✅ 查询接口：任务列表（分页 / 状态筛选 / 标题搜索 / 状态统计）、任务详情、
+8. ✅ 查询接口：任务列表（分页 / 状态与等级筛选 / 标题搜索 / 状态统计）、任务详情、
    重试与终止，决策列表与详情；`interfaces/dto` 只出 DTO，领域对象不外泄
 9. ✅ `ArchitectureTest`（7 条 ArchUnit 规则）守着硬约束，`mvn verify` 挂则违规
 10. ✅ 前端 `regent-web` 接通真实接口：列表 / 服务端分页 / 筛选 / 搜索 / 检查器，
@@ -588,7 +601,8 @@ class ArchitectureTest {
 14. ✅ 决策规则从 `decision_rule` 表加载：`DecisionRuleRepository`（domain）+
     `MyBatisDecisionRuleRepository`（infrastructure），`DecisionArbiter` 改成吃规则列表；
     规则行解析失败直接报错，不静默跳过 —— 分级是核心域，宁可起不来也不许降级放行
-15. ✅ 图片附件：`TaskAttachment`（不可变事实，只守「这是一张图片」这条结构性不变量）、
+15. ✅ 图片附件：共享的 `ImageUploadPolicy` 统一白名单、魔数、大小与展示名规则；
+    `TaskAttachment`（不可变事实，只守「这是一张图片」这条结构性不变量）、
     `task_attachment` 表（`V3__task_attachment.sql`，外键挂任务）、`AttachmentStorage` 端口 +
     `LocalAttachmentStorage` 适配器（**磁盘文件名只有 UUID + 扩展名** —— 原文件名会随
     `codex exec -i` 进 argv，非 ASCII 会被平台字符集打成问号，就是上面第 1 条踩过的坑）、
@@ -598,6 +612,36 @@ class ArchitectureTest {
     `GET /api/attachments/{id}/content`。执行侧每次尝试开局读一次附件，逐张变成
     `codex exec -i <path>`（首跑与续跑都带，见 `ExecRequest.imagePaths`）。
     前端三种入口（粘贴 / 拖放 / 选文件）与「先建任务再逐张上传」的时序见 `FRONTEND.md` 15.6
+    **Bug 图片附件**（2026-10-16）：`BugAttachment` + `bug_attachment`（`V8__bug_attachment.sql`）
+    复用同一存储端口与图片策略；人工录入弹框支持选文件、拖放和 ⌘V / Ctrl+V，
+    `POST/GET /api/bugs/{id}/attachments` 与 `GET /api/bug-attachments/{id}/content` 提供读写。
+16. ✅ 目录浏览（给注册项目的路径字段当选择器）：`DirectoryListingService`（application/query，
+    直接用 `java.nio.file`，理由与注册用例里的路径校验同一条 —— 这是对本机文件系统的一次读，
+    不是要适配的外部系统）、`GET /api/projects/directories?path=…`（不传就从用户主目录开始；
+    只列子目录、不列 `.` 开头的隐藏目录，最多 500 条并如实标记截断）。
+    **为什么不让浏览器自己选**：`<input type="file" webkitdirectory>` 出于安全只给目录名与相对
+    路径，而注册项目要的是绝对路径；后端与 codex 同机，它列的才是真能跑起来的那棵树。
+    这个接口能读本机目录树，成立的前提是服务只绑 `127.0.0.1` —— 要挪到服务器上多人用，
+    必须先加鉴权与白名单
+
+17. ✅ 外部执行者协议（`regent-agent/1`，2026-10-16）：平台**不接任何模型**，只公布一个地址 ——
+    执行者读 `GET /api/agent/contract.md`（协议全文 + 出参 schema）、`GET /api/agent/tasks?project=…`
+    （可领清单）、`POST /api/agent/tasks/claim | runs/{id}/heartbeat | runs/{id}/report`。
+    一条任务被拆成「认领（落 `task_run` + 租约）→ 执行者在自己环境里干 → 上报 → 结算」，
+    状态全落库，因为外部执行者可能几分钟后才回话，平台不可能挂一个线程等它。
+    三个刻意的决定：
+    · **结算只有一份实现**（`RunSettlementService`）：就高不就低、阈值内放行并回续跑指令、
+      超阈值挂起等人，内部 `codex exec` 与外部执行者走的是同一段代码，
+      否则「该不该问人」这条线会随入口而变；
+    · **租约是唯一的活性证明**（`task_run.lease_expires_at` + `AgentLeaseJob`）：
+      平台看不见也杀不掉外部进程，租约到期即判失联 —— 没有它，用户关掉编辑器，
+      任务会永远停在「执行中」而看板上没有任何线索；
+    · **一个项目同时只允许一个活跃租约**：与平台级并发上限默认 1 同因 ——
+      一条执行链路要切分支、改文件，两个执行者在同一个工作区并行会互相覆盖。
+    出参判定从适配器提到领域（`ExecReport.toResult`），让两条入口共用同一条「读不懂就判失败」的规则；
+    运行记录多了 `executor` / `agent_name` 两列，界面能分清是平台自己跑的 codex 还是外部执行者。
+    **要外部执行者独占派发，得把 `regent.execution.dispatch.enabled` 关掉** ——
+    内部心跳开着时，两边会抢同一批待执行任务（这是当前已知的取舍，没有做「按任务分配执行方式」）
 
 **执行链路落地时修掉的三个真缺陷**（由 `CodexCliAdapterTest` 与 `TaskLifecycleIT` 逼出来，
 每个的失败现象都离根因很远）：
@@ -620,15 +664,19 @@ token 四路用量、18 条事件、出参 JSON 全部落库，`changedFiles` �
 ### 待办
 
 16. 邮件与推送通道，以及邮件里的「一键批准」入口（`POST /api/approvals/{token}`）
-17. 需求单与「需求 → 任务」的拆解链路；Bug 单的写操作（派发修复任务）
+17. 需求单与「需求 → 任务」的拆解链路；Bug 单的标记已修复 / 验证关闭 / 不修复状态流转
 18. 决策规则的维护界面（规则已在表里，缺的是增删改与启停的入口）
 19. 项目的改名 / 暂停 / 删除入口（`project.enabled` 已在，缺操作入口；写侧仓储目前只支持新增，
     见 `ProjectRepository` 的注释）。**读侧已落地**（2026-10-16）：前端有了项目管理页
     （`/projects`，项目画像 + 该项目的最近任务）与全站唯一的注册入口（工具栏 / 项目页 /
     新建任务「一个项目都没有」时的死结出口）；页面上刻意不摆暂停、删除这类点了没反应的假开关
 20. 附件的删除入口（上传与查看有了，删还没有）：删行不难，难的是**两个存储要一起改** ——
-    `task_attachment` 行没了、`~/.regent/attachments` 下的文件还在，或者反过来。
+    `task_attachment` / `bug_attachment` 行没了、`~/.regent/attachments` 下的文件还在，或者反过来。
     这类「双写」的收尾单独设计，别顺手加一个 DELETE 接口就算完
+
+> 2026-10-16 已做：Bug 派发修复任务（`POST /api/bugs/{id}/fix-task`）。应用服务锁住缺陷单，
+> 在同一事务里创建 `BUG_FIX` 任务、回填 `fix_task_id` 并把缺陷迁到 `FIXING`；执行线程在事务
+> 提交后启动，回滚时释放并发许可。前端按钮已接真实接口，不再显示“尚未接入”。
 
 > 2026-10-16 已做（原第 16 项的前半，即现在的第 17 项）：项目注册（`Project` 聚合 + `POST /api/projects` +
 > `MyBatisProjectRepository`）与人工录入任务（`TaskCommandService.createManual` + `POST /api/tasks`，

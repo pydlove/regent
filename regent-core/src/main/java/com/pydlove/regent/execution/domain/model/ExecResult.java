@@ -21,6 +21,7 @@ import java.util.Objects;
  * @param rawResult    末条消息原文，复盘用
  * @param schemaValid  出参是否按约定解析成功；false 时调用方应当按失败处理
  * @param changedFiles 本次改动的文件（相对项目根），用于路径通配规则
+ * @param bugs         执行器发现的缺陷；没有发现时为空列表
  * @param decision     执行器要求决策时非空
  */
 public record ExecResult(
@@ -32,6 +33,7 @@ public record ExecResult(
         String rawResult,
         boolean schemaValid,
         List<String> changedFiles,
+        List<ReportedBug> bugs,
         ExecDecision decision) {
 
     public ExecResult {
@@ -41,6 +43,7 @@ public record ExecResult(
         }
         tokens = tokens == null ? TokenUsage.ZERO : tokens;
         changedFiles = changedFiles == null ? List.of() : List.copyOf(changedFiles);
+        bugs = bugs == null ? List.of() : List.copyOf(bugs);
         if (status == RunStatus.BLOCKED && decision == null) {
             throw new DomainException("阻塞的执行结果必须带上待决策问题，否则任务会被挂起却无人知道要批什么");
         }
@@ -55,6 +58,6 @@ public record ExecResult(
     public static ExecResult invalidOutput(Integer exitCode, String threadId, TokenUsage tokens,
                                            String reason, String rawResult) {
         return new ExecResult(RunStatus.FAILED, exitCode, threadId, tokens, reason, rawResult, false,
-                List.of(), null);
+                List.of(), List.of(), null);
     }
 }

@@ -12,7 +12,8 @@
 
     <sql id="columns">
         id, task_id, attempt_no, status, exit_code, token_input, token_cached_input, token_output,
-        branch_name, summary, raw_result, schema_valid, changed_files, started_at, finished_at, created_at
+        branch_name, executor, agent_name, lease_expires_at, summary, raw_result, schema_valid,
+        changed_files, started_at, finished_at, created_at
     </sql>
 
     <select id="selectById" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskRunData">
@@ -39,12 +40,24 @@
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO task_run (task_id, attempt_no, status, exit_code, token_input, token_cached_input,
-                              token_output, branch_name, summary, raw_result, schema_valid, changed_files,
+                              token_output, branch_name, executor, agent_name, lease_expires_at,
+                              summary, raw_result, schema_valid, changed_files,
                               started_at, finished_at, created_at)
         VALUES (#{taskId}, #{attemptNo}, #{status}, #{exitCode}, #{tokenInput}, #{tokenCachedInput},
-                #{tokenOutput}, #{branchName}, #{summary}, #{rawResult}, #{schemaValid},
+                #{tokenOutput}, #{branchName}, #{executor}, #{agentName}, #{leaseExpiresAt},
+                #{summary}, #{rawResult}, #{schemaValid},
                 CAST(#{changedFiles} AS JSON), #{startedAt}, #{finishedAt}, #{createdAt})
     </insert>
+
+    <!--
+      心跳只动租约一列。不复用下面那条 update：那条是「写结论」的语句，
+      心跳拿它写库会把还没发生的结论一起刷一遍（比如把 status 写成 RUNNING 覆盖掉刚落的 FAILED）。
+    -->
+    <update id="updateLease">
+        UPDATE task_run
+        SET lease_expires_at = #{leaseExpiresAt}
+        WHERE id = #{id}
+    </update>
 
     <update id="update">
         UPDATE task_run
@@ -57,8 +70,45 @@
             raw_result = #{rawResult},
             schema_valid = #{schemaValid},
             changed_files = CAST(#{changedFiles} AS JSON),
+            lease_expires_at = #{leaseExpiresAt},
             finished_at = #{finishedAt}
         WHERE id = #{id}
     </update>
+
+    <!--
+      工作区有没有被外部执行者占着。连表拿 project_id：租约挂在执行记录上，
+      而「独占」这件事是按项目说的。executor 由调用方传领域常量，不在 SQL 里再写一遍字面量。
+    -->
+    <select id="countActiveLeasesByProject" resultType="int">
+        SELECT COUNT(1)
+        FROM task_run r
+                 JOIN task t ON t.id = r.task_id
+        WHERE t.project_id = #{projectId}
+          AND r.executor = #{executor}
+          AND r.status = 'RUNNING'
+          AND r.lease_expires_at IS NOT NULL
+          AND r.lease_expires_at &gt; #{now}
+    </select>
+
+    <!-- 失联名单：还挂在 RUNNING 上、租约却已经过期的外部执行记录 -->
+    <select id="selectExpiredLeases" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskRunData">
+        SELECT <include refid="columns"/>
+        FROM task_run
+        WHERE status = 'RUNNING'
+          AND executor = #{executor}
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at &lt;= #{now}
+        ORDER BY lease_expires_at
+    </select>
+
+    <select id="selectActiveLeases" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskRunData">
+        SELECT <include refid="columns"/>
+        FROM task_run
+        WHERE status = 'RUNNING'
+          AND executor = #{executor}
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at &gt; #{now}
+        ORDER BY lease_expires_at
+    </select>
 
 </mapper>

@@ -75,7 +75,8 @@ public final class CodexJsonlParser {
                 hasDecision ? stringList(decision.path("options")) : List.of(),
                 hasDecision ? text(decision, "recommendation") : null,
                 hasDecision ? decision.path("reversible").asBoolean(false) : false,
-                hasDecision ? text(decision, "blastRadius") : null));
+                hasDecision ? text(decision, "blastRadius") : null,
+                bugs(node.path("bugs"))));
     }
 
     private Optional<JsonNode> readTree(String raw) {
@@ -115,6 +116,24 @@ public final class CodexJsonlParser {
         return values;
     }
 
+    private static List<CodexBug> bugs(JsonNode node) {
+        if (!node.isArray()) {
+            return List.of();
+        }
+        List<CodexBug> values = new ArrayList<>();
+        node.forEach(item -> {
+            if (item.isObject()) {
+                values.add(new CodexBug(
+                        text(item, "title"),
+                        text(item, "severity"),
+                        text(item, "reproduction"),
+                        text(item, "filePath"),
+                        text(item, "detail")));
+            }
+        });
+        return values;
+    }
+
     /** 把一行非 JSON 文本包成合法的 JSON 字符串，好让它能原样存进 JSON 列。 */
     private String escaped(String line) {
         try {
@@ -148,10 +167,20 @@ public final class CodexJsonlParser {
             List<String> options,
             String recommendation,
             Boolean reversible,
-            String blastRadius) {
+            String blastRadius,
+            List<CodexBug> bugs) {
 
         public boolean hasDecision() {
             return level != null && !level.isBlank() && question != null && !question.isBlank();
         }
+    }
+
+    /** AI 发现的缺陷。缺项由领域层统一判为不合法，不在解析器里抛异常。 */
+    public record CodexBug(
+            String title,
+            String severity,
+            String reproduction,
+            String filePath,
+            String detail) {
     }
 }

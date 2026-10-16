@@ -1,3 +1,3 @@
 #!/bin/bash
-systemctl restart regent
-systemctl status regent --no-pager | head -5
+systemctl restart regent-relay
+systemctl status regent-relay --no-pager | head -5

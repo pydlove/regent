@@ -15,6 +15,12 @@ const router = createRouter({
       meta: { title: '样式基准页' },
     },
     {
+      path: '/dashboard',
+      name: 'dashboard',
+      component: () => import('@/views/DashboardView.vue'),
+      meta: { title: '看板' },
+    },
+    {
       path: '/tasks',
       name: 'tasks',
       component: () => import('@/views/TasksView.vue'),
@@ -31,6 +37,12 @@ const router = createRouter({
       name: 'projects',
       component: () => import('@/views/ProjectsView.vue'),
       meta: { title: '项目' },
+    },
+    {
+      path: '/environments',
+      name: 'environments',
+      component: () => import('@/views/EnvironmentsView.vue'),
+      meta: { title: '环境' },
     },
     {
       path: '/bugs',

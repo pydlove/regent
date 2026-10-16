@@ -25,6 +25,12 @@ public class MyBatisProjectProfileRepository implements ProjectProfileRepository
     }
 
     @Override
+    public Optional<ProjectProfile> findByCode(String code) {
+        return Optional.ofNullable(projectProfileMapper.selectByCode(code))
+                .map(MyBatisProjectProfileRepository::toProfile);
+    }
+
+    @Override
     public List<ProjectProfile> findAll() {
         return projectProfileMapper.selectAll().stream()
                 .map(MyBatisProjectProfileRepository::toProfile)

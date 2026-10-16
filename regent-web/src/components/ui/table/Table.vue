@@ -18,7 +18,16 @@ const props = withDefaults(
   { rowKey: 'id', selectedId: null, showEmpty: true },
 )
 
-const emit = defineEmits<{ select: [row: T] }>()
+const emit = defineEmits<{ select: [row: T]; rowDblclick: [row: T] }>()
+
+const HIDE_BELOW_CLASS: Record<NonNullable<TableColumn['hideBelow']>, string> = {
+  sm: 'hidden sm:table-cell',
+  md: 'hidden md:table-cell',
+  lg: 'hidden lg:table-cell',
+}
+
+const hideClass = (column: TableColumn) =>
+  column.hideBelow ? HIDE_BELOW_CLASS[column.hideBelow] : ''
 
 function cellText(row: T, key: string): string {
   const value = row[key]
@@ -44,7 +53,7 @@ function isSelected(row: T): boolean {
       固定布局让列宽只认表头的 width 与剩余空间的分配，单元格里再用 truncate 收尾，
       行高就真的固定住了。代价：多列都没有 width 时它们平分剩余宽度，所以列宽要写全。
     -->
-    <table class="w-full table-fixed border-separate border-spacing-0 text-body">
+    <table class="w-full table-fixed border-separate border-spacing-0 text-body text-label">
       <thead>
         <tr>
           <th
@@ -52,12 +61,15 @@ function isSelected(row: T): boolean {
             :key="column.key"
             :style="{ width: column.width }"
             :class="[
-              'sticky top-0 z-10 h-6 border-b border-separator bg-content px-2 text-caption font-emphasis text-label-secondary',
+              'sticky top-0 z-10 h-6 select-none border-b border-separator bg-sidebar px-2 text-caption font-emphasis text-label-secondary',
               column.align === 'right' ? 'text-right' : 'text-left',
               column.numeric ? 'tnum' : '',
+              hideClass(column),
             ]"
           >
-            {{ column.label }}
+            <slot name="header" :column="column">
+              {{ column.label }}
+            </slot>
           </th>
         </tr>
       </thead>
@@ -71,14 +83,16 @@ function isSelected(row: T): boolean {
           ]"
           :data-selected="isSelected(row) ? 'true' : undefined"
           @click="emit('select', row)"
+          @dblclick="emit('rowDblclick', row)"
         >
           <td
             v-for="column in columns"
             :key="column.key"
             :class="[
-              'border-b border-separator-soft px-2',
+              'border-b border-separator-soft px-2 align-middle group-data-[selected=true]:border-transparent',
               column.align === 'right' ? 'text-right' : 'text-left',
               column.numeric || column.align === 'right' ? 'tnum' : '',
+              hideClass(column),
             ]"
           >
             <!-- 单元格内容一律截断成一行：完整内容在右侧详情/弹框里，列表不是读长文的地方 -->

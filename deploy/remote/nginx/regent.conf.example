@@ -1,0 +1,58 @@
+# ==================== Regent AI 任务执行平台（regent-relay）====================
+# 由 deploy/remote/deploy.sh 自动写入 nginx.conf 的 http { } 内层；手工改动后需
+# nginx -t && nginx -s reload 生效。公网只暴露 18787；中继自身只监听
+# 127.0.0.1:8788，不直接对外。访问地址：http://<服务器IP>:18787
+server {
+    listen 18787;
+    server_name localhost;
+
+    root /root/app/regent-relay/frontend/dist;
+    index index.html;
+
+    # 构建产物带 hash，可长期缓存
+    location ~* \.(?:ico|png|jpg|jpeg|gif|svg|webp|woff|woff2|ttf|eot|otf|js|css)$ {
+        expires 7d;
+        add_header Cache-Control "public, max-age=604800";
+        add_header Vary "Accept-Encoding";
+        access_log off;
+    }
+
+    location / {
+        try_files $uri $uri/ @regent_router;
+        index index.html;
+        add_header Cache-Control "no-cache, no-store";
+    }
+
+    location @regent_router {
+        rewrite ^.*$ /index.html last;
+        add_header Cache-Control "no-cache, no-store";
+    }
+
+    gzip on;
+    gzip_min_length 1k;
+    gzip_comp_level 6;
+    gzip_types text/plain text/html application/javascript application/x-javascript text/css application/xml text/javascript application/json;
+    gzip_vary on;
+    gzip_disable "MSIE [1-6]\.";
+
+    # ^~ 优先于上面静态资源正则：附件下载等带扩展名的接口路径也必须走后端
+    # 中继对本机 8787 后端做长轮询转发，读超时放宽到 120s
+    location ^~ /api/ {
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
+        proxy_http_version 1.1;
+        proxy_redirect off;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_request_buffering off;
+        proxy_pass http://127.0.0.1:8788;
+    }
+
+    # 中继健康检查（无需登录，便于探活）
+    location = /health {
+        access_log off;
+        proxy_pass http://127.0.0.1:8788/health;
+    }
+}

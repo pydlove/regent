@@ -96,12 +96,90 @@ class TaskTest {
     }
 
     @Nested
+    @DisplayName("编辑")
+    class Editing {
+
+        @Test
+        void 非完成任务可以修改标题指令和优先级() {
+            Task task = pendingTask();
+
+            task.edit("新的标题", "新的执行指令", 8);
+
+            assertEquals("新的标题", task.getTitle());
+            assertEquals("新的执行指令", task.getPrompt());
+            assertEquals(8, task.getPriority());
+        }
+
+        @Test
+        void 执行中阻塞中失败和终止的任务允许编辑() {
+            Task running = runningTask();
+            Task blocked = blockedTask();
+            Task failed = runningTask();
+            failed.fail();
+            Task cancelled = pendingTask();
+            cancelled.cancel();
+
+            assertDoesNotThrow(() -> running.edit("运行中标题", "运行中指令", 1));
+            assertDoesNotThrow(() -> blocked.edit("阻塞中标题", "阻塞中指令", 2));
+            assertDoesNotThrow(() -> failed.edit("失败标题", "失败指令", 3));
+            assertDoesNotThrow(() -> cancelled.edit("终止标题", "终止指令", 4));
+        }
+
+        @Test
+        void 已完成的任务不能编辑() {
+            Task task = runningTask();
+            task.complete();
+
+            DomainException error = assertThrows(DomainException.class,
+                    () -> task.edit("不能改", "也不能改", 9));
+
+            assertEquals("已完成的任务不能编辑", error.getMessage());
+            assertEquals("补一个健康检查", task.getTitle());
+            assertEquals("给 /health 加数据库连通性检查", task.getPrompt());
+            assertEquals(0, task.getPriority());
+        }
+
+        @Test
+        void 编辑仍校验标题与指令() {
+            assertThrows(DomainException.class, () -> pendingTask().edit("  ", "指令", 0));
+            assertThrows(DomainException.class, () -> pendingTask().edit("标题", "  ", 0));
+            assertThrows(DomainException.class,
+                    () -> pendingTask().edit("标".repeat(257), "指令", 0));
+        }
+    }
+
+    @Nested
     @DisplayName("派发与完成")
     class DispatchAndCompletion {
 
         @Test
+        void 排队只表示已提交执行位且不算一次尝试() {
+            Task task = pendingTask();
+
+            task.queue();
+
+            assertEquals(TaskStatus.QUEUED, task.getStatus());
+            assertEquals(0, task.getAttemptCount());
+            assertTrue(task.getStartedAt().isEmpty());
+            assertTrue(task.getBranchName().isEmpty());
+        }
+
+        @Test
         void 派发把任务推入执行中并记一次尝试() {
             Task task = pendingTask();
+
+            task.dispatch("codex/task-1");
+
+            assertEquals(TaskStatus.RUNNING, task.getStatus());
+            assertEquals("codex/task-1", task.getBranchName().orElseThrow());
+            assertEquals(1, task.getAttemptCount());
+            assertTrue(task.getStartedAt().isPresent());
+        }
+
+        @Test
+        void 排队中的任务取得执行位后进入执行中() {
+            Task task = pendingTask();
+            task.queue();
 
             task.dispatch("codex/task-1");
 
@@ -185,7 +263,7 @@ class TaskTest {
     }
 
     @Nested
-    @DisplayName("失败与重试")
+    @DisplayName("失败、重试与重新执行")
     class FailureAndRetry {
 
         @Test
@@ -215,10 +293,27 @@ class TaskTest {
         }
 
         @Test
-        void 只有失败的任务可以重试() {
+        void 已终止任务可重新执行回待执行并保留尝试次数() {
+            Task task = runningTask();
+            task.cancel();
+
+            task.retry();
+
+            assertEquals(TaskStatus.PENDING, task.getStatus());
+            assertEquals(1, task.getAttemptCount());
+            assertTrue(task.getStartedAt().isEmpty());
+            assertTrue(task.getFinishedAt().isEmpty());
+        }
+
+        @Test
+        void 只有失败或已终止的任务可以重试() {
             assertThrows(DomainException.class, () -> pendingTask().retry());
             assertThrows(DomainException.class, () -> runningTask().retry());
             assertThrows(DomainException.class, () -> blockedTask().retry());
+
+            Task done = runningTask();
+            done.complete();
+            assertThrows(DomainException.class, done::retry);
         }
     }
 
@@ -229,6 +324,9 @@ class TaskTest {
         @Test
         void 待执行执行中阻塞中失败后都可终止() {
             assertDoesNotThrow(() -> pendingTask().cancel());
+            Task queued = pendingTask();
+            queued.queue();
+            assertDoesNotThrow(queued::cancel);
             assertDoesNotThrow(() -> runningTask().cancel());
             assertDoesNotThrow(() -> blockedTask().cancel());
 
@@ -254,6 +352,34 @@ class TaskTest {
             task.cancel();
 
             assertThrows(DomainException.class, task::cancel);
+        }
+    }
+
+    @Nested
+    @DisplayName("删除")
+    class Deletion {
+
+        @Test
+        void 只有待执行或排队中的任务可以删除() {
+            assertDoesNotThrow(() -> pendingTask().requireDeletable());
+            Task queued = pendingTask();
+            queued.queue();
+            assertDoesNotThrow(queued::requireDeletable);
+
+            Task running = runningTask();
+            Task blocked = blockedTask();
+            Task failed = runningTask();
+            failed.fail();
+            Task done = runningTask();
+            done.complete();
+            Task cancelled = pendingTask();
+            cancelled.cancel();
+
+            assertThrows(DomainException.class, running::requireDeletable);
+            assertThrows(DomainException.class, blocked::requireDeletable);
+            assertThrows(DomainException.class, failed::requireDeletable);
+            assertThrows(DomainException.class, done::requireDeletable);
+            assertThrows(DomainException.class, cancelled::requireDeletable);
         }
     }
 
@@ -313,6 +439,7 @@ class TaskTest {
         void 大小写宽容但拼错拒绝() {
             assertEquals(TaskStatus.BLOCKED, TaskStatus.parse("blocked"));
             assertEquals(TaskStatus.PENDING, TaskStatus.parse(" Pending "));
+            assertEquals(TaskStatus.QUEUED, TaskStatus.parse("queued"));
             assertThrows(DomainException.class, () -> TaskStatus.parse("FAIL"));
             assertThrows(DomainException.class, () -> TaskStatus.parse(null));
         }

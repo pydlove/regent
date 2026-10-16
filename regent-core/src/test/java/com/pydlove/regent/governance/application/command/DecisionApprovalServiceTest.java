@@ -370,10 +370,37 @@ class DecisionApprovalServiceTest {
         }
 
         @Override
+        public void updateEditable(Task task) {
+            store.put(task.getId().value(), task);
+            saves++;
+        }
+
+        @Override
+        public void delete(TaskId id) {
+            store.remove(id.value());
+        }
+
+        @Override
         public List<Task> findDispatchable(int limit) {
             return store.values().stream()
-                    .filter(task -> task.getStatus() == TaskStatus.PENDING)
+                    .filter(task -> task.getStatus() == TaskStatus.PENDING
+                            || task.getStatus() == TaskStatus.QUEUED)
                     .limit(limit)
+                    .toList();
+        }
+
+        @Override
+        public List<Task> findQueued(int limit) {
+            return store.values().stream()
+                    .filter(task -> task.getStatus() == TaskStatus.QUEUED)
+                    .limit(limit)
+                    .toList();
+        }
+
+        @Override
+        public List<Task> findDispatchableInProject(ProjectId projectId, int limit) {
+            return findDispatchable(limit).stream()
+                    .filter(task -> task.getProjectId().equals(projectId))
                     .toList();
         }
 

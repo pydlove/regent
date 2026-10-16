@@ -3,6 +3,7 @@ package com.pydlove.regent.execution.domain.repository;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.shared.domain.DomainException;
+import com.pydlove.regent.shared.kernel.DecisionLevel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -21,42 +22,53 @@ class TaskQueryTest {
     @Test
     @DisplayName("页码与每页条数被夹到合法区间")
     void 规范化分页参数() {
-        assertEquals(1, TaskQuery.of(null, null, null, 0, 20).page());
-        assertEquals(1, TaskQuery.of(null, null, null, -5, 20).page());
-        assertEquals(1, TaskQuery.of(null, null, null, 1, 0).size());
-        assertEquals(200, TaskQuery.of(null, null, null, 1, 9999).size());
-        assertEquals(20, TaskQuery.of(null, null, null, null, null).size());
+        assertEquals(1, TaskQuery.of(null, null, null, null, 0, 20).page());
+        assertEquals(1, TaskQuery.of(null, null, null, null, -5, 20).page());
+        assertEquals(1, TaskQuery.of(null, null, null, null, 1, 0).size());
+        assertEquals(200, TaskQuery.of(null, null, null, null, 1, 9999).size());
+        assertEquals(20, TaskQuery.of(null, null, null, null, null, null).size());
     }
 
     @Test
     @DisplayName("关键词去空白，纯空白视为不筛选")
     void 规范化关键词() {
-        assertEquals("登录", TaskQuery.of(null, null, "  登录  ", 1, 20).keyword());
-        assertNull(TaskQuery.of(null, null, "   ", 1, 20).keyword());
+        assertEquals("登录", TaskQuery.of(null, null, null, "  登录  ", 1, 20).keyword());
+        assertNull(TaskQuery.of(null, null, null, "   ", 1, 20).keyword());
     }
 
     @Test
     @DisplayName("状态缺省不筛选，拼错则拒绝")
     void 解析状态() {
-        assertNull(TaskQuery.of("", null, null, 1, 20).status());
-        assertNull(TaskQuery.of(null, null, null, 1, 20).status());
-        assertEquals(TaskStatus.FAILED, TaskQuery.of("failed", null, null, 1, 20).status());
-        assertThrows(DomainException.class, () -> TaskQuery.of("FAIL", null, null, 1, 20));
+        assertNull(TaskQuery.of("", null, null, null, 1, 20).status());
+        assertNull(TaskQuery.of(null, null, null, null, 1, 20).status());
+        assertEquals(TaskStatus.FAILED, TaskQuery.of("failed", null, null, null, 1, 20).status());
+        assertEquals(TaskStatus.QUEUED, TaskQuery.of("queued", null, null, null, 1, 20).status());
+        assertThrows(DomainException.class, () -> TaskQuery.of("FAIL", null, null, null, 1, 20));
+    }
+
+    @Test
+    @DisplayName("等级缺省不筛选，大小写宽容，拼错则拒绝")
+    void 解析等级() {
+        assertNull(TaskQuery.of(null, "", null, null, 1, 20).level());
+        assertNull(TaskQuery.of(null, null, null, null, 1, 20).level());
+        assertEquals(DecisionLevel.L2, TaskQuery.of(null, "l2", null, null, 1, 20).level());
+        assertEquals(DecisionLevel.L3, TaskQuery.of(null, "3", null, null, 1, 20).level());
+        assertThrows(DomainException.class, () -> TaskQuery.of(null, "L4", null, null, 1, 20));
     }
 
     @Test
     @DisplayName("项目筛选：缺省不筛，非法 ID 直接拒绝")
     void 解析项目筛选() {
-        assertNull(TaskQuery.of(null, null, null, 1, 20).projectId());
-        assertEquals(ProjectId.of(7L), TaskQuery.of(null, 7L, null, 1, 20).projectId());
-        assertThrows(DomainException.class, () -> TaskQuery.of(null, 0L, null, 1, 20));
-        assertThrows(DomainException.class, () -> TaskQuery.of(null, -1L, null, 1, 20));
+        assertNull(TaskQuery.of(null, null, null, null, 1, 20).projectId());
+        assertEquals(ProjectId.of(7L), TaskQuery.of(null, null, 7L, null, 1, 20).projectId());
+        assertThrows(DomainException.class, () -> TaskQuery.of(null, null, 0L, null, 1, 20));
+        assertThrows(DomainException.class, () -> TaskQuery.of(null, null, -1L, null, 1, 20));
     }
 
     @Test
     @DisplayName("offset 由页码推出，供 SQL 的 LIMIT 使用")
     void 计算偏移量() {
-        assertEquals(0, TaskQuery.of(null, null, null, 1, 20).offset());
-        assertEquals(40, TaskQuery.of(null, null, null, 3, 20).offset());
+        assertEquals(0, TaskQuery.of(null, null, null, null, 1, 20).offset());
+        assertEquals(40, TaskQuery.of(null, null, null, null, 3, 20).offset());
     }
 }

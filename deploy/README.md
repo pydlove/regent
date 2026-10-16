@@ -1,10 +1,10 @@
 # 部署与启动脚本
 
-两套脚本，互不依赖：
+两套脚本，按部署角色分工：
 
 ```
-deploy/local/     本机开发：起后端 + 前端，给你点开验证
-deploy/remote/    发布到 Linux 服务器：构建 + 上传 + systemd 托管
+deploy/local/     本机：起 Regent、前端与公网中继连接器
+deploy/remote/    公网服务器：构建并部署无状态中继与静态前端
 ```
 
 ## 本地：`deploy/local/`
@@ -14,6 +14,9 @@ deploy/remote/    发布到 Linux 服务器：构建 + 上传 + systemd 托管
 | `start-all.sh` | 一键起后端 + 前端（等价于依次跑下面两个） |
 | `start-backend.sh` | 只起后端。**已在监听就不重复起**，直接返回 |
 | `start-frontend.sh` | 只起前端（vite dev）。缺 `node_modules` 时先 `npm install` |
+| `start-relay.sh` | 起公网中继连接器；未配置 `~/.regent/relay-connector.env` 时安全跳过 |
+| `connect-relay.sh` | 配对中继：读取服务器共享密钥 → 写 `~/.regent/relay-connector.env` → 重启连接器 → 探活 |
+| `relay-agent.sh` | 把连接器交给 launchd 托管（`install` / `uninstall` / `restart` / `status`），开机自启、崩溃自动重启 |
 | `stop-all.sh` | 按 pid 停，pid 文件丢了就按端口兜底 |
 | `restart.sh` | `stop-all` → 等 2 秒 → `start-all` |
 | `status.sh` | 端口探活 + 健康检查，打印两行状态 |
@@ -31,6 +34,24 @@ deploy/remote/    发布到 Linux 服务器：构建 + 上传 + systemd 托管
 - 后端 <http://127.0.0.1:8787/actuator/health>
 - 日志 `~/.regent/logs/backend.log`、`~/.regent/logs/frontend.log`
 - pid `~/.regent/*.pid`
+
+公网访问另外需要：
+
+```bash
+./deploy/local/connect-relay.sh          # 交互询问服务器 IP / SSH 端口 / 用户名；密钥读自服务器
+./deploy/local/relay-agent.sh install    # 可选：交给 launchd 常驻，手机才随时打得开
+```
+
+连接器只主动访问服务器，不监听任何本地端口。未配置时 `start-all.sh` 会打印警告并跳过，
+不影响本机直连 `http://127.0.0.1:12580/`。
+
+`connect-relay.sh` 优先用 SSH 密钥登录，密钥不通且是交互终端时才问密码；
+`deploy/remote/deploy.sh` 会直接传入密钥，所以服务器侧部署完就已经配对好，不需要再手工拷贝密码。
+
+**连接器为什么要托管**：服务器只做转发，真正干活的 Regent 在本机，连接器一断，
+手机打开公网地址就只会看到「本地 Regent 未连接」。`nohup` 起的连接器关掉终端就没了，
+`relay-agent.sh install` 之后由 launchd 拉起：开机自启、崩溃重启、退出终端不影响。
+托管期间 `start-relay.sh`、`stop-all.sh` 会主动避让，避免同一条配置被连两份。
 
 **运行时产物一律写 `~/.regent/`，不写仓库。** 仓库里出现 pid 或日志文件即为配置错误
 （根 `.gitignore` 也会挡住）。
@@ -51,33 +72,56 @@ deploy/remote/    发布到 Linux 服务器：构建 + 上传 + systemd 托管
 
 依赖：JDK 17、Maven 3.9+、Node 20+、本机 MySQL（`regent` / `regent_test` 两个 schema）。
 
-## 发布：`deploy/remote/`
+## 公网服务器：`deploy/remote/`
 
-服务端布局（与 systemd 单元、Nginx 约定一致）：
+服务器只运行无状态中继和静态前端，不运行 Regent 后端，不接触本地 MySQL 或 codex。
 
 ```
-/root/app/regent/backend/    regent-boot.jar + application-prod.yml（仅服务器上存在）
-/root/app/regent/frontend/   dist/
-/root/app/regent/script/     start.sh / stop.sh / restart.sh
-/root/app/regent/logs/
+/root/app/regent-relay/relay/      regent-relay.jar + relay.env
+/root/app/regent-relay/frontend/   dist/
+/root/app/regent-relay/script/     start.sh / stop.sh / restart.sh
+/root/app/regent-relay/logs/
+/root/app/regent-relay/nginx/      Nginx 示例配置
 ```
 
 ```bash
-export REGENT_SERVER_IP=1.2.3.4          # 不配就直接报错退出，不会误传到 127.0.0.1
-export REGENT_SERVER_USER=root
-export REGENT_SSH_KEY=~/.ssh/id_rsa      # 或 REGENT_SERVER_PASSWORD=... （需要 sshpass）
 ./deploy/remote/deploy.sh
 ```
 
-`deploy.sh` 依次做六件事：构建后端 → 构建前端 → 建目录 → 停服务并上传 jar →
-上传前端 `dist/` 与服务端启停脚本 → 装 systemd 单元并启动。
+直接运行后依次询问四项连接信息，带默认值的直接回车即可：
 
-服务器上还需要你手工做两件事（脚本会提示）：
+| 输入项 | 默认 | 说明 |
+|---|---|---|
+| 服务器 IP | 必填 | 公网地址，填 `127.0.0.1` 会被拒绝 |
+| SSH 端口 | 22 | |
+| SSH 用户名 | root | |
+| SSH 密码 | 空 | 隐藏输入；留空改用密钥 `~/.ssh/id_rsa` |
 
-1. Nginx 的 `root` 指到 `/root/app/regent/frontend/dist`，然后 `nginx -s reload`；
-2. 放一份 `/root/app/regent/backend/application-prod.yml`，**凭据永远不进仓库**。
-   更推荐用 `backend/.env`（systemd 的 `EnvironmentFile`），写 `REGENT_DB_USERNAME` /
-   `REGENT_DB_PASSWORD` 两行即可。
+脚本先做一次 SSH 探活，连不通立即退出，不会先花时间构建。
+非交互场景仍可用环境变量跳过询问：`REGENT_SERVER_IP`、`REGENT_SSH_PORT`、
+`REGENT_SERVER_USER`、`REGENT_SERVER_PASSWORD`（密码认证，需 `sshpass`）或
+`REGENT_SSH_KEY`（密钥认证）。
 
-前端 `dist/` 是静态产物，没有 Node 运行时依赖；后端由 systemd 托管，开机自启、崩溃重试。
+`deploy.sh` 会构建中继与前端，上传产物，并在首次部署时生成服务器端共享密钥。
+脚本不会把密钥打印到构建日志里；从服务器读取后写入本机 `~/.regent/relay-connector.env`：
+
+```bash
+ssh root@1.2.3.4 'grep REGENT_RELAY_SHARED_SECRET /root/app/regent-relay/relay/relay.env'
+```
+
+Nginx 是自动配置的（第 7/7 步）：脚本探测服务器上的 `nginx.conf` 路径，把
+`deploy/remote/nginx/regent.conf.example` 写入 `http { }` 内层（`listen 18787`、
+`root` 指向 `/root/app/regent-relay/frontend/dist`、`/api/` 反代 `127.0.0.1:8788`），
+写入前自动备份、写入后 `nginx -t` 校验、校验失败自动回滚；已有该配置则跳过。
+服务器上若开着 firewalld 会自动放行 18787/tcp。
+
+`deploy.sh` 的第 5/7 步会把服务器密钥同步到本机 `~/.regent/relay-connector.env` 并探活连接器，
+所以「部署完还要手工配连接器」这步已经没有了。仍需手工的只有一件事：
+**云厂商安全组放行 `18787/tcp`**。
+之后手机访问 `http://<服务器IP>:18787`；本机连接器的 `REGENT_RELAY_SERVER_URL`
+填同一地址。若后续套域名与 HTTPS，把连接器地址换成 `https://域名` 即可，无需改其它配置。
+只想重配连接器、不重新部署前端与中继时，单独跑 `./deploy/local/connect-relay.sh`。
+部署机不是跑 Regent 的那台机器时，设 `REGENT_SKIP_LOCAL_CONNECTOR=1` 跳过本机配对。
+
+前端 `dist/` 是静态产物，没有 Node 运行时依赖；中继由 systemd 托管，开机自启、崩溃重试。
 `SystemMaxUse` 之类的日志轮转不在脚本里，服务器上按需配 `journald` 即可。

@@ -14,13 +14,14 @@ import java.util.Optional;
  * 任务 —— 执行上下文的聚合根，本项目里唯一带完整状态机的对象。
  *
  * <pre>
- * PENDING ──dispatch──▶ RUNNING ──complete──▶ DONE（终态）
- *                          │
- *                          ├──block──▶ BLOCKED ──resume──▶ RUNNING
- *                          │               │
- *                          │               └──cancel──▶ CANCELLED（终态）
- *                          ├──fail──▶ FAILED ──retry──▶ PENDING
- *                          └──cancel──▶ CANCELLED
+ * PENDING ──queue──▶ QUEUED ──dispatch──▶ RUNNING ──complete──▶ DONE（终态）
+ *    │                                      │
+ *    └────────────dispatch────────────────┘
+ *                                           ├──block──▶ BLOCKED ──resume──▶ RUNNING
+ *                                           │               │
+ *                                           │               └──cancel──▶ CANCELLED
+ *                                           ├──fail──▶ FAILED ──retry──▶ PENDING
+ *                                           └──cancel──▶ CANCELLED ──retry──▶ PENDING
  * </pre>
  *
  * <p><b>状态只能通过这些领域方法迁移</b>：没有 setStatus，没有公开 setter，
@@ -39,9 +40,9 @@ public class Task {
     private final RequirementId requirementId;
     private final BugId bugId;
     private final TaskSource source;
-    private final String title;
-    private final String prompt;
-    private final int priority;
+    private String title;
+    private String prompt;
+    private int priority;
 
     private TaskStatus status;
     private String codexThreadId;
@@ -122,13 +123,22 @@ public class Task {
     }
 
     /**
-     * 派发执行。
+     * 排队等待执行位。任务还没有真正执行，因此不增加尝试次数，也不写开始时间。
+     */
+    public void queue() {
+        requireState(TaskStatus.PENDING, "只有待执行任务可以进入排队");
+        this.status = TaskStatus.QUEUED;
+        touch();
+    }
+
+    /**
+     * 派发执行。首次派发和排队后的起跑都走这里。
      *
      * <p>分支名由调用方（执行编排）传入而不是这里拼 {@code codex/task-N}：命名策略属于
      * 分支管理端口，写死在聚合里会让接 Git 适配器时无处可改。
      */
     public void dispatch(String branchName) {
-        requireState(TaskStatus.PENDING, "只有待执行任务可以派发");
+        requireStateIn("只有待执行或排队中的任务可以派发", TaskStatus.PENDING, TaskStatus.QUEUED);
         this.branchName = requireText(branchName, "分支名");
         this.status = TaskStatus.RUNNING;
         this.attemptCount += 1;
@@ -191,12 +201,29 @@ public class Task {
         touch();
     }
 
-    /** 人工重试：FAILED 回到 PENDING，等下一轮派发。历史尝试次数保留，用于追溯反复失败的任务。 */
+    /**
+     * 人工重试或重新执行：FAILED / CANCELLED 回到 PENDING，等下一轮派发。
+     * 历史尝试次数保留，用于追溯反复失败或多次终止的任务。
+     */
     public void retry() {
-        requireState(TaskStatus.FAILED, "只有失败的任务可以重试");
+        requireStateIn("只有失败或已终止的任务可以重试", TaskStatus.FAILED, TaskStatus.CANCELLED);
         this.status = TaskStatus.PENDING;
         this.startedAt = null;
         this.finishedAt = null;
+        touch();
+    }
+
+    /**
+     * 修改任务内容。只有已完成任务禁止编辑；终止、失败等历史状态仍允许修正记录，
+     * 但修改内容不会伪装成一次新的执行尝试。
+     */
+    public void edit(String title, String prompt, int priority) {
+        if (this.status == TaskStatus.DONE) {
+            throw new DomainException("已完成的任务不能编辑");
+        }
+        this.title = requireTitle(title);
+        this.prompt = requirePrompt(prompt);
+        this.priority = priority;
         touch();
     }
 
@@ -213,6 +240,16 @@ public class Task {
         touch();
     }
 
+    /**
+     * 删除守卫。
+     *
+     * <p>只有尚未执行过的待执行或排队任务允许删除；删除本身由仓储做逻辑删除，聚合不需要
+     * 知道 {@code deleted} 列。执行中、阻塞、失败或已结束的任务必须留在平台上供审计与追溯。
+     */
+    public void requireDeletable() {
+        requireStateIn("只有待执行或排队中的任务可以删除", TaskStatus.PENDING, TaskStatus.QUEUED);
+    }
+
     /** 执行器回报断点续跑的钥匙，取自 {@code codex exec --json} 的 thread_id。 */
     public void recordThreadId(String threadId) {
         if (this.status != TaskStatus.RUNNING) {
@@ -226,6 +263,15 @@ public class Task {
         if (this.status != expected) {
             throw new DomainException(message + "，当前状态：" + this.status);
         }
+    }
+
+    private void requireStateIn(String message, TaskStatus... expected) {
+        for (TaskStatus status : expected) {
+            if (this.status == status) {
+                return;
+            }
+        }
+        throw new DomainException(message + "，当前状态：" + this.status);
     }
 
     private void touch() {

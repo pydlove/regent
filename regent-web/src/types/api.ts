@@ -26,6 +26,38 @@ export type ApiErrorBody = {
   timestamp: string
 }
 
+/** 批量删除中的一个失败项。 */
+export type TaskBatchDeleteFailure = {
+  taskId: number
+  message: string
+}
+
+/** 批量删除结果。成功删除与未能删除的任务分开返回。 */
+export type TaskBatchDeleteResult = {
+  deletedTaskIds: number[]
+  failures: TaskBatchDeleteFailure[]
+}
+
+/** 批量派发中的一个失败项。 */
+export type TaskBatchDispatchFailure = {
+  taskId: number
+  message: string
+}
+
+/** 批量派发结果。成功包括立即起跑与进入排队，失败项留下供用户重试。 */
+export type TaskBatchDispatchResult = {
+  dispatchedTaskIds: number[]
+  failures: TaskBatchDispatchFailure[]
+}
+
+/** 看板趋势柱状图的一天；后端已按天补齐，不存在空档。 */
+export type TaskTrendPoint = {
+  /** yyyy-MM-dd，按本机时区切天 */
+  date: string
+  done: number
+  failed: number
+}
+
 /** 后端的时间一律是 ISO-8601 的 UTC 串（如 2026-10-16T04:41:10.573Z），可空字段用 null。 */
 export type TaskSummary = {
   id: number
@@ -42,6 +74,8 @@ export type TaskSummary = {
   decisionId: number | null
   attemptCount: number
   tokens: number
+  /** 所有执行记录的运行时长之和；阻塞等人或排队等待的时间不计入 */
+  executionMillis: number
   startedAt: string | null
   finishedAt: string | null
   createdAt: string
@@ -78,6 +112,12 @@ export type TaskRunSummary = {
   tokenOutput: number
   tokens: number
   branchName: string
+  /** 谁在跑这次尝试：`codex-cli` = 平台自己拉起的本机 codex；`agent` = 外部执行者 */
+  executor: string
+  /** 外部执行者的自称；平台自己拉起的执行器为 null */
+  agentName: string | null
+  /** 外部执行者的租约到期时间；没有外部执行者持有（或已收场）时为 null */
+  leaseExpiresAt: string | null
   summary: string | null
   /** 出参是否符合约定。false 说明这次执行的结论读不懂，界面要标出来 */
   schemaValid: boolean
@@ -106,21 +146,25 @@ export type TaskRunDetail = {
   events: RunEvent[]
 }
 
-/**
- * 任务的一张图片附件。
- *
- * 只带 `contentUrl` 不带磁盘路径：图片放在平台侧哪个目录是服务端实现细节，
- * 界面要看图就访问这个地址（见 AttachmentController）。
- */
-export type TaskAttachment = {
+/** 图片附件的共同展示字段，任务与 Bug 的缩略图组件只依赖这一层。 */
+export type ImageAttachment = {
   id: number
-  taskId: number
   /** 用户的原始文件名，只用于展示与「另存为」 */
   filename: string
   contentType: string
   sizeBytes: number
-  /** 形如 `/api/attachments/{id}/content`，可以直接塞进 `<img src>` */
+  /** 可以直接塞进 `<img src>` */
   contentUrl: string
+}
+
+/** 任务的一张图片附件。 */
+export type TaskAttachment = ImageAttachment & {
+  taskId: number
+}
+
+/** Bug 单的一张图片附件。 */
+export type BugAttachment = ImageAttachment & {
+  bugId: number
 }
 
 /**
@@ -138,6 +182,33 @@ export type Project = {
   defaultDecisionLevel: DecisionLevel
   /** 暂停开关；关掉之后不再派发新任务，但录入不受影响 */
   enabled: boolean
+}
+
+/** 项目工作区的当前 Git 分支；没有 Git 管理或处于游离 HEAD 时为 null。 */
+export type ProjectGitBranch = {
+  branchName: string | null
+}
+
+export type EnvironmentScope = 'GLOBAL' | 'PROJECT'
+
+/** 一条任务执行时可用的环境信息。 */
+export type EnvironmentEntry = {
+  id: number
+  scope: EnvironmentScope
+  /** scope=GLOBAL 时为 null；scope=PROJECT 时必填 */
+  projectId: number | null
+  key: string
+  value: string
+  tags: string[]
+  description: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** 平台级执行设置；修改后立即影响新任务的领取，不终止已经运行的任务。 */
+export type ExecutionSettings = {
+  maxConcurrentTasks: number
+  runningTaskCount: number
 }
 
 /**
@@ -173,6 +244,7 @@ export type DecisionSummary = {
   matchedRuleName: string | null
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'AUTO_RESOLVED'
   question: string
+  options: string[]
   recommendation: string | null
   reversible: boolean
   blastRadius: string | null

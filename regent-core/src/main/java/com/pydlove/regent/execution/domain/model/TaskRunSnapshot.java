@@ -23,6 +23,9 @@ public record TaskRunSnapshot(
         String rawResult,
         boolean schemaValid,
         List<String> changedFiles,
+        String executor,
+        String agentName,
+        Instant leaseExpiresAt,
         Instant startedAt,
         Instant finishedAt,
         Instant createdAt) {

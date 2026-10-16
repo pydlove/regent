@@ -48,7 +48,7 @@ Regent 换个做法：需求一次性录进平台，平台逐个调起 Codex 执
 ## 快速开始
 
 ```bash
-./deploy/local/start-all.sh     # 起后端 + 前端
+./deploy/local/start-all.sh     # 起后端 + 前端（已配置时再起公网中继连接器）
 ./deploy/local/status.sh        # 看状态
 ./deploy/local/stop-all.sh      # 停
 ```
@@ -68,9 +68,41 @@ Regent 换个做法：需求一次性录进平台，平台逐个调起 Codex 执
 > **本地默认关掉派发心跳**（`application-local.yml` 里的 `regent.execution.dispatch.enabled: false`）。
 > 演示数据里的项目路径是真实仓库（`app_audit`、Regent 自己），一旦你把演示数据灌回来，
 > 心跳一开，起个服务就会真的跑任务 —— 烧 token、切分支、改文件。要看自动派发就改成 `true`；
-> 只验证单条任务，用界面上的「派发执行」或 `POST /api/tasks/{id}/dispatch`。
+> 只验证单条任务，用界面上的「派发给 codex」或 `POST /api/tasks/{id}/dispatch`。
 
-发布到服务器见 `deploy/README.md`（`deploy/remote/deploy.sh` 一键构建上传 + systemd 托管）。
+手机公网访问见 `doc/设计文档/移动端公网中继.md` 与 `deploy/README.md`：
+公网服务器只运行无状态中继和静态前端，本机连接器主动长轮询服务器；
+Regent、MySQL、codex 和项目工作区始终留在本机。
+一次配对：`./deploy/remote/deploy.sh` 会自动写好本机 `~/.regent/relay-connector.env`
+并探活连接器；想让手机随时打得开，再跑 `./deploy/local/relay-agent.sh install` 交给 launchd 常驻。
+
+## 让别的工具自己上去找活干
+
+平台**不接任何模型**。它只公布一个地址：执行者自己去读协议、领活、干活、把结果报回来 ——
+跑活的是你手里那个 codex（或别的 CLI、别的模型工具），平台全程不知道它是谁。
+
+```bash
+curl -s http://127.0.0.1:8787/api/agent/contract.md   # 协议全文，读一次就够
+```
+
+把下面这段话连同**地址和项目**丢给你的 codex 就行：
+
+> 你是 Regent 平台的外部执行者。先读 `http://127.0.0.1:8787/api/agent/contract.md`，
+> 然后按协议在项目 `regent` 上找活干：看清单 → 认领 → 在 `workdir` 里、`branch` 上干完 → 上报。
+> 遇到要拍板的地方如实报 `BLOCKED`，不要自己放宽分级。
+
+平台这一侧只有三件事要留意：
+
+- **想让它独占派发，把 `regent.execution.dispatch.enabled` 关掉** —— 内部心跳开着时，
+  两边会抢同一批待执行任务；
+- **执行者要与后端同机**：工作区只有一份，切分支由平台负责；换台机器得先有按任务隔离的工作区；
+- **认领即拿租约**，默认 900 秒不心跳就按失联处理（`regent.agent.lease-seconds`），
+  回收由 `AgentLeaseJob` 负责，任务会回到可以重试的状态。
+
+平台同时运行的任务数由工具栏右侧的「执行设置」控制，范围 1–64。内部 `codex exec`
+和外部执行者共用同一个闸门；调低上限不会打断正在跑的任务，只会让新任务等待空位。
+
+任务详情里的运行记录会标出这次是谁在跑：本机 codex，还是「外部执行者 · 它的自称」。
 
 ## 目录
 
@@ -80,6 +112,7 @@ regent-core/            领域层 + 应用层（纯 Java，零框架依赖）
 regent-infrastructure/  持久化、codex 适配、通知实现、Flyway 脚本
 regent-interfaces/      REST、调度入口、CLI、DTO
 regent-boot/            Spring Boot 启动与装配
+regent-relay/           公网中继与本地连接器（零第三方运行时依赖）
 regent-web/             前端（Vue 3 + Tailwind v4，macOS 观感）
 doc/                    需求 / 设计 / 开发 / 数据库 / 测试 / bug
 deploy/                 本地启停脚本 + 远程发布脚本
@@ -99,22 +132,30 @@ deploy/                 本地启停脚本 + 远程发布脚本
 - 基础设施：`CodexCliAdapter`（进程、超时、stdout/stderr 分流、JSONL、末条消息）、
   `GitBranchManager`（每个任务一条分支，绝不直接改主干）、MyBatis 仓储
 - 接口：`GET /api/tasks`（支持 `status` / `projectId` / `keyword` / 分页）、`POST /api/tasks`（人工录入）、
+  `PUT /api/tasks/{id}`（编辑指令与优先级，已完成任务拒绝）、
   `/api/tasks/stats`、`GET /api/tasks/{id}`、
   `POST /api/tasks/{id}/retry|cancel|dispatch`、`GET /api/tasks/{id}/runs`、`GET /api/runs/{id}`、
   `POST /api/tasks/{id}/attachments`（贴图，`multipart/form-data`）、`GET /api/tasks/{id}/attachments`、
   `GET /api/attachments/{id}/content`（原图）、
   `GET /api/projects`、`POST /api/projects`（注册项目）、
+  `GET /api/projects/directories`（列本机目录，给注册表单的路径选择器用）、
+  `GET|PUT /api/execution/settings`（读取 / 修改最大同时运行任务数）、
   `GET /api/decisions`、`POST /api/decisions/{id}/approve|reject`、
-  `GET /api/bugs`
-- 前端：任务列表 / 分页 / 筛选 / 搜索 / 检查器、**新建任务弹框（贴图 + 拖放）**、
+  `GET /api/bugs`（支持范围 / 严重级 / 关键词 / 分页）、`POST /api/bugs`（人工录入）、
+  `POST /api/bugs/{id}/fix-task`（创建并派发修复任务、回填修复任务号）、
+  **外部执行者**：`GET /api/agent/contract(.md)`（协议全文 + 出参 schema）、
+  `GET /api/agent/tasks?project=…`（可领清单）、`POST /api/agent/tasks/claim`、
+  `POST /api/agent/runs/{id}/heartbeat`、`POST /api/agent/runs/{id}/report`
+- 前端：任务列表 / 分页 / 筛选 / 搜索 / 检查器、**新建任务弹框（贴图 + 拖放）与任务编辑弹框**、
   **项目管理页**（项目画像 + 最近任务）与「注册项目」（入口在工具栏项目下拉右边、项目页、
-  以及一个项目都没有时的新建任务弹框里）、按项目筛选、决策审批闭环、
-  **运行记录面板与事件流弹框**、**详情里的附件缩略图与看图弹框**
-- 测试：`regent-core` 162 个单测（毫秒级反馈回路）+ 适配器 11 个 + 26 条集成测试
+  以及一个项目都没有时的新建任务弹框里；路径能手打、也能从本机目录树里选）、按项目筛选、决策审批闭环、
+  **运行记录面板与事件流弹框**、**详情里的附件缩略图与看图弹框**、**执行设置弹框**
+- 测试：`regent-core` 单测（毫秒级反馈回路）+ 适配器 11 个 + 26 条集成测试
   （真 MySQL、真 Git、假 codex 脚本回放 JSONL）+ 7 条 ArchUnit 架构守卫
 
 **还没做**：邮件/推送通道与邮件里的「一键批准」入口、需求单本身与「需求 → 任务」的拆解链路、
-Bug 单的写操作（派发修复任务）、决策规则的维护界面、定时心跳的运维开关（当前只有配置文件一个入口）。
+Bug 单的标记已修复 / 验证关闭 / 不修复状态流转、决策规则的维护界面、
+定时心跳的运维开关（当前只有配置文件一个入口）。
 待办见 `ARCHITECTURE.md` 第十一节。
 
 任务可以由人直接录入（`POST /api/tasks`，来源 `MANUAL`），也可以由需求拆解而来（来源 `REQUIREMENT`，

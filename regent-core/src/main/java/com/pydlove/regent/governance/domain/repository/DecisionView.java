@@ -4,6 +4,7 @@ import com.pydlove.regent.governance.domain.model.DecisionStatus;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * 决策单读模型，列表与详情共用。
@@ -25,6 +26,7 @@ public record DecisionView(
         String matchedRuleName,
         String status,
         String question,
+        List<String> options,
         String recommendation,
         boolean reversible,
         String blastRadius,

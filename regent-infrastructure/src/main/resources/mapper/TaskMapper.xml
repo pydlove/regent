@@ -17,11 +17,20 @@
         started_at, finished_at, created_at, updated_at
     </sql>
 
+    <!-- 列表等级与等级筛选共用同一口径；没有决策的任务按 L0 处理。 -->
+    <sql id="effectiveLevel">
+        COALESCE((SELECT d.effective_level FROM decision d
+                   WHERE d.task_id = t.id ORDER BY d.id DESC LIMIT 1), 'L0')
+    </sql>
+
     <!-- keyword 已由仓储层转义通配符，这里直接按包含匹配。列名带 t. 前缀，供连表查询复用 -->
     <sql id="filters">
         t.deleted = 0
         <if test="status != null">
             AND t.status = #{status}
+        </if>
+        <if test="level != null">
+            AND <include refid="effectiveLevel"/> = #{level}
         </if>
         <if test="projectId != null">
             AND t.project_id = #{projectId}
@@ -43,17 +52,23 @@
       level 取该任务最新一条决策的仲裁等级 —— 用 ORDER BY id DESC 而不是 raised_at，
       因为 id 单调递增且没有并列，时间戳相同的情况下排序仍然稳定。
 
-      这两个子查询都是索引查（task_id / decision.task_id 都有索引），每页只有二十行，
+      三个子查询都是索引查（task_id / decision.task_id 都有索引），每页只有二十行，
       代价可控。真实数据量上来之后应改成冗余列或物化视图，届时再换，别提前优化。
+
+      execution_millis 汇总每次尝试的实际执行区间。任务续跑会另开 task_run，
+      两次记录之间的阻塞等待自然不计入；当前仍在执行的记录算到查询时刻。
     -->
     <select id="selectListPage" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskListRow">
         SELECT
             t.id, t.project_id, p.name AS project_name, t.source, t.title, t.status, t.priority,
-            (SELECT d.effective_level FROM decision d
-              WHERE d.task_id = t.id ORDER BY d.id DESC LIMIT 1) AS level,
+            <include refid="effectiveLevel"/> AS level,
             t.branch_name, t.blocking_decision_id, t.attempt_count,
             (SELECT COALESCE(SUM(r.token_input + r.token_cached_input + r.token_output), 0)
                FROM task_run r WHERE r.task_id = t.id) AS tokens,
+            (SELECT COALESCE(SUM(GREATEST(TIMESTAMPDIFF(
+                    MICROSECOND, r.started_at, COALESCE(r.finished_at, UTC_TIMESTAMP(3))
+                ), 0)), 0) DIV 1000
+               FROM task_run r WHERE r.task_id = t.id) AS execution_millis,
             t.started_at, t.finished_at, t.created_at, t.updated_at
         FROM task t
         JOIN project p ON p.id = t.project_id
@@ -76,13 +91,60 @@
     </select>
 
     <!--
-      可派发候选。两个来源合成一条查询（理由见 TaskRepository.findDispatchable 的注释）：
-        · PENDING：项目必须处于启用状态，暂停的项目不再开始新任务；
+      按自然日统计收场任务。时间列按约定存 UTC 字面量，所以切天要先把字面量平移
+      offsetMinutes 再取 DATE —— 否则东八区晚上 8 点之后完成的任务会算到第二天，
+      看板柱状图与列表里的「几分钟前」就对不上了。
+      范围条件按时区反推成 UTC 边界，不用 DATE() 直接比较，避免完成时间列失去索引。
+    -->
+    <select id="countCompletionPerDay"
+            resultType="com.pydlove.regent.execution.infrastructure.persistence.DailyCompletionRow">
+        SELECT DATE(DATE_ADD(t.finished_at, INTERVAL #{offsetMinutes} MINUTE)) AS day,
+               SUM(CASE WHEN t.status = 'DONE' THEN 1 ELSE 0 END)             AS done,
+               SUM(CASE WHEN t.status = 'FAILED' THEN 1 ELSE 0 END)           AS failed
+        FROM task t
+        WHERE t.deleted = 0
+          AND t.status IN ('DONE', 'FAILED')
+          AND t.finished_at >= #{from}
+          AND t.finished_at &lt; #{to}
+        GROUP BY day
+        ORDER BY day
+    </select>
+
+    <!--
+      可派发候选。三个来源合成一条查询（理由见 TaskRepository.findDispatchable 的注释）：
+        · PENDING / QUEUED：项目必须处于启用状态，暂停的项目不再开始新任务；
         · RUNNING 且最近一次执行记录停在 BLOCKED：决策已批准、会话还在，只差有人把它拉起来。
       这里刻意不过滤「本进程正在跑的任务」—— 那是进程内的状态，SQL 看不见也管不着，
       由调度器的 in-flight 集合拦。
-      列名全部带 t. 前缀：这是本文件里唯一一条连表查询，不加前缀会和 project 的 id 撞名。
+      连表查询里的列名全部带 t. 前缀，避免和 project 的 id 撞名。
     -->
+    <sql id="dispatchableWhere">
+        t.deleted = 0
+        AND (t.status IN ('PENDING', 'QUEUED')
+        OR (t.status = 'RUNNING'
+        AND t.codex_thread_id IS NOT NULL
+        AND (SELECT r.status FROM task_run r
+        WHERE r.task_id = t.id
+        ORDER BY r.attempt_no DESC LIMIT 1) = 'BLOCKED'))
+    </sql>
+
+    <sql id="dispatchableColumns">
+        t.id, t.project_id, t.requirement_id, t.bug_id, t.source, t.title, t.prompt,
+        t.status, t.priority, t.codex_thread_id, t.branch_name, t.blocking_decision_id,
+        t.attempt_count, t.started_at, t.finished_at, t.created_at, t.updated_at
+    </sql>
+
+    <!-- 只在一个项目里找候选：外部执行者按「地址 + 项目」找活时走这条 -->
+    <select id="selectDispatchableInProject" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskData">
+        SELECT <include refid="dispatchableColumns"/>
+        FROM task t
+                 JOIN project p ON p.id = t.project_id AND p.enabled = 1 AND p.deleted = 0
+        WHERE t.project_id = #{projectId}
+          AND <include refid="dispatchableWhere"/>
+        ORDER BY CASE WHEN t.status = 'QUEUED' THEN 0 ELSE 1 END, t.priority DESC, t.id ASC
+        LIMIT #{limit}
+    </select>
+
     <select id="selectDispatchable" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskData">
         SELECT
             t.id, t.project_id, t.requirement_id, t.bug_id, t.source, t.title, t.prompt,
@@ -91,12 +153,26 @@
         FROM task t
         JOIN project p ON p.id = t.project_id AND p.enabled = 1 AND p.deleted = 0
         WHERE t.deleted = 0
-          AND (t.status = 'PENDING'
+          AND (t.status IN ('PENDING', 'QUEUED')
                OR (t.status = 'RUNNING'
                    AND t.codex_thread_id IS NOT NULL
                    AND (SELECT r.status FROM task_run r
                          WHERE r.task_id = t.id
                          ORDER BY r.attempt_no DESC LIMIT 1) = 'BLOCKED'))
+        ORDER BY CASE WHEN t.status = 'QUEUED' THEN 0 ELSE 1 END, t.priority DESC, t.id ASC
+        LIMIT #{limit}
+    </select>
+
+    <!--
+      用户明确点过「派发」但当时没有执行位的任务。
+      它与普通 PENDING 分开取，避免执行位一释放就绕过自动派发开关启动未排队的任务。
+    -->
+    <select id="selectQueued" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskData">
+        SELECT <include refid="dispatchableColumns"/>
+        FROM task t
+        JOIN project p ON p.id = t.project_id AND p.enabled = 1 AND p.deleted = 0
+        WHERE t.deleted = 0
+          AND t.status = 'QUEUED'
         ORDER BY t.priority DESC, t.id ASC
         LIMIT #{limit}
     </select>
@@ -110,8 +186,8 @@
                 #{startedAt}, #{finishedAt}, #{createdAt}, #{updatedAt})
     </insert>
 
-    <!-- 只更新会随状态机改变的列。project_id / requirement_id / source / title / prompt 是
-         任务的「出身」，创建后不该再变，故意不放进 UPDATE 语句。 -->
+    <!-- 只更新会随状态机改变的列。project_id / requirement_id / source 是任务的「出身」，
+         标题与指令只允许走 updateEditable，避免状态迁移顺手改写任务内容。 -->
     <update id="update">
         UPDATE task
         SET status = #{status},
@@ -124,6 +200,34 @@
             finished_at = #{finishedAt},
             updated_at = #{updatedAt}
         WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <!--
+      编辑只改内容，不碰状态与执行字段；SQL 再次排除 DONE，挡住
+      “读取时未完成、写入前已完成”的并发窗口。
+    -->
+    <update id="updateEditable">
+        UPDATE task
+        SET title = #{title},
+            prompt = #{prompt},
+            priority = #{priority},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+          AND deleted = 0
+          AND status &lt;&gt; 'DONE'
+    </update>
+
+    <!--
+      逻辑删除只覆盖待执行或排队中的任务，并在 SQL 里再次检查 status：
+      SELECT 之后、UPDATE 之前，调度器可能已经并发把任务派发成 RUNNING。
+    -->
+    <update id="softDelete">
+        UPDATE task
+        SET deleted = 1,
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+          AND deleted = 0
+          AND status IN ('PENDING', 'QUEUED')
     </update>
 
 </mapper>

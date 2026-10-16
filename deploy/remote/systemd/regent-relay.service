@@ -1,0 +1,19 @@
+[Unit]
+Description=Regent 公网中继
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/app/regent-relay/relay
+EnvironmentFile=-/root/app/regent-relay/relay/relay.env
+ExecStart=/usr/bin/java -Xms64m -Xmx256m -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8 -jar /root/app/regent-relay/relay/regent-relay.jar server
+SuccessExitStatus=143
+ExecStop=/bin/kill -15 $MAINPID
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

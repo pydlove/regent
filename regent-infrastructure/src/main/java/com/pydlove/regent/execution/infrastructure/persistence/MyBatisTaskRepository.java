@@ -3,9 +3,14 @@ package com.pydlove.regent.execution.infrastructure.persistence;
 import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
+import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.shared.domain.DomainException;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 
@@ -38,6 +43,28 @@ public class MyBatisTaskRepository implements TaskRepository {
     }
 
     @Override
+    public List<Task> findQueued(int limit) {
+        return taskMapper.selectQueued(limit).stream()
+                .map(TaskDataMapper::toDomain)
+                .toList();
+    }
+
+    @Override
+    public List<Task> findDispatchableInProject(ProjectId projectId, int limit) {
+        return taskMapper.selectDispatchableInProject(projectId.value(), limit).stream()
+                .map(TaskDataMapper::toDomain)
+                .toList();
+    }
+
+    @Override
+    public void delete(TaskId id) {
+        int affected = taskMapper.softDelete(id.value(), now());
+        if (affected == 0) {
+            throw new DomainException("任务删除失败，状态可能已经变化：" + id);
+        }
+    }
+
+    @Override
     public void save(Task task) {
         TaskData data = TaskDataMapper.toData(task);
         if (task.getId() == null) {
@@ -51,5 +78,20 @@ public class MyBatisTaskRepository implements TaskRepository {
         if (affected == 0) {
             throw new DomainException("任务未更新，可能已被删除：" + task.getId());
         }
+    }
+
+    @Override
+    public void updateEditable(Task task) {
+        int affected = taskMapper.updateEditable(TaskDataMapper.toData(task));
+        if (affected == 0) {
+            throw new DomainException("任务内容未更新，任务可能已完成或已被删除：" + task.getId());
+        }
+    }
+
+    /** 数据库按约定存 UTC 字面量，删除时间同样显式转换，不交给 JDBC 或 MySQL 会话时区。 */
+    private static LocalDateTime now() {
+        return LocalDateTime.ofInstant(
+                Instant.now().truncatedTo(ChronoUnit.MILLIS),
+                ZoneOffset.UTC);
     }
 }

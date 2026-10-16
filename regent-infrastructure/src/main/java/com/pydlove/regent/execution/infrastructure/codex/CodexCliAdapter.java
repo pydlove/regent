@@ -91,6 +91,7 @@ public class CodexCliAdapter implements AgentExecutor {
 
         ProcessBuilder builder = new ProcessBuilder(commandLine(request, outputFile));
         builder.directory(Path.of(request.projectPath()).toFile());
+        builder.environment().putAll(request.environmentVariables());
         builder.redirectError(errorFile.toFile());
         builder.redirectInput(promptFile.toFile());
 
@@ -120,7 +121,7 @@ public class CodexCliAdapter implements AgentExecutor {
             log.warn("codex 执行超时，已终止进程：项目={} 会话={}", request.projectId(), summary.threadId());
             return new ExecResult(RunStatus.TIMEOUT, null, summary.threadId(), summary.tokens(),
                     "执行超过 " + request.timeout() + " 未结束，已终止进程", readQuietly(outputFile),
-                    false, List.of(), null);
+                    false, List.of(), List.of(), null);
         }
         joinQuietly(pump);
         drain(listener, summary);

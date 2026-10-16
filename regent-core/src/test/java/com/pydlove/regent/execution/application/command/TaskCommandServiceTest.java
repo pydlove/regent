@@ -1,6 +1,7 @@
 package com.pydlove.regent.execution.application.command;
 
 import com.pydlove.regent.execution.domain.model.Task;
+import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskSource;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.project.domain.model.ProjectId;
@@ -11,8 +12,11 @@ import com.pydlove.regent.support.ExecutionFakes;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -102,5 +106,85 @@ class TaskCommandServiceTest {
         Task task = service.createManual(new CreateTaskCommand(ProjectId.of(3L), "把任务列表导出成 CSV", 0));
 
         assertEquals(TaskStatus.PENDING, task.getStatus());
+    }
+
+    @Test
+    @DisplayName("编辑任务会重推标题并更新指令与优先级")
+    void editsTaskContent() {
+        Task task = create("原来的指令");
+
+        Task edited = service.edit(new EditTaskCommand(
+                task.getId(), "## 新的首行\n新的完整指令", 6));
+
+        assertEquals("新的首行", edited.getTitle());
+        assertEquals("## 新的首行\n新的完整指令", edited.getPrompt());
+        assertEquals(6, edited.getPriority());
+        assertEquals(1, tasks.editableUpdates);
+    }
+
+    @Test
+    @DisplayName("已完成的任务不能编辑，也不写回仓储")
+    void rejectsEditingDoneTask() {
+        Task task = create("已经完成的任务");
+        task.dispatch("codex/task-1");
+        task.complete();
+
+        assertThrows(DomainException.class,
+                () -> service.edit(new EditTaskCommand(task.getId(), "新的指令", 1)));
+
+        assertEquals(0, tasks.editableUpdates);
+        assertEquals("已经完成的任务", tasks.get(task.getId().value()).getTitle());
+    }
+
+    @Test
+    @DisplayName("已终止任务可以重新执行并写回仓储")
+    void retriesCancelledTask() {
+        Task task = create("终止后需要重新执行");
+        task.cancel();
+
+        Task retried = service.retry(task.getId());
+
+        assertEquals(TaskStatus.PENDING, retried.getStatus());
+        assertEquals(TaskStatus.PENDING, tasks.get(task.getId().value()).getStatus());
+    }
+
+    @Test
+    @DisplayName("待执行任务可以删除并从仓储移除")
+    void deletesPendingTask() {
+        Task task = create("删除这个还没跑的任务");
+
+        service.delete(task.getId());
+
+        assertNull(tasks.get(task.getId().value()));
+        assertEquals(List.of(task.getId()), tasks.deleted);
+    }
+
+    @Test
+    @DisplayName("执行中任务不能删除")
+    void rejectsDeletingStartedTask() {
+        Task task = create("已经派发的任务");
+        task.dispatch("codex/task-1");
+
+        assertThrows(DomainException.class, () -> service.delete(task.getId()));
+        assertEquals(0, tasks.deleted.size());
+        assertEquals(task, tasks.get(task.getId().value()));
+    }
+
+    @Test
+    @DisplayName("批量删除去重，待执行项成功，不可删项逐项返回")
+    void deletesBatchWithPartialFailure() {
+        Task pending = create("待执行任务");
+        Task running = create("执行中任务");
+        running.dispatch("codex/task-2");
+        TaskId missing = TaskId.of(999L);
+
+        TaskDeleteBatchResult result = service.deleteBatch(
+                List.of(pending.getId(), running.getId(), pending.getId(), missing));
+
+        assertEquals(List.of(pending.getId()), result.deletedTaskIds());
+        assertEquals(List.of(running.getId(), missing),
+                result.failures().stream().map(TaskDeleteBatchResult.Failure::taskId).toList());
+        assertNull(tasks.get(pending.getId().value()));
+        assertEquals(running, tasks.get(running.getId().value()));
     }
 }

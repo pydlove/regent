@@ -9,7 +9,7 @@ import {
   Settings,
   Trash2,
 } from '@lucide/vue'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import BugSeverityBadge from '@/components/business/BugSeverityBadge.vue'
 import BugStatusBadge from '@/components/business/BugStatusBadge.vue'
@@ -43,6 +43,7 @@ import Table from '@/components/ui/table/Table.vue'
 import type { TableColumn } from '@/components/ui/table/table.types'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
 import { useToast } from '@/composables/useToast'
+import type { TaskStatus } from '@/types/task'
 import BaselineSection from '@/views/BaselineSection.vue'
 import FontProbe from '@/views/FontProbe.vue'
 
@@ -83,21 +84,86 @@ const projects = [
 ]
 
 const tableColumns: TableColumn[] = [
-  { key: 'id', label: '#', width: '56px' },
+  { key: 'selection', label: '', width: '36px' },
+  { key: 'id', label: '#', width: '52px' },
   { key: 'requirement', label: '需求' },
-  { key: 'level', label: '等级', width: '140px' },
-  { key: 'status', label: '状态', width: '96px' },
-  { key: 'tokens', label: 'Token', align: 'right', width: '88px' },
+  { key: 'level', label: '等级', width: '92px' },
+  { key: 'status', label: '状态', width: '92px' },
+  { key: 'duration', label: '耗时', align: 'right', width: '72px' },
+  { key: 'tokens', label: 'Token', align: 'right', width: '78px' },
+  { key: 'actions', label: '', align: 'right', width: '40px' },
 ]
 
-const tableRows = [
-  { id: 1024, requirement: '给 app_audit 增加导出功能', level: 'L0', status: '已完成', tokens: 12840 },
-  { id: 1025, requirement: '修正登录页空指针', level: 'L1', status: '执行中', tokens: 4310 },
-  { id: 1026, requirement: '调整 deploy 目录下的发布脚本', level: 'L3', status: '待批准', tokens: 980 },
-  { id: 1027, requirement: '给订单表增加字段', level: 'L2', status: '待批准', tokens: 2210 },
+type BaselineTableRow = {
+  id: number
+  requirement: string
+  level: 'L0' | 'L1' | 'L2' | 'L3'
+  status: TaskStatus
+  duration: string
+  tokens: number
+}
+
+const tableRows: BaselineTableRow[] = [
+  {
+    id: 1024,
+    requirement: '给 app_audit 增加导出功能',
+    level: 'L0',
+    status: 'DONE',
+    duration: '2m 14s',
+    tokens: 12840,
+  },
+  {
+    id: 1025,
+    requirement: '修正登录页空指针',
+    level: 'L1',
+    status: 'RUNNING',
+    duration: '00:48',
+    tokens: 4310,
+  },
+  {
+    id: 1026,
+    requirement: '调整 deploy 目录下的发布脚本，并同步更新服务器上的 systemd 单元',
+    level: 'L3',
+    status: 'BLOCKED',
+    duration: '—',
+    tokens: 980,
+  },
+  {
+    id: 1027,
+    requirement: '给订单表增加字段',
+    level: 'L2',
+    status: 'BLOCKED',
+    duration: '—',
+    tokens: 2210,
+  },
+  {
+    id: 1028,
+    requirement: '修复附件上传后偶发丢帧',
+    level: 'L1',
+    status: 'FAILED',
+    duration: '12s',
+    tokens: 6104,
+  },
 ]
 
 const selectedRow = ref<string | number | null>(1025)
+const checkedTableRows = ref<number[]>([1025])
+const tableSelectionState = computed<boolean | 'indeterminate'>(() => {
+  if (checkedTableRows.value.length === 0) return false
+  if (checkedTableRows.value.length === tableRows.length) return true
+  return 'indeterminate'
+})
+
+const setTableRowChecked = (id: number, checked: boolean) => {
+  checkedTableRows.value = checked
+    ? [...new Set([...checkedTableRows.value, id])]
+    : checkedTableRows.value.filter((rowId) => rowId !== id)
+}
+
+const toggleAllTableRows = (checked: boolean) => {
+  checkedTableRows.value = checked ? tableRows.map((row) => row.id) : []
+}
+
 const dialogOpen = ref(false)
 const rejectReason = ref('')
 
@@ -367,23 +433,91 @@ const colorTokens = [
 
       <BaselineSection
         title="表格"
-        hint="28px 行高、无斑马纹；选中是实心强调色 + 白字，行内色点同时转白"
+        hint="28px 行高、无斑马纹；表头吸顶、数字右对齐，选中态必须压住行内颜色"
       >
-        <Table
-          :columns="tableColumns"
-          :rows="tableRows"
-          :selected-id="selectedRow"
-          @select="selectedRow = $event.id as number"
-        >
-          <template #cell="{ row, column }">
-            <template v-if="column.key === 'level'">
-              <DecisionLevelBadge :level="row.level as 'L0'" />
+        <div class="scroll-area overflow-x-auto">
+          <Table
+            class="min-w-[760px]"
+            :columns="tableColumns"
+            :rows="tableRows"
+            :selected-id="selectedRow"
+            @select="selectedRow = $event.id as number"
+          >
+            <template #header="{ column }">
+              <Checkbox
+                v-if="column.key === 'selection'"
+                :model-value="tableSelectionState"
+                aria-label="选择全部任务"
+                @update:model-value="toggleAllTableRows($event === true)"
+              />
+              <span v-else>{{ column.label }}</span>
             </template>
-            <template v-else-if="column.key === 'status'">
-              <span class="text-label-secondary">{{ row.status }}</span>
+
+            <template #cell="{ row, column }">
+              <div
+                v-if="column.key === 'selection'"
+                class="flex items-center"
+                @click.stop
+              >
+                <Checkbox
+                  :model-value="checkedTableRows.includes(row.id)"
+                  :aria-label="`选择任务 #${row.id}`"
+                  @update:model-value="setTableRowChecked(row.id, $event === true)"
+                />
+              </div>
+              <span
+                v-else-if="column.key === 'id'"
+                class="tnum text-label-tertiary group-data-[selected=true]:text-white"
+              >
+                {{ row.id }}
+              </span>
+              <span
+                v-else-if="column.key === 'requirement'"
+                class="font-emphasis group-data-[selected=true]:text-white"
+              >
+                {{ row.requirement }}
+              </span>
+              <DecisionLevelBadge v-else-if="column.key === 'level'" :level="row.level" />
+              <TaskStatusBadge v-else-if="column.key === 'status'" :status="row.status" />
+              <span
+                v-else-if="column.key === 'duration'"
+                class="tnum text-label-secondary group-data-[selected=true]:text-white"
+              >
+                {{ row.duration }}
+              </span>
+              <span
+                v-else-if="column.key === 'tokens'"
+                class="tnum text-label-secondary group-data-[selected=true]:text-white"
+              >
+                {{ row.tokens.toLocaleString('en-US') }}
+              </span>
+              <div
+                v-else-if="column.key === 'actions'"
+                class="flex justify-end"
+                @click.stop
+              >
+                <Tooltip content="更多操作">
+                  <IconButton label="更多操作" size="sm" variant="default">
+                    <Icon :as="MoreHorizontal" size="inline" />
+                  </IconButton>
+                </Tooltip>
+              </div>
             </template>
-          </template>
-        </Table>
+          </Table>
+        </div>
+
+        <p class="mt-4 text-caption text-label-tertiary">
+          行点击切换选中态，复选框只演示键盘可达的真实控件。表头吸顶由调用方的滚动容器负责；
+          长文本单行截断，完整内容应放在右侧检查器或详情弹框中。
+        </p>
+
+        <div class="mt-6 border-t border-separator pt-5">
+          <div class="mb-3 flex items-baseline gap-2">
+            <h3 class="text-body font-emphasis text-label">空表</h3>
+            <p class="text-caption text-label-tertiary">表头保留，空态只出现一次</p>
+          </div>
+          <Table :columns="tableColumns" :rows="[]" />
+        </div>
       </BaselineSection>
 
       <BaselineSection
@@ -581,6 +715,7 @@ const colorTokens = [
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <TaskStatusBadge status="PENDING" />
+            <TaskStatusBadge status="QUEUED" />
             <TaskStatusBadge status="RUNNING" />
             <TaskStatusBadge status="BLOCKED" />
             <TaskStatusBadge status="DONE" />

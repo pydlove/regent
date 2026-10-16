@@ -2,6 +2,7 @@ package com.pydlove.regent.execution.infrastructure.persistence;
 
 import com.pydlove.regent.execution.domain.model.TaskSource;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
+import com.pydlove.regent.execution.domain.repository.DailyCompletionCount;
 import com.pydlove.regent.execution.domain.repository.TaskListItem;
 import com.pydlove.regent.execution.domain.repository.TaskListItemPage;
 import com.pydlove.regent.execution.domain.repository.TaskQuery;
@@ -11,6 +12,7 @@ import com.pydlove.regent.shared.kernel.DecisionLevel;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.EnumMap;
@@ -30,14 +32,15 @@ public class MyBatisTaskQueryRepository implements TaskQueryRepository {
     @Override
     public TaskListItemPage findPage(TaskQuery query) {
         String status = query.status() == null ? null : query.status().name();
+        String level = query.level() == null ? null : query.level().name();
         Long projectId = query.projectId() == null ? null : query.projectId().value();
         String keyword = escapeLike(query.keyword());
-        long total = taskMapper.countListBy(status, projectId, keyword);
+        long total = taskMapper.countListBy(status, level, projectId, keyword);
         if (total == 0) {
             return new TaskListItemPage(List.of(), 0, query.page(), query.size());
         }
         List<TaskListItem> items = taskMapper
-                .selectListPage(status, projectId, keyword, query.size(), query.offset())
+                .selectListPage(status, level, projectId, keyword, query.size(), query.offset())
                 .stream()
                 .map(MyBatisTaskQueryRepository::toItem)
                 .toList();
@@ -54,6 +57,16 @@ public class MyBatisTaskQueryRepository implements TaskQueryRepository {
         return counts;
     }
 
+    @Override
+    public List<DailyCompletionCount> countCompletionPerDay(LocalDate from, LocalDate to, ZoneOffset offset) {
+        // 领域侧给的是「用户时区的自然日」，仓储负责换算成 UTC 字面量：库里存的始终是 UTC
+        LocalDateTime fromUtc = from.atStartOfDay().toInstant(offset).atZone(ZoneOffset.UTC).toLocalDateTime();
+        LocalDateTime toUtc = to.plusDays(1).atStartOfDay().toInstant(offset).atZone(ZoneOffset.UTC).toLocalDateTime();
+        return taskMapper.countCompletionPerDay(fromUtc, toUtc, offset.getTotalSeconds() / 60).stream()
+                .map(row -> new DailyCompletionCount(row.getDay(), row.getDone(), row.getFailed()))
+                .toList();
+    }
+
     private static TaskListItem toItem(TaskListRow row) {
         return new TaskListItem(
                 row.getId(),
@@ -68,6 +81,7 @@ public class MyBatisTaskQueryRepository implements TaskQueryRepository {
                 row.getBlockingDecisionId() == null ? null : DecisionId.of(row.getBlockingDecisionId()),
                 row.getAttemptCount(),
                 row.getTokens() == null ? 0L : row.getTokens(),
+                row.getExecutionMillis() == null ? 0L : row.getExecutionMillis(),
                 fromDb(row.getStartedAt()),
                 fromDb(row.getFinishedAt()),
                 fromDb(row.getCreatedAt()),

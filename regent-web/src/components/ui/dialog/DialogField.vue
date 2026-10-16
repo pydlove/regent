@@ -13,12 +13,16 @@ defineProps<{
   label: string
   /** 控件下方的说明。它跟着控件走，不跟着标签走 —— 标签列只有 56px，塞不下整句话 */
   hint?: string
+  /** 必填只做视觉提示，真正能不能提交仍由表单守卫决定。 */
+  required?: boolean
 }>()
 </script>
 
 <template>
   <div class="flex gap-3">
-    <span class="w-14 shrink-0 pt-1 text-right text-body text-label">{{ label }}</span>
+    <span class="w-14 shrink-0 pt-1 text-right text-body text-label">
+      {{ label }}<span v-if="required" class="ml-0.5 text-danger" aria-hidden="true">*</span>
+    </span>
     <div class="min-w-0 flex-1">
       <slot />
       <p v-if="hint" class="mt-1 text-caption text-label-tertiary">{{ hint }}</p>

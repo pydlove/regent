@@ -1,0 +1,35 @@
+import { get, post, postJson } from '@/api/http'
+import type { Bug, BugSeverity } from '@/types/bug'
+import type { PageResponse } from '@/types/api'
+
+export type BugScope = 'ALL' | 'OPEN' | 'RESOLVED'
+
+export type BugListParams = {
+  severity?: BugSeverity | 'ALL'
+  scope?: BugScope
+  keyword?: string
+  page?: number
+  size?: number
+}
+
+export const listBugs = (params: BugListParams = {}) =>
+  get<PageResponse<Bug>>('/bugs', {
+    severity: params.severity === 'ALL' ? undefined : params.severity,
+    scope: params.scope,
+    keyword: params.keyword,
+    page: params.page,
+    size: params.size,
+  })
+
+export type CreateBugInput = {
+  projectId: number
+  title: string
+  severity: BugSeverity
+  reproduction?: string
+  filePath?: string
+  detail?: string
+}
+
+export const createBug = (input: CreateBugInput) => postJson<Bug>('/bugs', input)
+
+export const requestBugFix = (bugId: number) => post<Bug>(`/bugs/${bugId}/fix-task`)

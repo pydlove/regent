@@ -1,31 +1,38 @@
 <script setup lang="ts">
-import { ShieldCheck, Wrench } from '@lucide/vue'
-import { computed, ref } from 'vue'
+import { ChevronLeft, ImagePlus, Plus, ShieldCheck, Wrench } from '@lucide/vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
+import { ACCEPTED_IMAGE_TYPES, listBugAttachments, uploadBugAttachment } from '@/api/attachments'
+import { ApiError } from '@/api/http'
+import BugCreateDialog from '@/components/business/BugCreateDialog.vue'
 import BugSeverityBadge from '@/components/business/BugSeverityBadge.vue'
 import BugStatusBadge from '@/components/business/BugStatusBadge.vue'
+import ImageAttachmentGrid from '@/components/business/ImageAttachmentGrid.vue'
+import ImageAttachmentsDialog from '@/components/business/ImageAttachmentsDialog.vue'
 import Button from '@/components/ui/button/Button.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
+import IconButton from '@/components/ui/icon-button/IconButton.vue'
 import Input from '@/components/ui/input/Input.vue'
 import Pagination from '@/components/ui/pagination/Pagination.vue'
 import Textarea from '@/components/ui/input/Textarea.vue'
 import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
 import Table from '@/components/ui/table/Table.vue'
 import type { TableColumn } from '@/components/ui/table/table.types'
-import { usePagination } from '@/composables/usePagination'
+import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
 import { useToast } from '@/composables/useToast'
 import { useBugStore } from '@/stores/useBugStore'
+import type { BugAttachment, ImageAttachment } from '@/types/api'
 import {
   canMarkFixed,
   canRequestFix,
   canVerify,
   canWontFix,
-  isResolved,
   type BugSeverity,
   type BugStatus,
 } from '@/types/bug'
+import { formatRelative } from '@/utils/format'
 
 /*
  * 缺陷单。列表按严重级排，同级新的在前 —— 缺陷不像任务有先后关系，
@@ -40,72 +47,110 @@ const columns: TableColumn[] = [
   { key: 'title', label: '缺陷' },
   { key: 'severity', label: '严重级', width: '88px' },
   { key: 'status', label: '状态', width: '96px' },
-  { key: 'source', label: '来源任务', width: '104px' },
-  { key: 'reportedAt', label: '发现时间', align: 'right', width: '88px' },
+  { key: 'source', label: '来源', width: '104px', hideBelow: 'md' },
+  { key: 'foundAt', label: '发现时间', align: 'right', width: '88px', hideBelow: 'md' },
 ]
 
-// 严重级排序权重。用数组下标而不是另建一张映射表：顺序就是权重，改顺序即改优先级
-const severityRank: BugSeverity[] = ['BLOCKER', 'MAJOR', 'MINOR', 'TRIVIAL']
-
-const scope = ref('open')
 const scopeOptions = [
-  { value: 'all', label: '全部' },
-  { value: 'open', label: '未解决' },
-  { value: 'closed', label: '已解决' },
+  { value: 'ALL', label: '全部' },
+  { value: 'OPEN', label: '未解决' },
+  { value: 'RESOLVED', label: '已解决' },
 ]
 
-const keyword = ref('')
-
-const visible = computed(() =>
-  [...bugStore.bugs]
-    .filter((bug) => {
-      if (scope.value === 'open') return !isResolved(bug.status)
-      if (scope.value === 'closed') return isResolved(bug.status)
-      return true
-    })
-    .filter((bug) => keyword.value === '' || bug.title.includes(keyword.value))
-    .sort(
-      (a, b) =>
-        severityRank.indexOf(a.severity) - severityRank.indexOf(b.severity) || b.id - a.id,
-    ),
-)
-
-const { page, pageSize, total, items } = usePagination(visible, {
-  pageSize: 20,
-  resetOn: [scope, keyword],
-})
-
-const selectedId = ref<number | null>(302)
+const selectedId = ref<number | null>(null)
 const selected = computed(() => bugStore.bugs.find((b) => b.id === selectedId.value) ?? null)
 
-// 任务标题要另一个上下文的数据，等后端提供「按 id 批量取任务摘要」之后再补。
-// 先只显示单号：显示一个猜出来的标题比显示空更糟 —— 那会让人以为关联关系是对的。
-const taskLabel = (id: number) => `#${id}`
+const attachments = ref<BugAttachment[]>([])
+const attachmentError = ref<string | null>(null)
+const attaching = ref(false)
+const requestingFix = ref(false)
+const attachInput = ref<HTMLInputElement | null>(null)
+const viewerOpen = ref(false)
+const viewerId = ref<number | null>(null)
 
-/*
- * 派发修复任务要同时改 Bug 与 Task 两个聚合，按 AGENTS.md 的约束这属于应用服务的编排：
- * 后端要在一个事务里「新建任务 → 派发 → 回填 bug.fix_task_id」。这条链路还没实现，
- * 所以这里只提示，不做本地假编排 —— 本地改两个 store 的字段看起来能跑，
- * 但刷新就回到原样，而且缺陷单会指向一个数据库里不存在的任务号。
- */
-const requestFix = () => {
+const taskLabel = (id: number | null) => (id === null ? '人工录入' : `#${id}`)
+
+function messageOf(error: unknown): string {
+  if (error instanceof ApiError) return error.message
+  return '无法连接后端，请确认服务已启动（默认 127.0.0.1:8787）'
+}
+
+const loadAttachments = async (id: number) => {
+  attachmentError.value = null
+  try {
+    attachments.value = await listBugAttachments(id)
+  } catch (error) {
+    attachments.value = []
+    attachmentError.value = messageOf(error)
+  }
+}
+
+watch(selectedId, (id) => {
+  attachments.value = []
+  attachmentError.value = null
+  viewerOpen.value = false
+  viewerId.value = null
+  if (id !== null) void loadAttachments(id)
+})
+
+const openViewer = (attachment: ImageAttachment) => {
+  viewerId.value = attachment.id
+  viewerOpen.value = true
+}
+
+const attachFiles = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  input.value = ''
+  const bugId = selectedId.value
+  if (bugId === null || files.length === 0) return
+
+  attaching.value = true
+  attachmentError.value = null
+  let uploaded = 0
+  try {
+    for (const file of files) {
+      await uploadBugAttachment(bugId, file)
+      uploaded++
+    }
+    await loadAttachments(bugId)
+    toast.success(`${uploaded} 张图片已附上`, `Bug #${bugId} 的复现证据已保存`)
+  } catch (error) {
+    if (uploaded > 0) await loadAttachments(bugId)
+    attachmentError.value = messageOf(error)
+  } finally {
+    attaching.value = false
+  }
+}
+
+const requestFix = async () => {
   const bug = selected.value
-  if (!bug) return
-  toast.warning('派发修复任务尚未接入', '后端就绪后会新建任务、派发并把任务号回填到缺陷单')
+  if (!bug || requestingFix.value) return
+
+  requestingFix.value = true
+  try {
+    const updated = await bugStore.requestFix(bug.id)
+    toast.success(
+      `修复任务 #${updated.fixTaskId} 已派发`,
+      '执行位够就立即起跑，否则先按顺序排队',
+    )
+  } catch (error) {
+    toast.warning(`Bug #${bug.id} 派发修复任务被拒绝`, messageOf(error))
+  } finally {
+    requestingFix.value = false
+  }
 }
 
 const markFixed = () => {
   const bug = selected.value
   if (!bug) return
-  bugStore.markFixed(bug.id)
-  toast.show(`#${bug.id} 已标记为待验证`, { description: '修复任务跑完不等于问题没了，还要人验一遍' })
+  toast.warning('缺陷状态流转尚未接入', '后端接口就绪后才会改变状态，当前不伪造成功')
 }
 
 const verify = () => {
   const bug = selected.value
   if (!bug) return
-  bugStore.verify(bug.id)
-  toast.success(`#${bug.id} 已关闭`, '验证通过，缺陷单归档')
+  toast.warning('缺陷状态流转尚未接入', '后端接口就绪后才会改变状态，当前不伪造成功')
 }
 
 const wontFixOpen = ref(false)
@@ -121,9 +166,8 @@ const openWontFix = () => {
 const confirmWontFix = () => {
   const bug = selected.value
   if (!bug || !canWontFixConfirm.value) return
-  bugStore.wontFix(bug.id, wontFixReason.value.trim())
   wontFixOpen.value = false
-  toast.show(`#${bug.id} 已标记为不修复`, { description: '理由留在缺陷单上，将来有人翻到能看见为什么' })
+  toast.warning('缺陷状态流转尚未接入', '理由没有保存，刷新后会回到库里的真实状态')
 }
 
 // 列表里已经有严重级和状态两列，详情面板不再重复一遍大标题，只补上下文
@@ -134,26 +178,41 @@ const context: Record<BugStatus, string> = {
   CLOSED: '已验证关闭。',
   WONTFIX: '已判定不修。',
 }
+
+const createOpen = ref(false)
+
+onMounted(() => {
+  void bugStore.load()
+  void bugStore.loadOpenCount()
+})
 </script>
 
 <template>
   <div class="flex h-full min-h-0">
     <div class="flex min-w-0 flex-1 flex-col">
-      <div class="flex h-toolbar shrink-0 items-center gap-3 border-b border-separator px-5">
+      <div
+        class="flex min-h-toolbar shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-separator px-3 py-1.5 lg:h-toolbar lg:flex-nowrap lg:px-5 lg:py-0"
+      >
         <h1 class="text-body font-emphasis text-label">Bug 单</h1>
         <span class="tnum text-body text-label-tertiary">
-          {{ bugStore.openBugs.length }} 条未解决
+          {{ bugStore.openTotal }} 条未解决
         </span>
-        <SegmentedControl v-model="scope" :items="scopeOptions" size="lg" class="ml-2" />
-        <div class="ml-auto flex items-center gap-2">
-          <Input v-model="keyword" placeholder="搜索" size="lg" class="w-52" />
+        <SegmentedControl v-model="bugStore.scope" :items="scopeOptions" size="lg" class="lg:ml-2" />
+        <div class="ml-auto flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto">
+          <Input v-model="bugStore.keyword" placeholder="搜索" size="lg" class="w-full sm:w-52" />
+          <Button variant="primary" size="lg" @click="createOpen = true">
+            <Icon :as="Plus" size="inline" />录入 Bug
+          </Button>
         </div>
       </div>
 
       <div class="scroll-area min-h-0 flex-1 overflow-auto">
+        <p v-if="bugStore.error" class="border-b border-separator px-5 py-2 text-caption text-danger">
+          {{ bugStore.error }}
+        </p>
         <Table
           :columns="columns"
-          :rows="items"
+          :rows="bugStore.bugs"
           :selected-id="selectedId"
           :show-empty="false"
           @select="selectedId = $event.id as number"
@@ -164,29 +223,56 @@ const context: Record<BugStatus, string> = {
               :severity="row.severity as BugSeverity"
             />
             <BugStatusBadge v-else-if="column.key === 'status'" :status="row.status as BugStatus" />
-            <span v-else-if="column.key === 'source'" class="tnum text-label-tertiary">
-              #{{ row.sourceTaskId }}
+            <span
+              v-else-if="column.key === 'source'"
+              class="tnum text-label-tertiary group-data-[selected=true]:text-white"
+            >
+              {{ taskLabel(row.sourceTaskId) }}
             </span>
-            <span v-else-if="column.key === 'reportedAt'" class="tnum text-label-tertiary">
-              {{ row.reportedAt }}
+            <span
+              v-else-if="column.key === 'foundAt'"
+              class="tnum text-label-tertiary group-data-[selected=true]:text-white"
+            >
+              {{ formatRelative(row.foundAt) }}
             </span>
           </template>
         </Table>
 
         <EmptyState
-          v-if="total === 0"
+          v-if="bugStore.total === 0"
           title="没有匹配的缺陷"
           :description="
-            scope === 'open' ? '执行过程中报出的问题会自动落成 Bug 单' : '处理过的缺陷会留在这'
+            bugStore.scope === 'OPEN'
+              ? '人工录入或执行过程中报出的问题会进入这里'
+              : '处理过的缺陷会留在这'
           "
         />
       </div>
 
-      <Pagination v-model:page="page" v-model:page-size="pageSize" :total="total" />
+      <Pagination
+        v-model:page="bugStore.page"
+        v-model:page-size="bugStore.pageSize"
+        :total="bugStore.total"
+      />
     </div>
 
-    <aside class="w-72 shrink-0 overflow-y-auto border-l border-separator bg-window p-4">
+    <!-- 与任务页同一套：桌面右栏，手机整屏覆盖层（390px 放不下并排两栏） -->
+    <aside
+      :class="[
+        'bg-window',
+        selected
+          ? 'fixed inset-0 z-40 w-full overflow-y-auto border-separator p-4 lg:static lg:inset-auto lg:z-auto lg:w-72 lg:shrink-0 lg:border-l'
+          : 'hidden lg:block lg:w-72 lg:shrink-0 lg:overflow-y-auto lg:border-l lg:border-separator lg:p-4',
+      ]"
+    >
       <template v-if="selected">
+        <button
+          type="button"
+          class="mb-3 inline-flex items-center gap-0.5 text-caption text-accent lg:hidden"
+          @click="selectedId = null"
+        >
+          <Icon :as="ChevronLeft" size="inline" />返回列表
+        </button>
         <div class="flex items-center gap-2">
           <span class="tnum text-caption text-label-tertiary">#{{ selected.id }}</span>
           <BugSeverityBadge :severity="selected.severity" />
@@ -198,7 +284,62 @@ const context: Record<BugStatus, string> = {
         <div class="mt-4 rounded-panel border border-separator-soft bg-content p-2.5">
           <p class="text-caption font-emphasis text-label-secondary">复现步骤</p>
           <p class="mt-1 whitespace-pre-line text-caption text-label">
-            {{ selected.reproduction }}
+            {{ selected.reproduction || '未填写' }}
+          </p>
+        </div>
+
+        <div class="mt-4 border-t border-separator pt-3">
+          <div class="flex items-center gap-2">
+            <p class="text-caption font-emphasis text-label-secondary">图片</p>
+            <span v-if="attachments.length > 0" class="tnum text-caption text-label-tertiary">
+              {{ attachments.length }}
+            </span>
+            <Tooltip content="加一张图">
+              <IconButton
+                label="添加图片"
+                size="sm"
+                class="ml-auto"
+                :disabled="attaching"
+                @click="attachInput?.click()"
+              >
+                <Icon :as="ImagePlus" size="regular" />
+              </IconButton>
+            </Tooltip>
+          </div>
+
+          <ImageAttachmentGrid
+            v-if="attachments.length > 0"
+            :attachments="attachments"
+            class="mt-2"
+            @select="openViewer"
+          />
+          <p v-else class="mt-2 text-caption text-label-tertiary">
+            还没有图片。报错现场、界面错位这类问题可以直接截图贴上来。
+          </p>
+          <p v-if="attachmentError" class="mt-2 text-caption text-danger">
+            {{ attachmentError }}
+          </p>
+
+          <input
+            ref="attachInput"
+            type="file"
+            :accept="ACCEPTED_IMAGE_TYPES.join(',')"
+            multiple
+            class="hidden"
+            @change="attachFiles"
+          />
+        </div>
+
+        <div
+          v-if="selected.filePath || selected.detail"
+          class="mt-4 rounded-panel border border-separator-soft bg-content p-2.5"
+        >
+          <p class="text-caption font-emphasis text-label-secondary">定位与说明</p>
+          <p v-if="selected.filePath" class="mt-1 break-all font-mono text-caption text-label">
+            {{ selected.filePath }}
+          </p>
+          <p v-if="selected.detail" class="mt-1 whitespace-pre-line text-caption text-label-secondary">
+            {{ selected.detail }}
           </p>
         </div>
 
@@ -216,7 +357,11 @@ const context: Record<BugStatus, string> = {
         -->
         <dl class="mt-4 space-y-3">
           <div>
-            <dt class="text-caption text-label-secondary">来源任务</dt>
+            <dt class="text-caption text-label-secondary">项目</dt>
+            <dd class="mt-0.5 text-caption text-label">{{ selected.projectName }}</dd>
+          </div>
+          <div>
+            <dt class="text-caption text-label-secondary">来源</dt>
             <dd class="mt-0.5 text-caption text-label">{{ taskLabel(selected.sourceTaskId) }}</dd>
           </div>
           <div>
@@ -227,7 +372,9 @@ const context: Record<BugStatus, string> = {
           </div>
           <div class="flex items-center gap-2">
             <dt class="text-caption text-label-secondary">发现时间</dt>
-            <dd class="tnum ml-auto text-caption text-label">{{ selected.reportedAt }}</dd>
+            <dd class="tnum ml-auto text-caption text-label">
+              {{ formatRelative(selected.foundAt) }}
+            </dd>
           </div>
         </dl>
 
@@ -236,6 +383,7 @@ const context: Record<BugStatus, string> = {
             v-if="canRequestFix(selected.status)"
             variant="primary"
             size="sm"
+            :disabled="requestingFix"
             @click="requestFix"
           >
             <Icon :as="Wrench" size="inline" />派发修复任务
@@ -243,12 +391,7 @@ const context: Record<BugStatus, string> = {
           <Button v-if="canMarkFixed(selected.status)" size="sm" @click="markFixed">
             标记已修复
           </Button>
-          <Button
-            v-if="canVerify(selected.status)"
-            variant="primary"
-            size="sm"
-            @click="verify"
-          >
+          <Button v-if="canVerify(selected.status)" variant="primary" size="sm" @click="verify">
             <Icon :as="ShieldCheck" size="inline" />验证关闭
           </Button>
           <Button v-if="canWontFix(selected.status)" size="sm" @click="openWontFix">
@@ -287,5 +430,17 @@ const context: Record<BugStatus, string> = {
         <Button :disabled="!canWontFixConfirm" @click="confirmWontFix">确认不修复</Button>
       </template>
     </Dialog>
+
+    <BugCreateDialog
+      v-model:open="createOpen"
+      @created="selectedId = $event.id"
+      @uploaded="loadAttachments($event.id)"
+    />
+
+    <ImageAttachmentsDialog
+      v-model:open="viewerOpen"
+      v-model:selected-id="viewerId"
+      :attachments="attachments"
+    />
   </div>
 </template>

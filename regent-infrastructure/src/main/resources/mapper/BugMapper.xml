@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.bug.infrastructure.persistence.BugMapper">
+
+    <sql id="dataColumns">
+        id, project_id, requirement_id, source_task_id, fix_task_id, source, title, severity,
+        status, repro, file_path, detail, wont_fix_reason, found_at, fixed_at, created_at, updated_at
+    </sql>
+
+    <sql id="filters">
+        b.deleted = 0
+        <if test="severity != null">
+            AND b.severity = #{severity}
+        </if>
+        <if test="scope == 'OPEN'">
+            AND b.status NOT IN ('CLOSED', 'WONTFIX')
+        </if>
+        <if test="scope == 'RESOLVED'">
+            AND b.status IN ('CLOSED', 'WONTFIX')
+        </if>
+        <if test="keyword != null">
+            AND (
+                b.title LIKE CONCAT('%', #{keyword}, '%')
+                OR b.repro LIKE CONCAT('%', #{keyword}, '%')
+                OR b.file_path LIKE CONCAT('%', #{keyword}, '%')
+            )
+        </if>
+    </sql>
+
+    <select id="selectDataById" resultType="com.pydlove.regent.bug.infrastructure.persistence.BugData">
+        SELECT <include refid="dataColumns"/>
+        FROM bug
+        WHERE id = #{id} AND deleted = 0
+    </select>
+
+    <select id="selectDataByIdForUpdate" resultType="com.pydlove.regent.bug.infrastructure.persistence.BugData">
+        SELECT <include refid="dataColumns"/>
+        FROM bug
+        WHERE id = #{id} AND deleted = 0
+        FOR UPDATE
+    </select>
+
+    <select id="selectRowById" resultType="com.pydlove.regent.bug.infrastructure.persistence.BugRow">
+        SELECT b.id, b.project_id, p.name AS project_name, b.requirement_id, b.source_task_id,
+               b.fix_task_id, b.source, b.title, b.severity, b.status, b.repro, b.file_path,
+               b.detail, b.wont_fix_reason, b.found_at, b.fixed_at
+        FROM bug b
+        JOIN project p ON p.id = b.project_id
+        WHERE b.id = #{id} AND b.deleted = 0
+    </select>
+
+    <select id="selectPage" resultType="com.pydlove.regent.bug.infrastructure.persistence.BugRow">
+        SELECT b.id, b.project_id, p.name AS project_name, b.requirement_id, b.source_task_id,
+               b.fix_task_id, b.source, b.title, b.severity, b.status, b.repro, b.file_path,
+               b.detail, b.wont_fix_reason, b.found_at, b.fixed_at
+        FROM bug b
+        JOIN project p ON p.id = b.project_id
+        WHERE <include refid="filters"/>
+        ORDER BY FIELD(b.severity, 'BLOCKER', 'MAJOR', 'MINOR', 'TRIVIAL'), b.id DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countBy" resultType="long">
+        SELECT COUNT(*)
+        FROM bug b
+        WHERE <include refid="filters"/>
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO bug (project_id, requirement_id, source_task_id, fix_task_id, source, title,
+                         severity, status, repro, file_path, detail, wont_fix_reason, found_at,
+                         fixed_at, deleted, created_at, updated_at)
+        VALUES (#{projectId}, #{requirementId}, #{sourceTaskId}, #{fixTaskId}, #{source}, #{title},
+                #{severity}, #{status}, #{reproduction}, #{filePath}, #{detail}, #{wontFixReason},
+                #{foundAt}, #{fixedAt}, 0, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <!-- 创建后的来源与标题不修改；这里只允许后续状态处理更新。 -->
+    <update id="update">
+        UPDATE bug
+        SET fix_task_id = #{fixTaskId},
+            status = #{status},
+            fixed_at = #{fixedAt},
+            wont_fix_reason = #{wontFixReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+</mapper>
