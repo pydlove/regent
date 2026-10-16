@@ -26,7 +26,7 @@
 | 构建 | Maven | 3.9.11 | 本机已装 |
 | 父 POM | `com.secsmart.api:api-parent` | 3.0.2_R100-SNAPSHOT | 依赖与插件版本统一在此 |
 | 框架 | Spring Boot | 3.5.5 | 由父 POM 管理，**不要自己写版本号** |
-| 持久层 | MyBatis | 父 POM 管理 | 沿用 `app_audit` 的 dao 分层风格 |
+| 持久层 | MyBatis-Plus `mybatis-plus-spring-boot3-starter` | 3.5.8，父 POM 管理 | 与 `app_audit` 保持一致，沿用其 dao 分层风格 |
 | 连接池 | Druid | 1.2.24 | 父 POM 已有 |
 | 数据库 | MySQL | 8.3.0 驱动 | 专用 schema `regent` |
 | **迁移** | **Flyway** | 父 POM 管理（11.x） | `flyway-core` + `flyway-mysql` |
@@ -38,6 +38,7 @@
 | 推送 | Spring `RestClient` | — | Server酱 / PushPlus / 飞书 / 钉钉 webhook |
 | 前端 | Vue 3 + Vite + Pinia + Element Plus | — | **待定**，见第十节 |
 | 测试 | JUnit 5 + Mockito + Spring Boot Test | — | Testcontainers 需 Docker，本机没有，不采用 |
+| 测试执行 | `maven-surefire-plugin` | **3.5.4，必须显式钉版本** | `api_parent` 未管理 surefire；Maven 默认 2.12.4 无法执行 JUnit 5，测试会被静默跳过且构建仍然「成功」 |
 | 质量 | maven-surefire / maven-scm / 父 POM 插件链 | — | 复用父 POM 既有插件配置 |
 | 守护 | 复用 `py-deploy` 的 start/stop/status 模式 | — | `java -jar` + 开机自启 |
 
