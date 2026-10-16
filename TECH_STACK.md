@@ -36,7 +36,7 @@
 | 调度 | Spring `@Scheduled` + `ThreadPoolTaskExecutor` | — | 不引 Quartz，现阶段用不上 |
 | 邮件 | `spring-boot-starter-mail` | — | JavaMailSender |
 | 推送 | Spring `RestClient` | — | Server酱 / PushPlus / 飞书 / 钉钉 webhook |
-| 前端 | Vue 3 + Vite + Pinia + Element Plus | — | **待定**，见第十节 |
+| 前端 | Vue 3 + Vite + TS + Tailwind CSS + reka-ui + Pinia | 见 `FRONTEND.md` | 对标 macOS 观感，**刻意不用 Element Plus** |
 | 测试 | JUnit 5 + Mockito + Spring Boot Test | — | Testcontainers 需 Docker，本机没有，不采用 |
 | 测试执行 | `maven-surefire-plugin` | **3.5.4，必须显式钉版本** | `api_parent` 未管理 surefire；Maven 默认 2.12.4 无法执行 JUnit 5，测试会被静默跳过且构建仍然「成功」 |
 | 质量 | maven-surefire / maven-scm / 父 POM 插件链 | — | 复用父 POM 既有插件配置 |
@@ -148,7 +148,7 @@ regent/
 │       ├── db/migration/        # ★ Flyway 迁移脚本
 │       └── mapper/              # MyBatis XML
 ├── regent-executor/             # codex exec 封装、任务生命周期状态机、调度
-├── regent-web/                  # 前端（Vue 或 React，待定）
+├── regent-web/                  # 前端（Vue 3 + Tailwind，见 FRONTEND.md）
 └── deploy/                      # start-all / stop-all / restart / status
 ```
 
@@ -279,10 +279,8 @@ regent:
 
 ## 十、待定项
 
-1. **前端**：工作区现有前端（`app-audit-frontend`、`r_data_service/web`）**全是 React**，没有任何项目用 Vue，且 `app-audit-frontend` 带 7 份强制编码规范。上 Vue 意味着将来维护两套前端规范。
-   - 选项 A：React + antd，复用既有规范
-   - 选项 B：Vue 3 + Element Plus，接受双栈
-   - 选项 C：阶段 1 先不做前端，用 CLI 录需求，平台先跑通
+1. ~~前端选型~~ **已定**：Vue 3 + Vite + Tailwind CSS + reka-ui，对标 macOS 原生观感，详见 `FRONTEND.md`。
+   工作区现有前端（`app-audit-frontend`、`r_data_service/web`）**全是 React**，上 Vue 意味着将来维护两套前端规范——该代价已确认接受。
 2. **MySQL 实例位置**：本机新装常驻实例，还是指向现有开发库？（决定守护脚本与 `V1__init_schema.sql` 的执行方式）
 3. **工作区根 `.git` 干扰**：`regent/` 位于 `/Users/panyong/shanjie` 下，该根目录存在空 `.git`，会把 `regent/` 纳入其跟踪范围，建议在 `regent/` 内独立 `git init`。
 

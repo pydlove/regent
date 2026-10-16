@@ -38,6 +38,7 @@ Regent 换个做法：需求一次性录进平台，平台逐个调起 Codex 执
 |---|---|
 | `TECH_STACK.md` | 技术选型、Flyway 规范、配置约定 |
 | `ARCHITECTURE.md` | 限界上下文、聚合边界、分包规范、反模式 |
+| `FRONTEND.md` | 前端 UI 框架、macOS 设计令牌、组件清单 |
 | `AGENTS.md` | 硬约束与工作流，**改代码前必读** |
 
 ## 目录
