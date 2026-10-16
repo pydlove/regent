@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  审批令牌 SQL。
+  核销那条 UPDATE 带 status = 'ACTIVE' 是有意的：邮件里的链接可能被点两次（人也可能双击），
+  两个请求会同时通过「查出来还能用」这一关。把条件写进 WHERE，第二次就影响 0 行 ——
+  由它来充当并发下的唯一裁判，而不是靠先查后改那一段代码里的时序运气。
+-->
+<mapper namespace="com.pydlove.regent.governance.infrastructure.persistence.ApprovalTokenMapper">
+
+    <select id="selectByHash" resultType="com.pydlove.regent.governance.infrastructure.persistence.ApprovalTokenRow">
+        SELECT id, decision_id, token_hash, status, expires_at
+        FROM approval_token
+        WHERE token_hash = #{tokenHash}
+    </select>
+
+    <update id="updateConsumed">
+        UPDATE approval_token
+        SET status = 'USED',
+            used_at = #{usedAt},
+            used_ip = #{usedIp}
+        WHERE id = #{id}
+          AND status = 'ACTIVE'
+    </update>
+
+</mapper>

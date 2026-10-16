@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  执行记录的 SQL。
+  两条纪律：
+    1. UPDATE 只改「收敛时才写」的列：task_id / attempt_no / branch_name / started_at 是这次执行的
+       出身，写结论的时候不该再动它们 —— 允许改，历史就会被人事后修饰；
+    2. changed_files 是 JSON 列，写入走 CAST(? AS JSON)：不 CAST 的话，MySQL 对字符串到 JSON 的
+       隐式转换在不同 sql_mode 下行为不一致，而参数化查询又不该为了兼容去拼字符串。
+-->
+<mapper namespace="com.pydlove.regent.execution.infrastructure.persistence.TaskRunMapper">
+
+    <sql id="columns">
+        id, task_id, attempt_no, status, exit_code, token_input, token_cached_input, token_output,
+        branch_name, summary, raw_result, schema_valid, changed_files, started_at, finished_at, created_at
+    </sql>
+
+    <select id="selectById" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskRunData">
+        SELECT <include refid="columns"/>
+        FROM task_run
+        WHERE id = #{id}
+    </select>
+
+    <!-- 最近的尝试按 attempt_no 降序取，不按 started_at：同一秒内开跑两次时时间戳会并列，序号不会 -->
+    <select id="selectLatestByTask" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskRunData">
+        SELECT <include refid="columns"/>
+        FROM task_run
+        WHERE task_id = #{taskId}
+        ORDER BY attempt_no DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectByTask" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskRunData">
+        SELECT <include refid="columns"/>
+        FROM task_run
+        WHERE task_id = #{taskId}
+        ORDER BY attempt_no
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO task_run (task_id, attempt_no, status, exit_code, token_input, token_cached_input,
+                              token_output, branch_name, summary, raw_result, schema_valid, changed_files,
+                              started_at, finished_at, created_at)
+        VALUES (#{taskId}, #{attemptNo}, #{status}, #{exitCode}, #{tokenInput}, #{tokenCachedInput},
+                #{tokenOutput}, #{branchName}, #{summary}, #{rawResult}, #{schemaValid},
+                CAST(#{changedFiles} AS JSON), #{startedAt}, #{finishedAt}, #{createdAt})
+    </insert>
+
+    <update id="update">
+        UPDATE task_run
+        SET status = #{status},
+            exit_code = #{exitCode},
+            token_input = #{tokenInput},
+            token_cached_input = #{tokenCachedInput},
+            token_output = #{tokenOutput},
+            summary = #{summary},
+            raw_result = #{rawResult},
+            schema_valid = #{schemaValid},
+            changed_files = CAST(#{changedFiles} AS JSON),
+            finished_at = #{finishedAt}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

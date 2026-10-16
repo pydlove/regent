@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  项目画像查询。deleted = 0 是硬性要求：逻辑删除漏一个 WHERE，删除掉的项目会从某个调用点
+  悄悄复活，而且这类问题只在「为什么这个项目还在派发」的追问下才会被发现。
+-->
+<mapper namespace="com.pydlove.regent.project.infrastructure.persistence.ProjectProfileMapper">
+
+    <select id="selectById" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectProfileRow">
+        SELECT id, code, name, path, default_decision_level, enabled
+        FROM project
+        WHERE id = #{id} AND deleted = 0
+    </select>
+
+    <select id="selectAll" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectProfileRow">
+        SELECT id, code, name, path, default_decision_level, enabled
+        FROM project
+        WHERE deleted = 0
+        ORDER BY id
+    </select>
+
+</mapper>

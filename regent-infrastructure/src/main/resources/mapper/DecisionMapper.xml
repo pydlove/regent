@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  决策单写侧 SQL —— 只碰 decision 表自己。
+  两条纪律：UPDATE 只改「会随决议改变」的列，ai_level / effective_level / question 是决策的
+  出身，AI 提出之后就不该再变 —— 允许改写它们，事后审计看到的就不是当时的判断了；
+  状态列写枚举名，与 DecisionStatus 逐字对齐，不存序号。
+-->
+<mapper namespace="com.pydlove.regent.governance.infrastructure.persistence.DecisionMapper">
+
+    <sql id="columns">
+        id, task_id, project_id, ai_level, effective_level, matched_rule_id, status, question,
+        options, recommendation, reversible, blast_radius, resolved_by, resolved_choice,
+        resolution_note, raised_at, resolved_at, created_at, updated_at
+    </sql>
+
+    <select id="selectById" resultType="com.pydlove.regent.governance.infrastructure.persistence.DecisionData">
+        SELECT <include refid="columns"/>
+        FROM decision
+        WHERE id = #{id}
+    </select>
+
+    <!--
+      最近一条已决议的决策。按 id 降序而不是 raised_at：决策单号单调递增，同一毫秒内
+      连提两条时时间戳会并列，序号不会。
+      不过滤具体的决议状态（APPROVED / AUTO_RESOLVED / REJECTED）：被驳回的任务会走向
+      CANCELLED，根本不会来问「该带什么结论续跑」，多一个条件只是把判断复制到 SQL 里。
+    -->
+    <select id="selectLatestResolvedByTask"
+            resultType="com.pydlove.regent.governance.infrastructure.persistence.DecisionData">
+        SELECT <include refid="columns"/>
+        FROM decision
+        WHERE task_id = #{taskId}
+          AND status != 'PENDING'
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO decision (task_id, project_id, ai_level, effective_level, matched_rule_id, status,
+                              question, options, recommendation, reversible, blast_radius,
+                              resolved_by, resolved_choice, resolution_note,
+                              raised_at, resolved_at, created_at, updated_at)
+        VALUES (#{taskId}, #{projectId}, #{aiLevel}, #{effectiveLevel}, #{matchedRuleId}, #{status},
+                #{question}, #{options}, #{recommendation}, #{reversible}, #{blastRadius},
+                #{resolvedBy}, #{resolvedChoice}, #{resolutionNote},
+                #{raisedAt}, #{resolvedAt}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <update id="update">
+        UPDATE decision
+        SET status = #{status},
+            resolved_by = #{resolvedBy},
+            resolved_choice = #{resolvedChoice},
+            resolution_note = #{resolutionNote},
+            resolved_at = #{resolvedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

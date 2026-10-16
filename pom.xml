@@ -20,7 +20,7 @@
         <relativePath>../api_parent/pom.xml</relativePath>
     </parent>
 
-    <groupId>com.secsmart.regent</groupId>
+    <groupId>com.pydlove.regent</groupId>
     <artifactId>regent</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
@@ -53,22 +53,22 @@
         <dependencies>
             <!-- 本项目内部模块 -->
             <dependency>
-                <groupId>com.secsmart.regent</groupId>
+                <groupId>com.pydlove.regent</groupId>
                 <artifactId>regent-commons</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.secsmart.regent</groupId>
+                <groupId>com.pydlove.regent</groupId>
                 <artifactId>regent-core</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.secsmart.regent</groupId>
+                <groupId>com.pydlove.regent</groupId>
                 <artifactId>regent-infrastructure</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.secsmart.regent</groupId>
+                <groupId>com.pydlove.regent</groupId>
                 <artifactId>regent-interfaces</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -86,6 +86,20 @@
     <build>
         <pluginManagement>
             <plugins>
+                <!--
+                  必须编译进 -parameters 方法参数名：Spring MVC 的 @RequestParam / @PathVariable
+                  默认靠反射读参数名来绑定 URL 查询串，缺这个标志就会在启动时看似正常、
+                  一调接口才报「Name for argument not specified」。
+                  本项目继承的 api_parent 没有开启它（Spring Boot 官方 parent 才会默认开启），
+                  所以在这里显式声明。
+                -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <configuration>
+                        <parameters>true</parameters>
+                    </configuration>
+                </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>

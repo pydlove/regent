@@ -1,0 +1,44 @@
+import { createRouter, createWebHistory } from 'vue-router'
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    {
+      path: '/',
+      // 默认落地在任务页：样式基准页只是展示用，放在侧边栏底部，不当首屏
+      redirect: '/tasks',
+    },
+    {
+      path: '/baseline',
+      name: 'baseline',
+      component: () => import('@/views/BaselineView.vue'),
+      meta: { title: '样式基准页' },
+    },
+    {
+      path: '/tasks',
+      name: 'tasks',
+      component: () => import('@/views/TasksView.vue'),
+      meta: { title: '任务' },
+    },
+    {
+      path: '/decisions',
+      name: 'decisions',
+      component: () => import('@/views/DecisionsView.vue'),
+      meta: { title: '决策' },
+    },
+    {
+      path: '/projects',
+      name: 'projects',
+      component: () => import('@/views/ProjectsView.vue'),
+      meta: { title: '项目' },
+    },
+    {
+      path: '/bugs',
+      name: 'bugs',
+      component: () => import('@/views/BugsView.vue'),
+      meta: { title: 'Bug 单' },
+    },
+  ],
+})
+
+export default router

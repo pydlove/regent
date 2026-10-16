@@ -1,0 +1,75 @@
+/* 全站基线：只放「所有页面都一致」的东西，不放任何组件样式。见 FRONTEND.md 3.11 第四层。 */
+@layer base {
+  body {
+    /* 13px 设在 body 上靠继承生效。绝不改 html 的 font-size —— 那会让 rem 基准变化，
+       Tailwind 整套间距刻度静默缩水 19%，见 FRONTEND.md 3.9 的警告。 */
+    font-family: var(--fx-font-sans);
+    font-size: 13px;
+    line-height: 1.4;
+    background: var(--window-bg);
+    color: var(--label);
+    /* 不要用 antialiased：那会让字比原生更细、更「网页」。subpixel 才是 macOS 默认渲染。 */
+    -webkit-font-smoothing: subpixel-antialiased;
+    -moz-osx-font-smoothing: auto;
+    /* 不设 text-rendering: optimizeLegibility —— 那是 Web 圈的迷信，字距连字交给字体自己，
+       设了反而会在部分平台上改变 kerning，让 13px 的字看起来比原生松散。 */
+  }
+
+  /* .dark 不只换变量，也要给出自己的文字色。
+     应用里 .dark 挂在 html 上时，body 的 color 会跟着令牌走，看不出问题；
+     但基准页的「深浅并排」把 .dark 当作子容器用，body 的浅色 color 会继承进来 ——
+     没有显式颜色类的元素（原生 input、裸 p 等）就会在深底上显示黑字。 */
+  .dark {
+    color: var(--label);
+  }
+
+  ::selection {
+    background: var(--selection-bg);
+  }
+
+  /* 覆盖式滚动条：默认透明，容器悬停或滚动中淡入。纯 CSS 判断不了「正在滚动」，
+     所以滚动中的淡入靠 useOverlayScrollbar 切 [data-scrolling]。 */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border: 2px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+    transition: background-color 200ms var(--fx-ease);
+  }
+  .scroll-area:hover::-webkit-scrollbar-thumb,
+  [data-scrolling="true"]::-webkit-scrollbar-thumb {
+    background-color: var(--fx-scrollbar-thumb);
+  }
+
+  /* 焦点兜底用 outline，不用 box-shadow：shadow-* 工具类本身就是 box-shadow，
+     基线的规则优先级更低，会被组件自己的阴影直接覆盖导致焦点环消失。见 FRONTEND.md 3.10。 */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+  :focus-visible {
+    outline: 2px solid var(--sys-blue);
+    outline-offset: 2px;
+  }
+
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 系统开了「减弱动态效果」就别再动。macOS 原生同样遵守这一条。 */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

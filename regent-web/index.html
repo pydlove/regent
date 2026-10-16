@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Regent AI 任务执行平台</title>
+    <script>
+      // 必须在样式生效前同步执行，否则深色模式下会先闪一帧白
+      ;(function () {
+        var saved = localStorage.getItem('regent-theme')
+        // QA 钩子：?theme=dark 强制某一套主题，便于截图与回归比对，不影响正式行为
+        var forced = new URLSearchParams(location.search).get('theme')
+        if (forced === 'dark' || forced === 'light') saved = forced
+        var dark =
+          saved === 'dark' ||
+          (saved !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.classList.toggle('dark', dark)
+        if (saved) document.documentElement.dataset.themePreference = saved
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  附件表。没有 deleted 条件可加 —— 这张表没有软删标记（见 V3 迁移脚本的注释）：
+  附件是不可变的事实，任务删除时才连同文件一起消失。
+-->
+<mapper namespace="com.pydlove.regent.execution.infrastructure.persistence.TaskAttachmentMapper">
+
+    <sql id="columns">
+        id, task_id, filename, content_type, size_bytes, storage_path, created_at
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO task_attachment (task_id, filename, content_type, size_bytes, storage_path, created_at)
+        VALUES (#{taskId}, #{filename}, #{contentType}, #{sizeBytes}, #{storagePath}, #{createdAt})
+    </insert>
+
+    <select id="selectById" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskAttachmentData">
+        SELECT <include refid="columns"/>
+        FROM task_attachment
+        WHERE id = #{id}
+    </select>
+
+    <!-- 按 ID 升序 = 上传顺序：界面上的缩略图要按人贴的顺序排 -->
+    <select id="selectByTask" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskAttachmentData">
+        SELECT <include refid="columns"/>
+        FROM task_attachment
+        WHERE task_id = #{taskId}
+        ORDER BY id
+    </select>
+
+</mapper>

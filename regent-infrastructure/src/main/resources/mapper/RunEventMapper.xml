@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  执行事件流：只追加、只按运行读。
+  payload 是 JSON 列，同样走 CAST(? AS JSON)；写入前的合法性兜底在仓储实现里做，
+  因为「什么算合法 JSON」需要 Jackson，而 SQL 里判断不了。
+-->
+<mapper namespace="com.pydlove.regent.execution.infrastructure.persistence.RunEventMapper">
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO run_event (task_run_id, seq, event_type, payload, occurred_at, created_at)
+        VALUES (#{taskRunId}, #{seq}, #{eventType}, CAST(#{payload} AS JSON), #{occurredAt}, #{createdAt})
+    </insert>
+
+    <!-- 按 seq 排序而不是 id：序号是「这次运行内的顺序」这一事实本身，id 只是写入顺序 -->
+    <select id="selectByRun" resultType="com.pydlove.regent.execution.infrastructure.persistence.RunEventData">
+        SELECT id, task_run_id, seq, event_type, payload, occurred_at, created_at
+        FROM run_event
+        WHERE task_run_id = #{taskRunId}
+        ORDER BY seq
+    </select>
+
+</mapper>

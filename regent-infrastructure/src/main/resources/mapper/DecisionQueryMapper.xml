@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  决策单查询 SQL。
+
+  两条与外键策略配套的取数约定：
+    * task / project 用内连接 —— decision 表对两者都有外键，行必然存在，缺了就是数据被人手工改坏，
+      这时报错比返回一行名字为空的决策更好；
+    * matched_rule_id 用左连接 —— 它本来就允许为空（AI 自评未经规则抬升的决策没有命中规则）。
+-->
+<mapper namespace="com.pydlove.regent.governance.infrastructure.persistence.DecisionQueryMapper">
+
+    <sql id="columns">
+        d.id, d.task_id, t.title AS task_title, d.project_id, p.name AS project_name,
+        d.ai_level, d.effective_level, r.name AS matched_rule_name, d.status, d.question,
+        d.recommendation, d.reversible, d.blast_radius, d.resolved_by, d.resolved_choice,
+        d.resolution_note, d.raised_at, d.resolved_at
+    </sql>
+
+    <sql id="joins">
+        FROM decision d
+        JOIN task t ON t.id = d.task_id
+        JOIN project p ON p.id = d.project_id
+        LEFT JOIN decision_rule r ON r.id = d.matched_rule_id
+    </sql>
+
+    <sql id="filters">
+        <if test="level != null">
+            AND d.effective_level = #{level}
+        </if>
+        <if test="scope == 'PENDING'">
+            AND d.status = 'PENDING'
+        </if>
+        <if test="scope == 'RESOLVED'">
+            AND d.status &lt;&gt; 'PENDING'
+        </if>
+        <if test="keyword != null">
+            AND (d.question LIKE CONCAT('%', #{keyword}, '%')
+                 OR t.title LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+    </sql>
+
+    <select id="selectPage" resultType="com.pydlove.regent.governance.infrastructure.persistence.DecisionRow">
+        SELECT <include refid="columns"/>
+        <include refid="joins"/>
+        WHERE 1 = 1
+        <include refid="filters"/>
+        ORDER BY d.raised_at DESC, d.id DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countBy" resultType="long">
+        SELECT COUNT(*)
+        <include refid="joins"/>
+        WHERE 1 = 1
+        <include refid="filters"/>
+    </select>
+
+    <select id="selectById" resultType="com.pydlove.regent.governance.infrastructure.persistence.DecisionRow">
+        SELECT <include refid="columns"/>
+        <include refid="joins"/>
+        WHERE d.id = #{id}
+    </select>
+
+</mapper>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  分级规则查询。
+  project_id 为 NULL 表示全局规则，对每个项目都生效 —— 这里用 (IS NULL OR = ?) 一次取回，
+  而不是让应用层取两次再拼：少一次往返，也少一处「忘了取全局规则」的机会。
+  排序按 priority DESC, id ASC，与 DecisionArbiter 里的排序规则保持一致，
+  这样「哪条规则先命中」在数据库里看一眼就是答案。
+-->
+<mapper namespace="com.pydlove.regent.governance.infrastructure.persistence.DecisionRuleMapper">
+
+    <select id="selectEnabledFor" resultType="com.pydlove.regent.governance.infrastructure.persistence.DecisionRuleRow">
+        SELECT id, project_id, name, rule_type, pattern, target_level, priority, enabled
+        FROM decision_rule
+        WHERE deleted = 0
+          AND enabled = 1
+          AND (project_id IS NULL OR project_id = #{projectId})
+        ORDER BY priority DESC, id ASC
+    </select>
+
+</mapper>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  项目写侧。countByCode 故意不带 deleted = 0：数据库唯一键管的是整张表，
+  删除过的标识也算被占用 —— 查重口径必须和唯一键一致，否则查重通过、插入照样炸。
+-->
+<mapper namespace="com.pydlove.regent.project.infrastructure.persistence.ProjectMapper">
+
+    <select id="countByCode" resultType="int">
+        SELECT COUNT(*)
+        FROM project
+        WHERE code = #{code}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO project (code, name, path, tech_stack, verify_method, default_decision_level,
+                             enabled, deleted, created_at, updated_at)
+        VALUES (#{code}, #{name}, #{path}, #{techStack}, #{verifyMethod}, #{defaultDecisionLevel},
+                1, 0, #{createdAt}, #{updatedAt})
+    </insert>
+
+</mapper>

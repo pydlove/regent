@@ -34,6 +34,14 @@ spring:
   jackson:
     time-zone: UTC
 
+  # 图片附件是任务的一部分（截图、设计稿），默认的 1MB 只够传图标。
+  # 这里的两道限额只是容器层的兜底，真正的判据在 regent.attachments.max-bytes：
+  # 超出它由应用服务拒绝并给出人话，超出这里则是 MaxUploadSizeExceededException —— 也映射成 400。
+  servlet:
+    multipart:
+      max-file-size: 16MB
+      max-request-size: 32MB
+
 management:
   endpoints:
     web:
@@ -42,6 +50,33 @@ management:
   endpoint:
     health:
       show-details: never
+
+# 平台自身的运行参数。集中在一个前缀下，是为了让「改了这里会影响正在跑的任务」
+# 一眼可见 —— 它们与上面的数据库/框架配置不是一类东西。
+regent:
+  # 运行时目录：schema、执行临时文件。日志与 pid 由 deploy/ 脚本写在同一目录下，
+  # 约定见 TECH_STACK.md 六：运行时产物一律不写仓库。
+  home: ${REGENT_HOME:${user.home}/.regent}
+  attachments:
+    # 图片落盘目录。运行时产物不进仓库（TECH_STACK.md 六），与日志、schema、runs 同级
+    dir: ${REGENT_ATTACHMENTS_DIR:${regent.home}/attachments}
+    # 单张图片上限（字节）。默认 10MB：手机截图、设计稿都够，再大就是该压缩的原图了
+    max-bytes: ${REGENT_ATTACHMENT_MAX_BYTES:10485760}
+  execution:
+    # 执行器命令。默认取 PATH 里的 codex；本地想干跑就把它指向一个假脚本
+    codex-command: ${REGENT_CODEX_COMMAND:codex}
+    # 单次执行的墙钟上限，ISO-8601（PT30M = 三十分钟）
+    timeout: ${REGENT_EXEC_TIMEOUT:PT30M}
+    # 同时执行的任务数。默认 1：一条执行链路独占工作区，并行会互相覆盖改动
+    max-concurrency: ${REGENT_MAX_CONCURRENCY:1}
+    # 是否给每个任务开独立分支。关掉之后在当前分支上执行，并如实记录当前分支名
+    branch-enabled: ${REGENT_BRANCH_ENABLED:true}
+    dispatch:
+      # 派发扫描。关掉之后任务只能靠人点「派发」
+      enabled: ${REGENT_DISPATCH_ENABLED:true}
+      interval-ms: 15000
+      initial-delay-ms: 20000
+      batch-size: 3
 
 mybatis-plus:
   mapper-locations: classpath*:mapper/**/*.xml

@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>com.secsmart.regent</groupId>
+        <groupId>com.pydlove.regent</groupId>
         <artifactId>regent</artifactId>
         <version>0.1.0-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
@@ -17,7 +17,7 @@
 
     <dependencies>
         <dependency>
-            <groupId>com.secsmart.regent</groupId>
+            <groupId>com.pydlove.regent</groupId>
             <artifactId>regent-core</artifactId>
         </dependency>
 
@@ -57,6 +57,17 @@
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!--
+          数据对象（TaskData / TaskListRow / DecisionRow）用 @Data 生成读写方法。
+          Lombok 只允许出现在非领域层：领域对象一旦用 @Data，setter 会绕过状态守卫，
+          那就是贫血模型的起点。版本由 api_parent 管理。
+        -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
         </dependency>
 
         <!-- 邮件通道 -->

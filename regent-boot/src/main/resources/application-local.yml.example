@@ -8,3 +8,18 @@ spring:
   datasource:
     username: regent
     password: 在此填入本地密码
+  flyway:
+    # 演示数据默认不加载（2026-10-16 起）：本地库保持干净，录入的都是真实数据。
+    # 想灌回演示数据（45 条任务、10 张决策单，分页开箱有三页）：把下一行换成注释里的那行，
+    # 重启后端即可。db/seed/R__demo_data.sql 是幂等的（先按 ID 段删、再重建），可以反复加载；
+    # 加载后项目路径指向真实仓库，务必确认下面的派发心跳仍是 false。
+    # locations: classpath:db/migration,classpath:db/seed
+    locations: classpath:db/migration
+
+regent:
+  execution:
+    # 本地默认关掉派发心跳：一旦灌了演示数据（项目路径就是真实仓库），
+    # 心跳一开就会真的把演示任务跑起来（烧 token、切分支、改文件）。
+    # 要看自动派发就改成 true。
+    dispatch:
+      enabled: false

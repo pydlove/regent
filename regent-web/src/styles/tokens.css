@@ -1,0 +1,195 @@
+/*
+ * Regent 设计令牌 —— 对标的 macOS 原生观感全部收敛在这个文件里。
+ * 约定见 FRONTEND.md 第三节：业务组件只引用令牌与工具类，不写裸颜色、裸尺寸。
+ *
+ * 四层结构：
+ *   一层 @custom-variant  定义 .dark 暗色变体
+ *   二层 :root / .dark    两套语义变量（raw，fx- 前缀避开 Tailwind 命名空间）
+ *   三层 @theme inline    映射成工具类，inline 让工具类内联 var() 从而跟随主题切换
+ *   四层 @layer base      全站基线，放在 global.css
+ */
+@import "tailwindcss";
+@import "./global.css";
+
+/* ── 一层：暗色变体 ─────────────────────────────────────────────────────────
+   刻意不用 media query 直接驱动：media query 无法被「手动覆盖」，而我们既要跟随系统
+   又要可手动切换。系统偏好由 index.html 的内联脚本翻译成 .dark 类。 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * 弹层入场动画。macOS 的弹层是「快速淡入 + 极轻微缩放」，不是 Web 常见的滑入。
+ * 注意：只给对话框面板做 scale，不给 popover / tooltip / 菜单做 ——
+ *   那几个的定位由 reka-ui 用内联 transform 写死，keyframes 里的 transform 优先级高于内联样式，
+ *   动画期间会把它们甩回屏幕左上角。所以那几处只淡入不位移。
+ */
+@keyframes fx-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes fx-panel-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* ── 二层：语义变量，浅色/深色两套，缺一不可 ─────────────────────────────── */
+:root {
+  color-scheme: light;
+
+  /* 字体与缓动在深浅两套下取值相同，但也走 raw 变量：@layer base 要引用它们。
+     这一栈用 Chrome DevTools Protocol 的 CSS.getPlatformFontsForNode 实测过本机解析结果：
+       西文/数字 → .SF NS (.SFNS-Regular)      中文 → PingFang SC (PingFangSC-Regular)
+     与 macOS 原生 App 的组合完全一致，所以不要随手改。两条纪律：
+       1. system-ui 必须排在前面。若挪到末尾，Windows 会先命中 "Microsoft YaHei"，
+          连西文也一起用雅黑渲染，西文就毁了。
+       2. 不塞 "Helvetica Neue"。它没有中文字形，「西文优先」的说法站不住，
+          而且它本身比 SF 更不像 Apple —— 只在 SF 缺失时才轮得到它，纯属添乱。 */
+  --fx-font-sans: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --fx-font-mono: ui-monospace, "SF Mono", Menlo, "PingFang SC", monospace;
+  --fx-ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --sys-blue: #007aff;
+  --sys-red: #ff3b30;
+  --sys-orange: #ff9500;
+  --sys-yellow: #ffcc00;
+  --sys-green: #34c759;
+  --sys-gray: #8e8e93;
+
+  --label: rgba(0, 0, 0, 0.85);
+  --label-secondary: rgba(0, 0, 0, 0.5);
+  --label-tertiary: rgba(0, 0, 0, 0.25);
+  --separator: rgba(0, 0, 0, 0.1);
+  --separator-soft: rgba(0, 0, 0, 0.05);
+
+  --window-bg: #ececec;
+  --content-bg: #ffffff;
+  --sidebar-bg: #f5f5f5;
+  --material-bg: rgba(246, 246, 246, 0.72);
+  --hover-bg: rgba(0, 0, 0, 0.03);
+  --selection-bg: rgba(0, 122, 255, 0.12);
+
+  /* 输入类控件的底色与描边单独一组：深色下输入框要比内容底色略亮，否则一片死黑 */
+  --fx-field-bg: #ffffff;
+  --fx-field-border: rgba(0, 0, 0, 0.13);
+
+  /* 窗口红黄绿（traffic lights）。单列一组、不并进上面那套 --sys-*：
+     AppKit 画这三颗用的是另一组固定的窗口色，和控件语义色不是同一个值 ——
+     拿 --sys-red 去画会明显发暗。深浅两套取值相同：窗口按钮在深色下也不换色。 */
+  --fx-traffic-close: #ff5f57;
+  --fx-traffic-minimize: #febc2e;
+  --fx-traffic-zoom: #28c840;
+
+  --fx-shadow-control: 0 0 0 0.5px rgba(0, 0, 0, 0.07), 0 0.5px 1.5px rgba(0, 0, 0, 0.1);
+  --fx-shadow-panel: 0 0 0 0.5px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --fx-shadow-popover: 0 0 0 0.5px rgba(0, 0, 0, 0.07), 0 6px 20px rgba(0, 0, 0, 0.13);
+  --fx-shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 12px 40px rgba(0, 0, 0, 0.22);
+  --fx-focus-ring: 0 0 0 3px rgba(0, 122, 255, 0.35);
+
+  --fx-scrollbar-thumb: rgba(0, 0, 0, 0.28);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --sys-blue: #0a84ff;
+  --sys-red: #ff453a;
+  --sys-orange: #ff9f0a;
+  --sys-yellow: #ffd60a;
+  --sys-green: #30d158;
+  --sys-gray: #98989d;
+
+  --label: rgba(255, 255, 255, 0.85);
+  --label-secondary: rgba(255, 255, 255, 0.55);
+  --label-tertiary: rgba(255, 255, 255, 0.25);
+  --separator: rgba(255, 255, 255, 0.13);
+  --separator-soft: rgba(255, 255, 255, 0.08);
+
+  --window-bg: #1e1e1e;
+  --content-bg: #2c2c2e;
+  --sidebar-bg: #232325;
+  --material-bg: rgba(40, 40, 42, 0.72);
+  --hover-bg: rgba(255, 255, 255, 0.06);
+  --selection-bg: rgba(10, 132, 255, 0.24);
+
+  --fx-field-bg: rgba(255, 255, 255, 0.07);
+  --fx-field-border: rgba(255, 255, 255, 0.13);
+
+  /* 深色下投影基本不可见，分层靠发丝线，所以只留 0.5px 描边 */
+  --fx-shadow-control: 0 0 0 0.5px rgba(255, 255, 255, 0.09);
+  --fx-shadow-panel: 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+  --fx-shadow-popover: 0 0 0 0.5px rgba(255, 255, 255, 0.1), 0 8px 24px rgba(0, 0, 0, 0.5);
+  --fx-shadow-window: 0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 16px 48px rgba(0, 0, 0, 0.6);
+  --fx-focus-ring: 0 0 0 3px rgba(10, 132, 255, 0.45);
+
+  --fx-scrollbar-thumb: rgba(255, 255, 255, 0.28);
+}
+
+/* ── 三层：映射成 Tailwind 令牌 ───────────────────────────────────────────── */
+@theme inline {
+  --font-sans: var(--fx-font-sans);
+  --font-mono: var(--fx-font-mono);
+
+  /* 字号：13px 基准 */
+  --text-caption: 11px;
+  --text-caption--line-height: 14px;
+  --text-body: 13px;
+  --text-body--line-height: 18px;
+  /* 控件里的文字用更紧的行高，垂直居中的光学重心才正 */
+  --text-control: 13px;
+  --text-control--line-height: 16px;
+  --text-metric: 22px;
+  --text-metric--line-height: 28px;
+
+  --color-accent: var(--sys-blue);
+  --color-danger: var(--sys-red);
+  --color-warning: var(--sys-orange);
+  --color-success: var(--sys-green);
+  --color-neutral: var(--sys-gray);
+  --color-label: var(--label);
+  --color-label-secondary: var(--label-secondary);
+  --color-label-tertiary: var(--label-tertiary);
+  --color-separator: var(--separator);
+  --color-separator-soft: var(--separator-soft);
+  --color-window: var(--window-bg);
+  --color-content: var(--content-bg);
+  --color-sidebar: var(--sidebar-bg);
+  --color-material: var(--material-bg);
+  --color-hover: var(--hover-bg);
+  --color-selection: var(--selection-bg);
+  --color-field: var(--fx-field-bg);
+  --color-field-border: var(--fx-field-border);
+  --color-traffic-close: var(--fx-traffic-close);
+  --color-traffic-minimize: var(--fx-traffic-minimize);
+  --color-traffic-zoom: var(--fx-traffic-zoom);
+
+  /* 强调字重。不要用 Tailwind 的 font-semibold（600）：中文的 600 落到 PingFangSC-Semibold，
+     比 SF 的 600 视觉上重得多，13px 下会把标题/表头压得发闷。Apple 的中文 UI 强调用 Medium。
+     全站强调统一走 font-emphasis 一个类，将来要调只改这一处。 */
+  --font-weight-emphasis: 500;
+
+  --radius-badge: 4px;
+  --radius-control: 6px;
+  --radius-panel: 10px;
+  --radius-window: 12px;
+
+  --spacing-toolbar: 52px;
+  --spacing-toolbar-compact: 38px;
+  /* 表格底部的分页条。比工具栏矮一档：它不是操作区，只是一行「现在看到第几段」的读数 */
+  --spacing-footer: 32px;
+  --spacing-sidebar: 220px;
+  /* 控件高度：13px 中文（PingFang）比同字号西文视觉更满，22px 会显得挤。
+     取 24px 做基准，三档差值保持 4px 一致，同一屏不混用。 */
+  --spacing-control-sm: 20px;
+  --spacing-control: 24px;
+  --spacing-control-lg: 28px;
+  --spacing-row: 28px;
+  --shadow-control: var(--fx-shadow-control);
+  --shadow-panel: var(--fx-shadow-panel);
+  --shadow-popover: var(--fx-shadow-popover);
+  --shadow-window: var(--fx-shadow-window);
+
+  --animate-overlay-in: fx-fade-in 160ms var(--fx-ease);
+  --animate-panel-in: fx-panel-in 200ms var(--fx-ease);
+
+  --ease-apple: var(--fx-ease);
+}

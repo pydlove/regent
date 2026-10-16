@@ -31,7 +31,7 @@
 | 数据库 | MySQL | 服务端 8.0.43 / 驱动 8.3.0 | 专用 schema `regent`，实例与账号见 3.7 |
 | **迁移** | **Flyway** | 父 POM 管理（11.x） | `flyway-core` + `flyway-mysql` |
 | JSON | Jackson | 父 POM 管理 | 逐行解析 `codex exec --json` 的 JSONL |
-| JSON Schema | victools/jsonschema-generator | 4.x | 从 DTO 生成 Codex 出参 Schema |
+| JSON Schema | **手写契约文件** | — | `regent-infrastructure/src/main/resources/codex/` 下的 schema + 上报约定；victools 生成留作将来（见第五节） |
 | 进程调用 | `java.lang.ProcessBuilder` | JDK | 拉起 `codex exec` / `codex exec resume` |
 | 调度 | Spring `@Scheduled` + `ThreadPoolTaskExecutor` | — | 不引 Quartz，现阶段用不上 |
 | 邮件 | `spring-boot-starter-mail` | — | JavaMailSender |
@@ -125,6 +125,12 @@ spring:
 | `notification` | 通知投递记录：通道、状态、重试次数 |
 | `approval_token` | 一次性审批链接令牌 |
 
+`V3` 之后补进来的表在同名迁移脚本里，不混进 `V1`：
+
+| 表 | 迁移 | 职责 |
+|---|---|---|
+| `task_attachment` | `V3__task_attachment.sql` | 任务图片附件：展示用文件名、`image/*` 类型、字节数、平台侧存储路径（磁盘文件名只有 UUID + 扩展名） |
+
 全部用 `utf8mb4`，主键用 `BIGINT`，状态字段用 `VARCHAR` 存枚举名（不用 MySQL `ENUM`，避免改枚举要动表结构）。时间统一 `DATETIME(3)` 存 UTC。
 
 ### 3.7 本机环境与账号（已就绪）
@@ -162,41 +168,49 @@ spring:
 
 ## 四、目录结构
 
+模块划分与包结构以 `ARCHITECTURE.md` 第四节为唯一事实源，这里只列与选型直接相关的落点：
+
 ```
 regent/
 ├── pom.xml                      # 聚合 POM，<parent> 指向 api-parent
-├── TECH_STACK.md
-├── regent-api/                  # DTO / 对外接口定义
-│   └── src/main/java/.../dto/   # CodexExecResult / DecisionDto / BugDto
-├── regent-core/
-│   ├── src/main/java/.../
-│   │   ├── dao/                 # MyBatis Mapper 接口
-│   │   ├── entity/
-│   │   ├── service/
-│   │   ├── policy/              # 决策分级：rules + arbiter（仲裁「就高不就低」）
-│   │   └── notify/              # Notifier 抽象 + email/webhook 实现
+├── regent-commons/              # 共享内核（DomainException / DecisionLevel）
+├── regent-core/                 # 领域层 + 应用层，纯 Java，零框架依赖
+├── regent-infrastructure/       # 持久化 / codex 适配 / Flyway 脚本 / 出参契约
 │   └── src/main/resources/
-│       ├── db/migration/        # ★ Flyway 迁移脚本
-│       └── mapper/              # MyBatis XML
-├── regent-executor/             # codex exec 封装、任务生命周期状态机、调度
+│       ├── db/migration/        # ★ 唯一的迁移脚本位置（V1、V2…）
+│       ├── db/seed/             # 可选演示数据（默认不加载，启用方式见文件头注释）
+│       ├── mapper/              # MyBatis XML
+│       └── codex/               # 出参 schema 与上报约定（见第五节）
+├── regent-interfaces/           # REST、DTO、调度入口
+├── regent-boot/                 # Spring Boot 启动与装配
 ├── regent-web/                  # 前端（Vue 3 + Tailwind，见 FRONTEND.md）
-└── deploy/                      # start-all / stop-all / restart / status
+└── deploy/                      # 本地启停脚本 + 远程发布脚本
 ```
+
+DTO 收在 `regent-interfaces` 的 `interfaces/dto` 包下，**没有单独的 `regent-api` 模块** ——
+对外契约目前只有本仓库的 REST 层与前端两个消费方，单独拆模块是设想里才成立的抽象。
 
 ---
 
 ## 五、Codex 出参契约
 
-`regent-api` 中的 DTO 是唯一事实源，用 `victools/jsonschema-generator` 生成 Schema 文件：
+**现状是手写 schema，不是生成**。契约文件收在 `regent-infrastructure/src/main/resources/codex/`：
+
+- `codex-exec-result.schema.json` —— 出参的 JSON Schema（draft-07，`additionalProperties: false`）
+- `platform-contract.md` —— 给模型看的「平台上报约定」，讲清三种结局与定级尺度
+
+两个文件随 classpath 打包；执行时由 `SchemaFileProvider` 首次调用落到 `~/.regent/`，因为
+`codex exec --output-schema` **只接受文件路径**，不接受内联 schema。运行产物一律不落仓库。
+
+出参只有四个字段（`status` / `summary` / `changedFiles` / `decision`），没有 `bugs` / `verify` ——
+缺陷与验证结论目前都写在 `summary` 里，等 Bug 写路径真正落地再扩 schema：
 
 ```java
 public record CodexExecResult(
     Status status,                 // DONE / BLOCKED / FAILED
     String summary,
     List<String> changedFiles,
-    DecisionDto decision,
-    List<BugDto> bugs,
-    VerifyDto verify
+    DecisionDto decision           // 只有 BLOCKED 时是对象，其余为 null
 ) {}
 
 public record DecisionDto(
@@ -209,7 +223,10 @@ public record DecisionDto(
 ) {}
 ```
 
-**一致性由单测守住**——这是 Java 相对 Python 多出来的那一步：
+**DTO 与 schema 的一致性还没有单测守**。`CodexReportTranslator` 按字段名读 `-o` 落盘的 JSON，
+schema 改字段而解析没跟上（或反之）只有集成测试能发现。想补的那一步是 DTO 用
+`victools/jsonschema-generator` 生成、加一条「生成结果必须等于提交的文件」的单测——
+在那之前，改 schema 必须同步改 `CodexReportTranslator` 与 `CodexCliAdapterTest`：
 
 ```java
 @Test
@@ -221,19 +238,43 @@ void schemaMustMatchCommittedFile() {
 }
 ```
 
-提交后的 schema 文件供执行器调用：
+实际命令行（`CodexCliAdapter.commandLine`，新会话）：
 
 ```bash
 codex exec \
   -C <项目目录> \
   -s workspace-write \
   --json \
-  --output-schema src/main/resources/schema/codex-exec-result.schema.json \
+  --output-schema <~/.regent 下落盘的 schema 文件> \
   -o <末条消息输出文件> \
-  "<注入的任务上下文 + 平台上报约定>"
+  -                                  # 位置参数：指令从 stdin 读，绝不进 argv
 ```
 
-`--json` 事件流里逐行取 `thread_id` 存进 `task.codex_thread_id`；决策批准后走 `codex exec resume <thread_id>` 断点续跑。
+几条踩过坑才定下的规矩：
+
+1. **指令走 stdin，不进 argv**。JVM 的 `file.encoding` 常常不是 UTF-8（surefire、systemd、
+   `LANG` 未设置时都是 `US-ASCII`），中文 argv 会在起进程时被逐字换成 `?` 且不报错。
+   末尾的 `-` 就是「从 stdin 读指令」，字节由我们自己按 UTF-8 写；临时文件用完即删。
+   同时 `deploy/` 的启动脚本与 systemd 单元钉死 `-Dfile.encoding=UTF-8`。
+2. **`resume` 没有 `-C` 与 `-s`**：`codex exec resume <thread_id>` 的工作目录靠子进程 cwd
+   （适配器已 `ProcessBuilder.directory(项目目录)`），沙箱模式用
+   `-c sandbox_mode="workspace-write"` 覆盖。这一点是从 `--help` 逐条核对出来的。
+3. **`--json` 与 `-o` 是两条路**：`--json` 是 stdout 的 JSONL 事件流（逐行解析、落 `run_event`，
+   并从中取 `thread_id` 写回任务），`-o` 落盘的是**纯 JSON** 末条消息（不是 JSONL），
+   交给 `CodexReportTranslator` 按 schema 翻译成 `ExecResult`。
+4. **stderr 重定向到文件**，不读到管道里：只读 stdout 而不管 stderr，缓冲区写满时子进程会卡死。
+5. **读不懂出参不抛异常**：翻译成一条失败的执行记录，让工作线程继续活着，任务不会停在 RUNNING。
+
+决策批准后的续跑（人工结论作为新指令的一部分注入）：
+
+```bash
+codex exec resume <thread_id> \
+  -c sandbox_mode="workspace-write" \
+  --json \
+  --output-schema <同上> \
+  -o <新的末条消息输出文件> \
+  -
+```
 
 ---
 
@@ -256,7 +297,9 @@ codex exec \
 
 ## 七、测试与质量
 
-- **必须单测**：`policy/arbiter`（分级仲裁）、Codex JSONL 解析、DTO↔Schema 一致性、通知通道降级
+- **必须单测**：`DecisionArbiter`（分级仲裁，分支全覆盖）、Codex JSONL 解析与出参翻译
+  （`CodexCliAdapterTest` 9 个用例）、Codex 进程的指令编码与事件派发线程
+- **待补**：DTO↔Schema 一致性（契约还是手写文件，见第五节）、通知通道降级（通道未落地）
 - **集成测试**：用假 codex 脚本回放固定 JSONL，跑完整任务生命周期，不真调模型；DB 指向 `regent_test`
 - **Flyway 测试**：`@SpringBootTest` 启动时自动在 `regent_test` 上跑全量迁移，顺便验证脚本可执行
 - **门槛**：`mvn -q clean verify` 全绿
@@ -265,33 +308,29 @@ codex exec \
 
 ## 八、配置
 
-`application-{profile}.yml` 为主，密码走环境变量，不进 Git：
+`application-{profile}.yml` 为主，密码走环境变量，不进 Git。**分级参数不在配置文件里**：
+项目阈值来自 `project.default_decision_level` 列，规则来自 `decision_rule` 表 —— 它们是要按项目
+调的业务数据，不是部署参数。配置文件只管「进程怎么跑」：
 
 ```yaml
 regent:
-  policy:
-    default-auto-level: L1          # 高于此等级一律升级人工
-    # 分级规则只升不降，故这里**只有**升级规则，没有自动降级白名单。
-    # 原因见 ARCHITECTURE.md 2.5；规则实际存放在 decision_rule 表、可在平台界面维护，
-    # 这里只放首次启动时导入的默认集。
-    escalate-patterns:
-      - "deploy/**"
-      - "**/*.sql"
-      - "**/pom.xml"
-  executor:
-    max-concurrent-projects: 2
-    daily-token-budget: 0           # 0 表示不限制
-  notify:
-    email:
-      enabled: true
-      host: ""
-      port: 465
-      username: ""
-    push:
-      enabled: true
-      provider: feishu
-      token: ""
+  home: ${REGENT_HOME:${user.home}/.regent}   # schema 与执行临时文件；日志、pid 也写这里
+  execution:
+    codex-command: ${REGENT_CODEX_COMMAND:codex}
+    timeout: ${REGENT_EXEC_TIMEOUT:PT30M}     # 单次执行的墙钟上限，ISO-8601
+    max-concurrency: ${REGENT_MAX_CONCURRENCY:1}   # 默认 1，并行会互相覆盖工作区
+    branch-enabled: ${REGENT_BRANCH_ENABLED:true}  # 一任务一分支；关掉则在当前分支上跑
+    dispatch:                                 # 派发心跳。关了就只能靠人点「派发执行」
+      enabled: ${REGENT_DISPATCH_ENABLED:true}
+      interval-ms: 15000
+      batch-size: 3
+
+# 邮件与推送的配置项待通知通道落地后追加（见 ARCHITECTURE.md 第十一节待办 15）
 ```
+
+> **本地 profile 把 `regent.execution.dispatch.enabled` 覆写成 `false`**：一旦按需把演示数据
+> 灌回来（项目路径就是真实仓库），心跳一开，起个服务就会真的跑起来。理由与处置见 README
+> 与 `deploy/README.md`。演示数据本身默认不加载，见本节与种子脚本头部的说明。
 
 ---
 
@@ -302,7 +341,7 @@ regent:
 | MySQL 未常驻 | 本机没有 MySQL 服务，平台可用性从此绑定在 DB 上 | 先装常驻实例 + 纳入 start-all/status 脚本；冒烟时先探 DB |
 | Flyway 误删库 | `clean` 会删整库 | `clean-disabled: true` 显式声明；专用 schema 限制爆炸半径 |
 | 迁移脚本写错已执行 | 生产已跑过，改脚本会污染历史 | 铁律第 1 条：只追加不修改；发版前 review 脚本 |
-| DTO 与 Schema 漂移 | Java 里两者天然是两份文件 | 一致性单测，漂移即失败 |
+| DTO 与 Schema 漂移 | 契约是手写文件，解析器按字段名读，两边天然会漂 | 人工纪律：改 schema 必须同步改 `CodexReportTranslator` 与适配器测试；计划用 victools 生成 + 一致性单测兜底（见第五节） |
 | `--output-schema` 被违反 | 模型未必每次严格合规 | 校验失败按 `FAILED` 处理并保留原始输出，绝不猜 |
 | 无人值守被审批卡死 | headless 下不能出现交互式确认 | 每项目配 Codex `.rules` 白名单；危险命令一律判 `L3` |
 | 测试基建 | Testcontainers 需 Docker，本机没有 | 走独立 `regent_test` schema 直连 |
@@ -315,15 +354,16 @@ regent:
    工作区现有前端（`app-audit-frontend`、`r_data_service/web`）**全是 React**，上 Vue 意味着将来维护两套前端规范——该代价已确认接受。
 2. ~~MySQL 实例位置~~ **已定**：指向本机常驻实例（MySQL 8.0.43），建 `regent` / `regent_test` 两个独立 schema，
    不复用其它项目库。详见 3.7。
-3. **工作区根 `.git` 干扰**：`regent/` 位于 `/Users/panyong/shanjie` 下，该根目录存在空 `.git`，会把 `regent/` 纳入其跟踪范围，建议在 `regent/` 内独立 `git init`。
+3. ~~工作区根 `.git` 干扰~~ **已定**：`regent/` 内已独立 `git init`（当前分支 `main`），
+   父目录的空 `.git` 不再影响跟踪范围。
 
 ---
 
 ## 十一、下一步
 
-1. `regent/` 内 `git init`，建聚合 `pom.xml`，`<parent>` 指向 `api-parent`
-2. 立 MySQL 常驻实例，建 `regent` / `regent_test` 两个 schema 与专用账号
-3. 写 `V1__init_schema.sql`（十张表），跑通 Flyway 首次迁移
-4. 落地 `regent-api` 的 DTO + victools 生成 Schema + 一致性单测
-5. 实现 `policy/arbiter` 与单测
-6. 打通 `regent-executor` + `notify`，拿一个真实项目做端到端试点
+进度与下一步**以 `ARCHITECTURE.md` 第十一节为唯一事实源**，这里不再维护第二份会漂移的清单。
+当前剩下的三件事：
+
+1. 邮件与推送通道，以及邮件里的「一键批准」入口（`POST /api/approvals/{token}`）
+2. 需求录入与拆解、Bug 单的写操作（派发修复任务）
+3. 决策规则的维护界面

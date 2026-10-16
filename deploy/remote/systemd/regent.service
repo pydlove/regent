@@ -1,0 +1,21 @@
+[Unit]
+Description=Regent AI 任务执行平台
+After=network.target mysqld.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/app/regent/backend
+# 凭据走环境变量，不写进 application-prod.yml —— 仓库里的配置永远不该有密码
+EnvironmentFile=-/root/app/regent/backend/.env
+# -Dfile.encoding=UTF-8：JVM 默认字符集随环境变（systemd 下 LANG 往往是空的），日志文件与
+# 子进程参数都会被它影响。不写死的话，中文日志会变成一排问号。详见 deploy/local/start-backend.sh
+ExecStart=/usr/bin/java -Xms256m -Xmx512m -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8 -jar /root/app/regent/backend/regent-boot.jar --spring.profiles.active=prod
+SuccessExitStatus=143
+ExecStop=/bin/kill -15 $MAINPID
+ExecStopPost=/bin/sh -c 'sleep 2; /bin/kill -9 $(/usr/sbin/lsof -t -i:8787) 2>/dev/null || true'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

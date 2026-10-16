@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>com.secsmart.regent</groupId>
+        <groupId>com.pydlove.regent</groupId>
         <artifactId>regent</artifactId>
         <version>0.1.0-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
@@ -17,11 +17,11 @@
 
     <dependencies>
         <dependency>
-            <groupId>com.secsmart.regent</groupId>
+            <groupId>com.pydlove.regent</groupId>
             <artifactId>regent-interfaces</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.secsmart.regent</groupId>
+            <groupId>com.pydlove.regent</groupId>
             <artifactId>regent-infrastructure</artifactId>
         </dependency>
 
@@ -50,7 +50,7 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>com.secsmart.regent.boot.RegentApplication</mainClass>
+                    <mainClass>com.pydlove.regent.boot.RegentApplication</mainClass>
                 </configuration>
                 <executions>
                     <execution>

@@ -3,7 +3,7 @@
 > 版本：v1.0
 > 定义日期：2026-10-16
 > 配套文档：`TECH_STACK.md`（技术栈）、`ARCHITECTURE.md`（本文档）
-> 基础包名：`com.secsmart.regent`　groupId：`com.secsmart.regent`
+> 基础包名：`com.pydlove.regent`　groupId：`com.pydlove.regent`
 
 ---
 
@@ -238,7 +238,7 @@ regent/
 ├── ARCHITECTURE.md
 │
 ├── regent-commons/
-│   └── src/main/java/com/secsmart/regent/shared/
+│   └── src/main/java/com/pydlove/regent/shared/
 │       ├── domain/                           # 基础构件
 │       │   ├── AggregateRoot.java
 │       │   ├── Entity.java
@@ -256,7 +256,7 @@ regent/
 │       └── util/
 │
 ├── regent-core/                              # 纯 Java，零框架依赖
-│   └── src/main/java/com/secsmart/regent/
+│   └── src/main/java/com/pydlove/regent/
 │       ├── project/
 │       │   ├── domain/
 │       │   │   ├── model/                    # Project(AR), VerifyMethod, TechStack
@@ -316,7 +316,7 @@ regent/
 │
 ├── regent-infrastructure/
 │   └── src/main/
-│       ├── java/com/secsmart/regent/
+│       ├── java/com/pydlove/regent/
 │       │   ├── project/infrastructure/persistence/     # MyBatisProjectRepository, ProjectMapper
 │       │   ├── requirement/infrastructure/persistence/
 │       │   ├── execution/
@@ -339,7 +339,7 @@ regent/
 │           └── mapper/                       # MyBatis XML
 │
 ├── regent-interfaces/
-│   └── src/main/java/com/secsmart/regent/
+│   └── src/main/java/com/pydlove/regent/
 │       ├── project/interfaces/rest/          # ProjectController
 │       ├── requirement/interfaces/rest/
 │       ├── execution/interfaces/
@@ -352,7 +352,7 @@ regent/
 │
 └── regent-boot/
     └── src/main/
-        ├── java/com/secsmart/regent/boot/
+        ├── java/com/pydlove/regent/boot/
         │   ├── RegentApplication.java
         │   └── config/                       # 显式装配 Bean
         └── resources/
@@ -499,7 +499,7 @@ public class RequirementApplicationService {
 包约定靠自觉是守不住的。把上面的规矩写成可执行的测试，违规直接让 `mvn verify` 挂掉：
 
 ```java
-@AnalyzeClasses(packages = "com.secsmart.regent")
+@AnalyzeClasses(packages = "com.pydlove.regent")
 class ArchitectureTest {
 
     static final ArchRule DOMAIN_MUST_BE_FRAMEWORK_FREE =
@@ -558,18 +558,85 @@ class ArchitectureTest {
 
 ### 已完成
 
-1. ✅ `regent/` 内 `git init`，五模块 POM 骨架，`<parent>` 指向 `api-parent`
+1. ✅ 五模块 POM 骨架（`<parent>` 指向内部 `api-parent`），基础包名 `com.pydlove.regent`
 2. ✅ MySQL 8.0.43 实例、`regent` / `regent_test` 两个 schema、权限受限账号（见 `TECH_STACK.md` 3.7）
-3. ✅ `V1__init_schema.sql`（十张表、11 个外键），Flyway 迁移已跑通
+3. ✅ `V1__init_schema.sql`（十张表、11 个外键），Flyway 迁移已跑通；`clean-disabled: true`
 4. ✅ `shared/domain/DomainException` + `shared/kernel/DecisionLevel`
-5. ✅ `governance` 域 `DecisionArbiter` + 27 个单测（含 2.5 的两条安全约束）
+5. ✅ `governance` 域 `DecisionArbiter`（就高不就低）+ 单测
+6. ✅ `execution` 域 `Task` 聚合：静态工厂 + 七个带守卫的领域方法（dispatch / block /
+   resume / complete / fail / retry / cancel），49 个单测，`regent-core` 零框架依赖
+7. ✅ 仓储一分为二：`TaskRepository`（取聚合来改）与 `TaskQueryRepository`（读模型直出
+   `TaskListItem`）；实现在 `regent-infrastructure`，SQL 收在 `mapper/*.xml`
+8. ✅ 查询接口：任务列表（分页 / 状态筛选 / 标题搜索 / 状态统计）、任务详情、
+   重试与终止，决策列表与详情；`interfaces/dto` 只出 DTO，领域对象不外泄
+9. ✅ `ArchitectureTest`（7 条 ArchUnit 规则）守着硬约束，`mvn verify` 挂则违规
+10. ✅ 前端 `regent-web` 接通真实接口：列表 / 服务端分页 / 筛选 / 搜索 / 检查器，
+    见 `FRONTEND.md`
+11. ✅ 本地启停脚本与远程发布脚本，见 `deploy/README.md`
+12. ✅ 决策写路径：`Decision` 聚合（三条不变量：只有待批能决议、生效等级不得低于自评、
+    不可逆不许 AI 自主决断）、`ApprovalToken`（只存 SHA-256、一次性、到期即失效）、
+    `DecisionApprovalService` 跨聚合编排（决策落库 + 任务续跑/终止，跑在一个事务里），
+    `POST /api/decisions/{id}/approve|reject`，前端审批闭环已实测
+13. ✅ 执行链路：`TaskRun` 聚合（一次尝试一行不可改写的事实）+ `task_run` / `run_event`
+     两张表（`V2__task_run_running_and_changed_files.sql`）、`TaskRunService`（一次尝试的完整
+     生命周期：建会话 → 事件流落库 → 翻译出参 → 阈值内自主决断并续跑 / 超阈值挂起 →
+     人工批准后 `codex exec resume` 带结论续跑）、`TaskDispatchService`（认领 + 后台执行 +
+     并发上限 + 失败冷却）、`CodexCliAdapter`（进程、超时、stdout/stderr 分流、JSONL、
+     末条消息）、`GitBranchManager`（一任务一分支，绝不直接改主干）、
+     `POST /api/tasks/{id}/dispatch`、`GET /api/tasks/{id}/runs`、`GET /api/runs/{id}`；
+     前端派发按钮 + 运行记录面板 + 事件流弹框
+14. ✅ 决策规则从 `decision_rule` 表加载：`DecisionRuleRepository`（domain）+
+    `MyBatisDecisionRuleRepository`（infrastructure），`DecisionArbiter` 改成吃规则列表；
+    规则行解析失败直接报错，不静默跳过 —— 分级是核心域，宁可起不来也不许降级放行
+15. ✅ 图片附件：`TaskAttachment`（不可变事实，只守「这是一张图片」这条结构性不变量）、
+    `task_attachment` 表（`V3__task_attachment.sql`，外键挂任务）、`AttachmentStorage` 端口 +
+    `LocalAttachmentStorage` 适配器（**磁盘文件名只有 UUID + 扩展名** —— 原文件名会随
+    `codex exec -i` 进 argv，非 ASCII 会被平台字符集打成问号，就是上面第 1 条踩过的坑）、
+    `TaskAttachmentService`（白名单 PNG / JPEG / GIF / WebP + 单张上限 + 魔数校验；
+    拒收 SVG —— 它是能带脚本的 XML，原样回吐就是 XSS 入口）、
+    `POST /api/tasks/{id}/attachments` / `GET /api/tasks/{id}/attachments` /
+    `GET /api/attachments/{id}/content`。执行侧每次尝试开局读一次附件，逐张变成
+    `codex exec -i <path>`（首跑与续跑都带，见 `ExecRequest.imagePaths`）。
+    前端三种入口（粘贴 / 拖放 / 选文件）与「先建任务再逐张上传」的时序见 `FRONTEND.md` 15.6
 
-> 注：`shared/domain` 目前只落了 `DomainException`。`AggregateRoot` / `Entity` / `ValueObject` /
-> `DomainEvent` 这些基类要等第一个聚合根真正需要它们时再补 —— 预先建一套用不上的基类属于投机抽象。
+**执行链路落地时修掉的三个真缺陷**（由 `CodexCliAdapterTest` 与 `TaskLifecycleIT` 逼出来，
+每个的失败现象都离根因很远）：
+
+1. **中文指令经 argv 会被打烂**：`file.encoding` 是 `US-ASCII` 时（surefire、systemd、`LANG`
+   未设置的环境都见过），`ProcessBuilder` 把中文 argv 逐字替换成 `?` 且不报任何错——模型收到
+   一堆问号，平台却以为派发成功。修法：指令写临时文件 + `redirectInput`，命令行末尾加位置参数
+   `-`（`codex exec -` / `codex exec resume <id> -` 都从 stdin 读）；启动脚本与 systemd 单元
+   同时钉死 `-Dfile.encoding=UTF-8`
+2. **事件回调跑在读线程上会锁死**：读线程拿另一条连接写 `run_event`，撞上调用方尚未提交的
+   `task_run` 父行锁 → pump 线程永久阻塞 → `join` 超时 → token 读成 0。修法：读线程只解析入队
+   （`ConcurrentLinkedQueue`），调用线程每 200ms 轮询并派发
+3. **续跑判断被自己的记录遮住**：`openingPrompt` 在插入本次 `task_run` 之后才查「上一次尝试」，
+   永远读到自己的 RUNNING 行，人工结论永远进不了续跑指令。修法：落行前取 `previous`
+
+真机联调（2026-10-16）：临时仓库 + 真 `codex exec`，任务一轮 DONE，`thread_id` 写回、
+token 四路用量、18 条事件、出参 JSON 全部落库，`changedFiles` 与实际改动一致。
+回归仍靠假 codex 脚本回放固定 JSONL 的集成测试，真机验证只有这一次，别拿它当回归。
 
 ### 待办
 
-6. 加 `ArchitectureTest` 四条 ArchUnit 规则（依赖已引入 `regent-boot`，但尚无测试类，目前无人看守）
-7. `governance` 的仓储与应用服务：规则从 `decision_rule` 表加载、决策单落 `decision` 表
-8. 实现 `execution` 域 + `CodexCliAdapter`，拿一个真实项目端到端试点
-9. 前端 `regent-web` 脚手架 + 样式基准页（见 `FRONTEND.md` 第九节）
+16. 邮件与推送通道，以及邮件里的「一键批准」入口（`POST /api/approvals/{token}`）
+17. 需求单与「需求 → 任务」的拆解链路；Bug 单的写操作（派发修复任务）
+18. 决策规则的维护界面（规则已在表里，缺的是增删改与启停的入口）
+19. 项目的改名 / 暂停 / 删除入口（`project.enabled` 已在，缺操作入口；写侧仓储目前只支持新增，
+    见 `ProjectRepository` 的注释）。**读侧已落地**（2026-10-16）：前端有了项目管理页
+    （`/projects`，项目画像 + 该项目的最近任务）与全站唯一的注册入口（工具栏 / 项目页 /
+    新建任务「一个项目都没有」时的死结出口）；页面上刻意不摆暂停、删除这类点了没反应的假开关
+20. 附件的删除入口（上传与查看有了，删还没有）：删行不难，难的是**两个存储要一起改** ——
+    `task_attachment` 行没了、`~/.regent/attachments` 下的文件还在，或者反过来。
+    这类「双写」的收尾单独设计，别顺手加一个 DELETE 接口就算完
+
+> 2026-10-16 已做（原第 16 项的前半，即现在的第 17 项）：项目注册（`Project` 聚合 + `POST /api/projects` +
+> `MyBatisProjectRepository`）与人工录入任务（`TaskCommandService.createManual` + `POST /api/tasks`，
+> 来源 `MANUAL`）。任务必须挂在已注册的项目下 —— `task.project_id` 有外键，执行还要项目的路径与阈值，
+> 所以前端把「新建任务」做成了「选项目 → 写指令」（标题由后端从首行推导），项目为空时给一个直达注册的入口 ——
+> 注册项目本身不常驻在新建任务里，它挂在工具栏的项目下拉右边与项目页上。
+> 剩下的「需求 → 任务」是另一条链路：`requirement` 表与 `RequirementId` 都在，缺的是拆解用例与录入界面。
+
+> 注：`shared/domain` 目前只落了 `DomainException`。`AggregateRoot` / `Entity` / `ValueObject` /
+> `DomainEvent` 这些基类要等第一个聚合根真正需要它们时再补 —— 预先建一套用不上的基类属于投机抽象。
+> `Task` 聚合已经落地，它没有继承任何基类，这条判断仍然成立。
