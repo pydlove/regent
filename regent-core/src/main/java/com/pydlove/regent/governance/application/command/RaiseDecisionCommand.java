@@ -12,6 +12,8 @@ import java.util.Objects;
  *
  * @param autoThreshold 项目级自动决策阈值，来自 {@code project.default_decision_level}
  * @param changedPaths  本次改动涉及的路径，用于 PATH_GLOB 规则
+ * @param requiresHumanApproval 是否无条件要求人工批准；分支创建等平台安全动作必须为 true，
+ *                              不受项目阈值影响
  */
 public record RaiseDecisionCommand(
         TaskId taskId,
@@ -23,7 +25,23 @@ public record RaiseDecisionCommand(
         String recommendation,
         boolean reversible,
         String blastRadius,
-        List<String> changedPaths) {
+        List<String> changedPaths,
+        boolean requiresHumanApproval) {
+
+    /** 执行器上报的普通决策默认仍按分级规则判断是否可自动决议。 */
+    public RaiseDecisionCommand(TaskId taskId,
+                                ProjectId projectId,
+                                DecisionLevel autoThreshold,
+                                DecisionLevel aiLevel,
+                                String question,
+                                List<String> options,
+                                String recommendation,
+                                boolean reversible,
+                                String blastRadius,
+                                List<String> changedPaths) {
+        this(taskId, projectId, autoThreshold, aiLevel, question, options, recommendation,
+                reversible, blastRadius, changedPaths, false);
+    }
 
     public RaiseDecisionCommand {
         Objects.requireNonNull(taskId, "决策必须挂在某个任务上");

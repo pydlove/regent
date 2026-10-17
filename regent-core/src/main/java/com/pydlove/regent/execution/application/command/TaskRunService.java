@@ -164,7 +164,8 @@ public class TaskRunService {
                         execution.threadId,
                         timeout,
                         execution.images,
-                        execution.environment.values()),
+                        execution.environment.values(),
+                        execution.run.getBranchName()),
                 execution.recorder);
         execution.threadId = settlement.adoptThreadId(
                 execution.task.getId(), result.threadId(), execution.threadId);

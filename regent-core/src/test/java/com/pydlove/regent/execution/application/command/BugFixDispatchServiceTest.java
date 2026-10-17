@@ -48,15 +48,17 @@ class BugFixDispatchServiceTest {
         tasks.wire(runs);
         events.wire(runs);
         projects.put(ExecutionFakes.Projects.profile(1L, DecisionLevel.L1, true));
+        DecisionRaiseService decisionRaiseService = new DecisionRaiseService(rules, decisions);
         TaskRunService runService = new TaskRunService(tasks, runs, events, attachments, projects,
                 new ExecutionFakes.Environments(),
                 new ExecutionFakes.TaskPlugins(),
-                new RunSettlementService(tasks, decisions, new DecisionRaiseService(rules, decisions), bugs),
+                new RunSettlementService(tasks, decisions, decisionRaiseService, bugs),
                 executor, Duration.ofMinutes(30));
         TaskDispatchService dispatchService = new TaskDispatchService(
                 tasks,
                 projects,
                 branches,
+                new BranchProvisioningService(branches, decisionRaiseService),
                 runService,
                 workers,
                 new ExecutionConcurrencyGate(1),

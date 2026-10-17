@@ -136,7 +136,7 @@ class PlanExecutionServiceTest {
         private final List<TaskId> failing = new ArrayList<>();
 
         private RecordingDispatch() {
-            super(null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null);
         }
 
         @Override

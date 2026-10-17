@@ -1,6 +1,7 @@
 package com.pydlove.regent.execution.infrastructure.persistence;
 
 import com.pydlove.regent.bug.domain.model.BugId;
+import com.pydlove.regent.execution.domain.model.BranchApprovalState;
 import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskSnapshot;
@@ -39,6 +40,7 @@ public final class TaskDataMapper {
         data.setPriority(task.getPriority());
         data.setCodexThreadId(task.getCodexThreadId().orElse(null));
         data.setBranchName(task.getBranchName().orElse(null));
+        data.setBranchApprovalState(task.getBranchApprovalState().name());
         data.setBlockingDecisionId(task.getBlockingDecisionId().map(DecisionId::value).orElse(null));
         data.setAttemptCount(task.getAttemptCount());
         data.setStartedAt(toDb(task.getStartedAt().orElse(null)));
@@ -61,6 +63,8 @@ public final class TaskDataMapper {
                 TaskStatus.valueOf(data.getStatus()),
                 data.getCodexThreadId(),
                 data.getBranchName(),
+                data.getBranchApprovalState() == null
+                        ? BranchApprovalState.NONE : BranchApprovalState.valueOf(data.getBranchApprovalState()),
                 optionalId(data.getBlockingDecisionId()).map(DecisionId::of).orElse(null),
                 data.getAttemptCount(),
                 fromDb(data.getStartedAt()),

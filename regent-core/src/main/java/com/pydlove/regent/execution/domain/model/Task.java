@@ -47,6 +47,7 @@ public class Task {
     private TaskStatus status;
     private String codexThreadId;
     private String branchName;
+    private BranchApprovalState branchApprovalState;
     private DecisionId blockingDecisionId;
     private int attemptCount;
     private Instant startedAt;
@@ -70,6 +71,7 @@ public class Task {
         this.prompt = requirePrompt(prompt);
         this.priority = priority;
         this.status = TaskStatus.PENDING;
+        this.branchApprovalState = BranchApprovalState.NONE;
         this.attemptCount = 0;
         this.createdAt = requireNotNull(createdAt, "创建时间");
         this.updatedAt = createdAt;
@@ -106,6 +108,8 @@ public class Task {
         task.status = requireNotNull(snapshot.status(), "任务状态");
         task.codexThreadId = snapshot.codexThreadId();
         task.branchName = snapshot.branchName();
+        task.branchApprovalState = snapshot.branchApprovalState() == null
+                ? BranchApprovalState.NONE : snapshot.branchApprovalState();
         task.blockingDecisionId = snapshot.blockingDecisionId();
         task.attemptCount = snapshot.attemptCount();
         task.startedAt = snapshot.startedAt();
@@ -140,6 +144,7 @@ public class Task {
     public void dispatch(String branchName) {
         requireStateIn("只有待执行或排队中的任务可以派发", TaskStatus.PENDING, TaskStatus.QUEUED);
         this.branchName = requireText(branchName, "分支名");
+        this.branchApprovalState = BranchApprovalState.NONE;
         this.status = TaskStatus.RUNNING;
         this.attemptCount += 1;
         this.startedAt = now();
@@ -152,6 +157,51 @@ public class Task {
         requireState(TaskStatus.RUNNING, "只有执行中的任务可以阻塞");
         this.blockingDecisionId = requireNotNull(decisionId, "阻塞决策");
         this.status = TaskStatus.BLOCKED;
+        touch();
+    }
+
+    /**
+     * 首次执行需要创建分支，先挂起等人工批准。
+     *
+     * <p>只允许从尚未执行的 PENDING/QUEUED 进入：分支创建审批必须发生在任何 Git 副作用之前，
+     * 已跑过的任务不会走这条路径。调用方负责在决策单落库后再调用本方法。
+     */
+    public void requestBranchApproval(DecisionId decisionId) {
+        requireStateIn("只有待执行或排队中的任务可以申请创建分支",
+                TaskStatus.PENDING, TaskStatus.QUEUED);
+        if (branchApprovalState != BranchApprovalState.NONE) {
+            throw new DomainException("任务已有分支审批状态，不能重复申请：" + branchApprovalState);
+        }
+        this.blockingDecisionId = requireNotNull(decisionId, "分支审批决策");
+        this.branchApprovalState = BranchApprovalState.PENDING;
+        this.status = TaskStatus.BLOCKED;
+        touch();
+    }
+
+    /** 分支创建获得人工批准。任务回到排队中，下一次派发才允许真正创建分支。 */
+    public void approveBranchCreation() {
+        requireState(TaskStatus.BLOCKED, "只有阻塞中的任务可以批准创建分支");
+        if (branchApprovalState != BranchApprovalState.PENDING) {
+            throw new DomainException("任务当前没有待批准的分支创建申请：" + branchApprovalState);
+        }
+        this.blockingDecisionId = null;
+        this.branchApprovalState = BranchApprovalState.APPROVED;
+        this.status = TaskStatus.QUEUED;
+        touch();
+    }
+
+    /** 分支创建被驳回。与普通任务终止一样落 CANCELLED，但清掉审批状态，重试时重新申请。 */
+    public void rejectBranchCreation() {
+        requireState(TaskStatus.BLOCKED, "只有阻塞中的任务可以驳回创建分支");
+        if (branchApprovalState != BranchApprovalState.PENDING) {
+            throw new DomainException("任务当前没有待批准的分支创建申请：" + branchApprovalState);
+        }
+        this.blockingDecisionId = null;
+        this.branchApprovalState = BranchApprovalState.NONE;
+        this.status = TaskStatus.CANCELLED;
+        if (this.finishedAt == null) {
+            this.finishedAt = now();
+        }
         touch();
     }
 
@@ -207,6 +257,7 @@ public class Task {
      */
     public void retry() {
         requireStateIn("只有失败或已终止的任务可以重试", TaskStatus.FAILED, TaskStatus.CANCELLED);
+        this.branchApprovalState = BranchApprovalState.NONE;
         this.status = TaskStatus.PENDING;
         this.startedAt = null;
         this.finishedAt = null;
@@ -234,6 +285,7 @@ public class Task {
         }
         this.status = TaskStatus.CANCELLED;
         this.blockingDecisionId = null;
+        this.branchApprovalState = BranchApprovalState.NONE;
         if (this.finishedAt == null) {
             this.finishedAt = now();
         }
@@ -361,6 +413,18 @@ public class Task {
 
     public Optional<String> getBranchName() {
         return Optional.ofNullable(branchName);
+    }
+
+    public BranchApprovalState getBranchApprovalState() {
+        return branchApprovalState;
+    }
+
+    public boolean isBranchCreationApproved() {
+        return branchApprovalState == BranchApprovalState.APPROVED;
+    }
+
+    public boolean isAwaitingBranchApproval() {
+        return branchApprovalState == BranchApprovalState.PENDING;
     }
 
     public Optional<DecisionId> getBlockingDecisionId() {

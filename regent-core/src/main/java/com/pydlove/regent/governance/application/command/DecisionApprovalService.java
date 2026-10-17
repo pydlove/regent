@@ -79,13 +79,21 @@ public class DecisionApprovalService {
             // 而这样排序换来的是「一个被拒绝的请求不会在内存里留下任何已迁移的对象」。
             requireBlockedByThisDecision(task, decision.getId());
             decision.approve(command.choice(), command.note());
-            task.resume();
+            if (task.isAwaitingBranchApproval()) {
+                task.approveBranchCreation();
+            } else {
+                task.resume();
+            }
         } else {
             decision.reject(command.choice(), command.note());
             // 任务已经不在这条决策上（比如被人工直接终止了）时只留决策记录：硬要给一个终态任务
             // 判终止只会抛异常，把一次正常的人工否决变成 500，而决策单会永远停在待批。
             if (task.getStatus() == TaskStatus.BLOCKED) {
-                task.cancel();
+                if (task.isAwaitingBranchApproval()) {
+                    task.rejectBranchCreation();
+                } else {
+                    task.cancel();
+                }
             }
         }
 

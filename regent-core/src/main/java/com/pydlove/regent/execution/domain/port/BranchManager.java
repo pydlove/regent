@@ -11,6 +11,14 @@ import com.pydlove.regent.execution.domain.model.TaskId;
 public interface BranchManager {
 
     /**
+     * 只检查分支现状，不创建、不切换。
+     *
+     * <p>首次派发先用它判断是否真的需要新建分支；需要时先走人工审批，批准后再调用
+     * {@link #createFor(String, TaskId)}。检查与创建分开，审批才可能发生在 Git 副作用之前。
+     */
+    BranchPlan plan(String projectPath, TaskId taskId);
+
+    /**
      * 为任务准备一条独立分支并切过去。
      *
      * @param projectPath 工作区绝对路径

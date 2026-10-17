@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 public class PluginRow {
 
     private Long id;
+    private String builtinKey;
     private String name;
     private String description;
     private String tags;

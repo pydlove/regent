@@ -194,6 +194,9 @@
   --spacing-control-sm: 20px;
   --spacing-control: 24px;
   --spacing-control-lg: 28px;
+  /* 登录页这类「一屏一个主操作」的场景需要更大的触控/视觉落点。
+     只加一档，避免控件高度继续膨胀成通用后台的 32/36/40 全家桶。 */
+  --spacing-control-xl: 36px;
   --spacing-row: 28px;
   --shadow-control: var(--fx-shadow-control);
   --shadow-panel: var(--fx-shadow-panel);

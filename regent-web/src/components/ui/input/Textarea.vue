@@ -8,10 +8,18 @@ const props = withDefaults(
     size?: InputVariantProps['size']
     invalid?: boolean
     disabled?: boolean
+    readonly?: boolean
     placeholder?: string
     rows?: number
   }>(),
-  { size: 'regular', invalid: false, disabled: false, placeholder: '', rows: 3 },
+  {
+    size: 'regular',
+    invalid: false,
+    disabled: false,
+    readonly: false,
+    placeholder: '',
+    rows: 3,
+  },
 )
 
 const model = defineModel<string>({ default: '' })
@@ -27,6 +35,7 @@ const classes = computed(() =>
     :rows="rows"
     :placeholder="placeholder"
     :disabled="disabled"
+    :readonly="readonly"
     :aria-invalid="invalid || undefined"
     :class="classes"
   />

@@ -82,4 +82,18 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <!-- 内置插件源文件在仓库根目录维护，打包时平移到 classpath，运行时不再依赖项目路径。 -->
+            <resource>
+                <directory>${maven.multiModuleProjectDirectory}/plugins</directory>
+                <targetPath>builtin-plugins</targetPath>
+                <filtering>false</filtering>
+            </resource>
+        </resources>
+    </build>
 </project>

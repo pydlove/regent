@@ -37,9 +37,11 @@ const loading = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
+const readonly = computed(() => props.plugin?.builtin === true)
 
 const canSave = computed(
   () =>
+    !readonly.value &&
     name.value.trim().length > 0 &&
     filename.value.trim().length > 0 &&
     content.value.trim().length > 0 &&
@@ -105,7 +107,7 @@ const importFile = async (event: Event) => {
 }
 
 const save = async () => {
-  if (!canSave.value) return
+  if (!canSave.value || readonly.value) return
   saving.value = true
   error.value = null
   const input: SavePluginInput = {
@@ -139,28 +141,47 @@ const save = async () => {
     v-model:open="open"
     layout="form"
     size="large"
-    :title="props.plugin ? '编辑插件' : '新增插件'"
-    description="把可复用代码、协议说明或接入步骤存成能力包；执行任务时交给 AI 直接复用。"
+    :title="readonly ? '查看内置插件' : props.plugin ? '编辑插件' : '新增插件'"
+    :description="
+      readonly
+        ? '内置插件随发行包更新，只能启用或停用，不能手工修改正文。'
+        : '把可复用代码、协议说明或接入步骤存成能力包；执行任务时交给 AI 直接复用。'
+    "
   >
     <div class="flex flex-col gap-3">
       <p v-if="loading" class="text-caption text-label-tertiary">正在读取插件内容…</p>
 
       <DialogField label="名称" required hint="例如：Kafka 读取组件">
-        <Input v-model="name" placeholder="Kafka 读取组件" class="w-full" />
+        <Input v-model="name" :readonly="readonly" placeholder="Kafka 读取组件" class="w-full" />
       </DialogField>
 
       <DialogField label="说明" hint="说明适用场景、依赖和限制">
-        <Textarea v-model="description" :rows="2" placeholder="复用已有消费者配置与序列化处理" />
+        <Textarea
+          v-model="description"
+          :readonly="readonly"
+          :rows="2"
+          placeholder="复用已有消费者配置与序列化处理"
+        />
       </DialogField>
 
       <DialogField label="标签" hint="用逗号分隔，最多 8 个">
-        <Input v-model="tagsText" placeholder="Kafka, 中间件, Java" class="w-full" />
+        <Input
+          v-model="tagsText"
+          :readonly="readonly"
+          placeholder="Kafka, 中间件, Java"
+          class="w-full"
+        />
       </DialogField>
 
       <DialogField label="文件名" required hint="导入文件时自动填入，也可以手动修改">
         <div class="flex items-center gap-2">
-          <Input v-model="filename" placeholder="KafkaReader.java" class="min-w-0 flex-1" />
-          <Button :disabled="loading || saving" @click="fileInput?.click()">
+          <Input
+            v-model="filename"
+            :readonly="readonly"
+            placeholder="KafkaReader.java"
+            class="min-w-0 flex-1"
+          />
+          <Button v-if="!readonly" :disabled="loading || saving" @click="fileInput?.click()">
             <Icon :as="Upload" size="inline" />从文件导入
           </Button>
           <input ref="fileInput" type="file" class="hidden" @change="importFile" />
@@ -170,6 +191,7 @@ const save = async () => {
       <DialogField label="内容" required :hint="`UTF-8 文本或代码，最大 ${formatBytes(MAX_CONTENT_BYTES)}`">
         <Textarea
           v-model="content"
+          :readonly="readonly"
           :rows="14"
           class="font-mono"
           placeholder="粘贴已经验证过的代码或实现说明，不要放密码、Token 等凭据"
@@ -177,15 +199,15 @@ const save = async () => {
       </DialogField>
 
       <DialogField label="状态">
-        <Switch v-model="enabled" label="启用，可被任务绑定" />
+        <Switch v-model="enabled" :disabled="readonly" label="启用，可被任务绑定" />
       </DialogField>
 
       <p v-if="error" class="text-caption text-danger">{{ error }}</p>
     </div>
 
     <template #footer>
-      <Button :disabled="saving" @click="open = false">取消</Button>
-      <Button variant="primary" :disabled="!canSave" @click="save">
+      <Button :disabled="saving" @click="open = false">{{ readonly ? '关闭' : '取消' }}</Button>
+      <Button v-if="!readonly" variant="primary" :disabled="!canSave" @click="save">
         <Icon :as="FileCode2" size="inline" />
         {{ saving ? '保存中…' : '保存插件' }}
       </Button>

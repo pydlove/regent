@@ -53,13 +53,15 @@ class TaskDispatchServiceTest {
         tasks.wire(runs);
         events.wire(runs);
         projects.put(ExecutionFakes.Projects.profile(1L, DecisionLevel.L1, true));
+        DecisionRaiseService decisionRaiseService = new DecisionRaiseService(rules, decisions);
         TaskRunService runService = new TaskRunService(tasks, runs, events, attachments, projects,
                 new ExecutionFakes.Environments(),
                 new ExecutionFakes.TaskPlugins(),
-                new RunSettlementService(tasks, decisions, new DecisionRaiseService(rules, decisions), bugs),
+                new RunSettlementService(tasks, decisions, decisionRaiseService, bugs),
                 executor, Duration.ofMinutes(30));
         service = new TaskDispatchService(
-                tasks, projects, branches, runService, workers, concurrencyGate, transactions);
+                tasks, projects, branches, new BranchProvisioningService(branches, decisionRaiseService),
+                runService, workers, concurrencyGate, transactions);
     }
 
     private Task add(TaskStatus status) {
@@ -163,6 +165,28 @@ class TaskDispatchServiceTest {
 
             assertEquals(TaskStatus.PENDING, tasks.get(1L).getStatus());
             assertEquals(0, workers.size(), "认领失败就不能再提交执行");
+        }
+
+        @Test
+        void 首次需要新建分支时先生成审批单且不提交执行() {
+            branches.requiresCreation = true;
+            Task task = add(TaskStatus.PENDING);
+
+            Task waiting = service.dispatch(TaskId.of(1L));
+
+            assertEquals(TaskStatus.BLOCKED, waiting.getStatus());
+            assertTrue(waiting.getBranchName().isEmpty());
+            assertTrue(branches.created.isEmpty(), "审批前绝不能创建分支");
+            assertEquals(0, workers.size(), "挂起等人不是一次执行");
+            assertEquals(1, decisions.all().size());
+            assertTrue(decisions.all().get(0).isPending());
+
+            task.approveBranchCreation();
+            Task started = service.dispatch(TaskId.of(1L));
+
+            assertEquals(TaskStatus.RUNNING, started.getStatus());
+            assertEquals(List.of("codex/task-1"), branches.created);
+            assertEquals(1, workers.size());
         }
 
         @Test

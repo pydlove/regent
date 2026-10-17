@@ -71,6 +71,12 @@ const router = createRouter({
       meta: { title: '插件' },
     },
     {
+      path: '/help',
+      name: 'help',
+      component: () => import('@/views/HelpView.vue'),
+      meta: { title: '使用说明' },
+    },
+    {
       path: '/bugs',
       redirect: (to) => ({ name: 'tasks', query: { ...to.query, view: 'bugs' } }),
     },

@@ -2,6 +2,7 @@
 import {
   Blocks,
   CalendarClock,
+  CircleHelp,
   ChevronLeft,
   ChevronRight,
   FolderKanban,
@@ -227,6 +228,11 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
             <SegmentedControl v-model="themeModel" :items="themeOptions" size="lg" />
           </div>
           <FailedTaskNotifications />
+          <Tooltip content="使用说明">
+            <IconButton label="使用说明" size="lg" @click="router.push('/help')">
+              <Icon :as="CircleHelp" size="large" />
+            </IconButton>
+          </Tooltip>
           <Tooltip content="设置">
             <IconButton label="设置" size="lg" @click="router.push('/settings')">
               <Icon :as="Settings" size="large" />

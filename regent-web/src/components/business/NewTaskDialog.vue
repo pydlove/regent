@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { Blocks, ImagePlus, Plus, TriangleAlert, X } from '@lucide/vue'
+import { ImagePlus, Plus, TriangleAlert, X } from '@lucide/vue'
 import { computed, onUnmounted, ref, watch } from 'vue'
 
 import { ACCEPTED_IMAGE_TYPES, MAX_IMAGE_BYTES, uploadTaskAttachment } from '@/api/attachments'
 import { ApiError } from '@/api/http'
 import { bindTaskPlugins, listPlugins } from '@/api/plugins'
 import { createTask } from '@/api/tasks'
+import PluginPicker from '@/components/business/PluginPicker.vue'
 import Button from '@/components/ui/button/Button.vue'
-import Checkbox from '@/components/ui/checkbox/Checkbox.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import DialogField from '@/components/ui/dialog/DialogField.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
@@ -20,6 +20,7 @@ import { useToast } from '@/composables/useToast'
 import { useTaskStore } from '@/stores/useTaskStore'
 import type { PluginSummary } from '@/types/api'
 import { formatBytes } from '@/utils/format'
+import { MAX_TASK_PLUGINS } from '@/utils/pluginCatalog'
 
 /*
  * 新建任务。
@@ -111,8 +112,9 @@ const pickedProjectValue = computed({
 const prompt = ref('')
 const priority = ref('0')
 const plugins = ref<PluginSummary[]>([])
-const selectedPluginIds = ref(new Set<number>())
+const selectedPluginIds = ref<number[]>([])
 const loadingPlugins = ref(false)
+const pluginsError = ref<string | null>(null)
 
 /** editing 可以改；creating 已提交，正在等创建接口返回 */
 type Phase = 'editing' | 'creating'
@@ -174,10 +176,13 @@ const loadProjects = async () => {
 
 const loadPlugins = async () => {
   loadingPlugins.value = true
+  pluginsError.value = null
   try {
     plugins.value = (await listPlugins()).filter((plugin) => plugin.enabled)
   } catch (e) {
-    error.value = messageOf(e)
+    // 插件是可选项，接口暂不可用不能把整个任务创建入口判死
+    plugins.value = []
+    pluginsError.value = messageOf(e)
   } finally {
     loadingPlugins.value = false
   }
@@ -192,22 +197,12 @@ watch(open, (value) => {
   phase.value = 'editing'
   pickedProjectId.value = null
   dragging.value = false
-  selectedPluginIds.value = new Set()
+  pluginsError.value = null
+  selectedPluginIds.value = []
   releasePreviews()
   void loadProjects()
   void loadPlugins()
 })
-
-const togglePlugin = (pluginId: number, checked: boolean) => {
-  const next = new Set(selectedPluginIds.value)
-  if (checked && next.size >= 8) {
-    toast.warning('最多绑定 8 个插件', '先移除一个再选择')
-    return
-  }
-  if (checked) next.add(pluginId)
-  else next.delete(pluginId)
-  selectedPluginIds.value = next
-}
 
 const addFiles = (files: File[]) => {
   for (const file of files) {
@@ -334,9 +329,9 @@ const submit = async () => {
       prompt: prompt.value.trim(),
       priority: Number(priority.value) || 0,
     })
-    if (selectedPluginIds.value.size > 0) {
+    if (selectedPluginIds.value.length > 0) {
       try {
-        await bindTaskPlugins(task.id, [...selectedPluginIds.value])
+        await bindTaskPlugins(task.id, selectedPluginIds.value)
       } catch (e) {
         toast.warning(`#${task.id} 插件绑定失败`, messageOf(e))
       }
@@ -478,36 +473,28 @@ onUnmounted(releasePreviews)
         </span>
       </DialogField>
 
-      <DialogField label="插件" hint="已写好的组件会随执行指令交给 AI，优先复用而不是重新生成">
+      <DialogField
+        label="插件"
+        hint="可搜索或按标签筛选；已写好的组件会随执行指令交给 AI，优先复用而不是重新生成"
+      >
         <p v-if="loadingPlugins" class="text-caption text-label-tertiary">正在读取插件库…</p>
+        <p
+          v-else-if="pluginsError"
+          class="text-caption text-label-tertiary"
+          :title="pluginsError"
+        >
+          插件库暂时不可用，不影响创建任务
+        </p>
         <p v-else-if="plugins.length === 0" class="text-caption text-label-tertiary">
           还没有可用插件，可先到「插件」页添加。
         </p>
-        <div v-else class="scroll-area max-h-40 space-y-1 overflow-y-auto">
-          <div
-            v-for="plugin in plugins"
-            :key="plugin.id"
-            class="flex items-start gap-2 rounded-panel border border-separator-soft bg-content px-2.5 py-1.5"
-          >
-            <Checkbox
-              :model-value="selectedPluginIds.has(plugin.id)"
-              :disabled="phase !== 'editing'"
-              :aria-label="`绑定插件 ${plugin.name}`"
-              class="mt-0.5"
-              @update:model-value="togglePlugin(plugin.id, $event === true)"
-            />
-            <span class="min-w-0 flex-1">
-              <span class="flex items-center gap-1.5">
-                <Icon :as="Blocks" size="inline" class="text-label-tertiary" />
-                <span class="truncate text-caption font-emphasis text-label">{{ plugin.name }}</span>
-                <span class="tnum text-caption text-label-tertiary">v{{ plugin.currentRevision }}</span>
-              </span>
-              <span class="mt-0.5 block truncate text-caption text-label-secondary">
-                {{ plugin.description || plugin.filename }}
-              </span>
-            </span>
-          </div>
-        </div>
+        <PluginPicker
+          v-else
+          v-model="selectedPluginIds"
+          :plugins="plugins"
+          :disabled="phase !== 'editing'"
+          :max="MAX_TASK_PLUGINS"
+        />
       </DialogField>
 
       <DialogField label="优先级" hint="数值越大越先派发，默认 0">

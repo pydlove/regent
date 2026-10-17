@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { AlertTriangle, Check, ImagePlus, TriangleAlert, X } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 
 import { ACCEPTED_IMAGE_TYPES, listTaskAttachments, uploadTaskAttachment } from '@/api/attachments'
 import DecisionLevelBadge from '@/components/business/DecisionLevelBadge.vue'
@@ -17,7 +18,7 @@ import { formatBytes, formatRelative } from '@/utils/format'
 /*
  * 审批对话框。查看、批准、驳回共用同一个组件：
  *   查看 —— 展示判断所需的完整事实；待批记录可直接切换到批准或驳回
- *   批准 —— 可补充建议与图片，确认后从断点续跑
+ *   批准 —— 可补充建议与图片，确认后放行任务继续处理
  *   驳回 —— 必须填理由，理由会进上下文带回给下一轮执行
  *
  * 三种模式都只读传进来的 decision，调用点只管 open / decision / mode 三个东西。
@@ -86,14 +87,14 @@ const canApprove = computed(() => !reviewing.value)
 const isPending = computed(() => props.decision?.status === 'PENDING')
 
 const title = computed(() => {
-  if (props.mode === 'approve') return '批准并从断点续跑？'
+  if (props.mode === 'approve') return '批准并继续？'
   if (props.mode === 'reject') return '驳回并终止这条任务'
   return props.decision ? `决策 #${props.decision.id}` : '决策详情'
 })
 
 const description = computed(() => {
   if (props.mode === 'approve') {
-    return '批准后执行器会带着当前上下文继续，不会从头重跑；可以补充建议和图片。'
+    return '批准后任务会继续处理；如果已有执行会话，执行器会带着当前上下文从断点续跑。'
   }
   if (props.mode === 'reject') return '理由会写进决策留痕，也会作为上下文交给下一轮执行。'
   if (!isPending.value) return '这项决策已经处理，下面是当时的判断依据与处理结果。'
@@ -152,7 +153,13 @@ const confirm = async () => {
     <template v-if="decision">
       <div class="flex flex-wrap items-center gap-2">
         <span class="tnum text-caption text-label-tertiary">决策 #{{ decision.id }}</span>
-        <span class="tnum text-caption text-label-tertiary">#{{ decision.taskId }}</span>
+        <RouterLink
+          :to="{ name: 'tasks', query: { taskId: String(decision.taskId) } }"
+          class="tnum rounded-sm text-accent transition-colors duration-100 ease-apple hover:underline hover:underline-offset-2"
+          :aria-label="`在任务页查看任务 #${decision.taskId}`"
+        >
+          #{{ decision.taskId }}
+        </RouterLink>
         <DecisionLevelBadge :level="decision.effectiveLevel" />
         <span v-if="decision.levelEscalated" class="text-caption text-label-tertiary">
           AI 自评 {{ decision.aiLevel }}
@@ -163,9 +170,7 @@ const confirm = async () => {
         </span>
       </div>
 
-      <div
-        class="mt-3 max-h-[55vh] overflow-y-auto rounded-panel border border-separator-soft bg-content p-3"
-      >
+      <div class="mt-3 rounded-panel border border-separator-soft bg-content p-3">
         <p class="text-caption text-label-tertiary">任务</p>
         <p class="mt-1 text-body font-emphasis text-label">{{ decision.taskTitle }}</p>
 
@@ -345,25 +350,29 @@ const confirm = async () => {
       </p>
       <p v-if="approvalError" class="mt-1.5 text-caption text-danger">{{ approvalError }}</p>
     </template>
+    <div v-else class="py-8 text-center">
+      <p class="text-body text-label">决策详情尚未加载</p>
+      <p class="mt-1 text-caption text-label-secondary">关闭弹框后重新打开这条决策。</p>
+    </div>
 
     <template #footer>
       <Button :disabled="reviewing" @click="open = false">
         {{ mode === 'view' ? '关闭' : '取消' }}
       </Button>
-      <template v-if="mode === 'view' && isPending">
+      <template v-if="decision && mode === 'view' && isPending">
         <Button @click="emit('review', 'reject')">驳回</Button>
-        <Button variant="primary" @click="emit('review', 'approve')">批准并续跑</Button>
+        <Button variant="primary" @click="emit('review', 'approve')">批准并继续</Button>
       </template>
       <Button
-        v-if="mode === 'approve'"
+        v-if="decision && mode === 'approve'"
         variant="primary"
         :disabled="!canApprove"
         @click="confirm"
       >
-        {{ reviewing ? '上传中…' : '批准并续跑' }}
+        {{ reviewing ? '上传中…' : '批准并继续' }}
       </Button>
       <Button
-        v-else-if="mode === 'reject'"
+        v-else-if="decision && mode === 'reject'"
         variant="danger"
         :disabled="!canReject"
         @click="confirm"

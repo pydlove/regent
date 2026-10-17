@@ -32,6 +32,11 @@ public class MyBatisPluginRepository implements PluginRepository {
     }
 
     @Override
+    public Optional<Plugin> findByBuiltinKeyForUpdate(String builtinKey) {
+        return load(mapper.selectByBuiltinKeyForUpdate(builtinKey));
+    }
+
+    @Override
     public Optional<PluginVersion> findVersion(PluginId id, int revision) {
         return Optional.ofNullable(mapper.selectVersion(id.value(), revision))
                 .map(PluginDataMapper::toVersion);

@@ -12,10 +12,11 @@ import {
   RotateCcw,
   ScrollText,
   Trash2,
+  X,
   XCircle,
 } from '@lucide/vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { ACCEPTED_IMAGE_TYPES, listTaskAttachments, uploadTaskAttachment } from '@/api/attachments'
 import { getDecision } from '@/api/decisions'
@@ -72,6 +73,7 @@ import {
   type TaskStatus,
 } from '@/types/task'
 import { formatDateTime, formatDuration, formatDurationMillis, formatTokens } from '@/utils/format'
+import { parseTaskIdQuery } from '@/utils/taskNavigation'
 import BugView from '@/views/BugsView.vue'
 
 /*
@@ -84,7 +86,10 @@ const decisionStore = useDecisionStore()
 const runStore = useRunStore()
 const toast = useToast()
 const route = useRoute()
+const router = useRouter()
 const bugView = computed(() => route.query.view === 'bugs')
+const routeTaskId = computed(() => parseTaskIdQuery(route.query.taskId))
+let routeAppliedFilter = false
 
 const sourceMeta: Record<
   TaskSource,
@@ -157,7 +162,39 @@ watch(keywordInput, (value) => {
   }, 250)
 })
 
+watch(
+  routeTaskId,
+  (taskId) => {
+    if (taskId === null) {
+      if (store.taskIdFilter !== null) {
+        store.clearTaskFocus()
+        store.clearSelection()
+        routeAppliedFilter = true
+      } else {
+        routeAppliedFilter = false
+      }
+      return
+    }
+    store.clearSelection()
+    store.focusTask(taskId)
+    keywordInput.value = ''
+    routeAppliedFilter = true
+  },
+  { immediate: true },
+)
+
 const selected = computed(() => store.selected)
+const focusedTask = computed(() => {
+  const taskId = store.taskIdFilter
+  return taskId === null ? null : store.items.find((row) => row.id === taskId) ?? null
+})
+watch(
+  focusedTask,
+  (task) => {
+    if (task && store.selected?.id !== task.id) void store.select(task)
+  },
+  { immediate: true },
+)
 const promptOpen = ref(false)
 const editOpen = ref(false)
 
@@ -228,10 +265,25 @@ watch(
 
 /** 当前选中任务正阻塞在哪个决策上。列表项只有决策单号，问题与建议要单独取。 */
 const decision = ref<DecisionSummary | null>(null)
+const decisionLoading = ref(false)
+const decisionError = ref<string | null>(null)
 watch(
   () => store.selected?.decisionId,
   async (id) => {
-    decision.value = id ? await getDecision(id).catch(() => null) : null
+    decision.value = null
+    decisionError.value = null
+    decisionLoading.value = id !== undefined && id !== null
+    if (id === undefined || id === null) return
+    try {
+      const loaded = await getDecision(id)
+      if (store.selected?.decisionId === id) decision.value = loaded
+    } catch {
+      if (store.selected?.decisionId === id) {
+        decisionError.value = '决策详情读取失败，请稍后重试'
+      }
+    } finally {
+      if (store.selected?.decisionId === id) decisionLoading.value = false
+    }
   },
   { immediate: true },
 )
@@ -240,11 +292,23 @@ const reviewOpen = ref(false)
 const reviewMode = ref<'approve' | 'reject'>('approve')
 
 onMounted(() => {
-  void store.load()
+  if (!routeAppliedFilter) void store.load()
   void store.loadStats()
 })
 
+const dismissTaskFilter = () => {
+  store.clearTaskFocus()
+  store.clearSelection()
+  const query = { ...route.query }
+  delete query.taskId
+  void router.replace({ name: 'tasks', query })
+}
+
 const openReview = (mode: 'approve' | 'reject') => {
+  if (!decision.value) {
+    toast.warning('决策详情还没读取到', decisionError.value ?? '请等加载完成后再试')
+    return
+  }
   reviewMode.value = mode
   reviewOpen.value = true
 }
@@ -269,7 +333,7 @@ const onReviewed = async (payload: { mode: 'approve' | 'reject'; note: string })
   await loadAttachments(task.id)
 
   if (payload.mode === 'approve') {
-    toast.success(`#${task.id} 已批准`, '执行器从断点续跑，上下文里带着你的决定')
+    toast.success(`#${task.id} 已批准`, '任务已放行；已有执行会话时会从断点续跑')
   } else {
     toast.show(`#${task.id} 已驳回，任务终止`, { description: '理由已写入决策留痕' })
   }
@@ -459,14 +523,19 @@ const confirmCancel = async () => {
 const createOpen = ref(false)
 
 const onTaskCreated = async (payload: { id: number; title: string }) => {
-  // 筛选条件全归位：带着「已完成」「某个项目」的筛选去看刚建的任务，它必然不在结果里，
-  // 而「新建成功却看不到」在用户眼里就是创建失败
+  // 只清理会把新任务藏起来的筛选；项目是用户在顶栏明确选择的长期上下文，不能顺手重置。
+  // 当前选中项目时，新建任务本来就落在这个项目；选择「全部项目」时新任务同样可见。
   store.statusFilter = 'ALL'
   store.levelFilter = 'ALL'
-  store.projectId = null
   store.keyword = ''
   keywordInput.value = ''
   store.page = 1
+  if (store.taskIdFilter !== null) {
+    store.clearTaskFocus()
+    const query = { ...route.query }
+    delete query.taskId
+    void router.replace({ name: 'tasks', query })
+  }
   // 上面几个赋值会顺带触发 store 的 watch（同一份查询），但这里要等的是「请求已完成」，
   // 所以显式再拉一次：多一次本地 GET，换的是「创建成功立刻能看到并选中」这件确定的事
   await store.load()
@@ -677,6 +746,16 @@ onUnmounted(() => {
         <span class="tnum text-body text-label-tertiary">
           {{ store.total }} / {{ store.taskTotal }}
         </span>
+        <button
+          v-if="store.taskIdFilter !== null"
+          type="button"
+          class="inline-flex h-control items-center gap-1.5 rounded-full border border-accent/20 bg-accent/10 px-2.5 text-caption font-emphasis text-accent transition-colors duration-100 ease-apple hover:bg-accent/15"
+          title="清除任务筛选"
+          @click="dismissTaskFilter"
+        >
+          <span class="tnum">任务 #{{ store.taskIdFilter }}</span>
+          <Icon :as="X" size="inline" />
+        </button>
         <Select v-model="statusFilter" :items="statusOptions" size="lg" class="w-32 lg:ml-2" />
         <Select v-model="levelFilter" :items="levelOptions" size="lg" class="w-36" />
         <div class="ml-auto flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto">
@@ -813,8 +892,12 @@ onUnmounted(() => {
         />
         <EmptyState
           v-else-if="store.total === 0"
-          title="没有匹配的任务"
-          description="换个关键词，或把筛选切回「全部」"
+          :title="store.taskIdFilter === null ? '没有匹配的任务' : `没有找到任务 #${store.taskIdFilter}`"
+          :description="
+            store.taskIdFilter === null
+              ? '换个关键词，或把筛选切回「全部」'
+              : '这个任务可能已被删除，或当前账号没有读取权限'
+          "
         />
       </div>
 
@@ -1091,16 +1174,22 @@ onUnmounted(() => {
             v-if="canResume(selected.status)"
             variant="primary"
             size="sm"
+            :disabled="decisionLoading"
             @click="openReview('approve')"
           >
-            <Icon :as="Play" size="inline" />批准并续跑
+            <Icon :as="Play" size="inline" />批准并继续
           </Button>
           <Tooltip v-if="canDispatch(selected.status)" :content="dispatchHint">
             <Button variant="primary" size="sm" @click="dispatch">
               <Icon :as="Play" size="inline" />派发给 codex
             </Button>
           </Tooltip>
-          <Button v-if="canReject(selected.status)" size="sm" @click="openReview('reject')">
+          <Button
+            v-if="canReject(selected.status)"
+            size="sm"
+            :disabled="decisionLoading"
+            @click="openReview('reject')"
+          >
             <Icon :as="XCircle" size="inline" />驳回
           </Button>
           <Button v-if="canRetry(selected.status)" size="sm" @click="retry">

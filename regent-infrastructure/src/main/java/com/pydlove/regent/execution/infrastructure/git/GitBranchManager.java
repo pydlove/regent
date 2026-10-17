@@ -2,6 +2,7 @@ package com.pydlove.regent.execution.infrastructure.git;
 
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.port.BranchManager;
+import com.pydlove.regent.execution.domain.port.BranchPlan;
 import com.pydlove.regent.shared.domain.DomainException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +35,16 @@ public class GitBranchManager implements BranchManager {
 
     public GitBranchManager(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    @Override
+    public BranchPlan plan(String projectPath, TaskId taskId) {
+        Path workTree = requireWorkTree(projectPath);
+        if (!enabled) {
+            return new BranchPlan(currentBranch(workTree), false);
+        }
+        String branch = "codex/task-" + taskId.value();
+        return new BranchPlan(branch, !branchExists(workTree, branch));
     }
 
     @Override

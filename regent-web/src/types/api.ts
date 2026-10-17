@@ -291,6 +291,8 @@ export type PluginSummary = {
   name: string
   description: string | null
   tags: string[]
+  /** 随发行包同步，正文只读；仍可启停。 */
+  builtin: boolean
   enabled: boolean
   currentRevision: number
   filename: string

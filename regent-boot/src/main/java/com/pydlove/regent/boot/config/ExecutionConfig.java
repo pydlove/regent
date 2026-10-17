@@ -2,6 +2,7 @@ package com.pydlove.regent.boot.config;
 
 import com.pydlove.regent.bug.domain.repository.BugRepository;
 import com.pydlove.regent.execution.application.command.AgentRunService;
+import com.pydlove.regent.execution.application.command.BranchProvisioningService;
 import com.pydlove.regent.execution.application.command.ExecutionSettingsService;
 import com.pydlove.regent.execution.application.command.RunSettlementService;
 import com.pydlove.regent.execution.application.command.TaskAttachmentService;
@@ -70,6 +71,13 @@ public class ExecutionConfig {
     @Bean
     public BranchManager branchManager(@Value("${regent.execution.branch-enabled:true}") boolean enabled) {
         return new GitBranchManager(enabled);
+    }
+
+    /** 分支创建统一入口：需要新建时先建审批单，批准前不触碰 Git。 */
+    @Bean
+    public BranchProvisioningService branchProvisioningService(BranchManager branchManager,
+                                                               DecisionRaiseService decisionRaiseService) {
+        return new BranchProvisioningService(branchManager, decisionRaiseService);
     }
 
     /**
@@ -183,6 +191,7 @@ public class ExecutionConfig {
                                            TaskPluginRepository taskPluginRepository,
                                            DecisionRepository decisionRepository,
                                            BranchManager branchManager,
+                                           BranchProvisioningService branchProvisioningService,
                                            RunSettlementService runSettlementService,
                                            ExecutorContract executorContract,
                                            ExecutionConcurrencyGate executionConcurrencyGate,
@@ -191,7 +200,7 @@ public class ExecutionConfig {
                                            String contractUrl) {
         return new AgentRunService(taskRepository, taskRunRepository, runEventRepository, attachmentRepository,
                 projectProfileRepository, environmentEntryRepository, taskPluginRepository,
-                decisionRepository, branchManager, runSettlementService,
+                decisionRepository, branchManager, branchProvisioningService, runSettlementService,
                 executorContract, executionConcurrencyGate, Duration.ofSeconds(leaseSeconds), contractUrl);
     }
 
@@ -204,11 +213,13 @@ public class ExecutionConfig {
     public TaskDispatchService taskDispatchService(TaskRepository taskRepository,
                                                    ProjectProfileRepository projectProfileRepository,
                                                    BranchManager branchManager,
+                                                   BranchProvisioningService branchProvisioningService,
                                                    TaskRunService taskRunService,
                                                    ExecutorService executionWorkers,
                                                    ExecutionConcurrencyGate executionConcurrencyGate,
                                                    TransactionRunner transactionRunner) {
         return new TaskDispatchService(taskRepository, projectProfileRepository, branchManager,
-                taskRunService, executionWorkers, executionConcurrencyGate, transactionRunner);
+                branchProvisioningService, taskRunService, executionWorkers, executionConcurrencyGate,
+                transactionRunner);
     }
 }

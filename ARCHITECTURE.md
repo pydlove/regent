@@ -599,7 +599,8 @@ class ArchitectureTest {
      生命周期：建会话 → 事件流落库 → 翻译出参 → 阈值内自主决断并续跑 / 超阈值挂起 →
      人工批准后 `codex exec resume` 带结论续跑）、`TaskDispatchService`（认领 + 后台执行 +
      并发上限 + 失败冷却）、`CodexCliAdapter`（进程、超时、stdout/stderr 分流、JSONL、
-     末条消息）、`GitBranchManager`（一任务一分支，绝不直接改主干）、
+     末条消息）、`GitBranchManager`（一任务一分支，绝不直接改主干；分支不存在时先生成
+     `L2` 审批单，人工批准前不执行任何 Git 写操作，执行器进程另由 Git reference hook 禁止自建分支）、
      `POST /api/tasks/{id}/dispatch`、`GET /api/tasks/{id}/runs`、`GET /api/runs/{id}`；
      前端派发按钮 + 运行记录面板 + 事件流弹框
 14. ✅ 决策规则从 `decision_rule` 表加载：`DecisionRuleRepository`（domain）+

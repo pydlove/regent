@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -64,5 +65,58 @@ class PluginTest {
     void rejectsPathFilename() {
         assertThrows(DomainException.class, () -> Plugin.create(
                 "Kafka", null, List.of(), "../reader.txt", "content", true));
+    }
+
+    @Test
+    @DisplayName("内置插件同步保留启停状态，内容不变不升版本")
+    void synchronizesBuiltinWithoutLosingState() {
+        Plugin plugin = Plugin.createBuiltin(
+                "builtin-probe",
+                "内置探针",
+                "第一版说明",
+                List.of("通用"),
+                "probe.md",
+                "# 第一版",
+                false);
+
+        boolean metadataChanged = plugin.synchronizeBuiltin(
+                "内置探针",
+                "第二版说明",
+                List.of("通用", "质量"),
+                "probe.md",
+                "# 第一版");
+
+        assertTrue(metadataChanged);
+        assertFalse(plugin.isEnabled());
+        assertEquals(1, plugin.getCurrentVersion().revision());
+
+        boolean contentChanged = plugin.synchronizeBuiltin(
+                "内置探针",
+                "第二版说明",
+                List.of("通用", "质量"),
+                "probe.md",
+                "# 第二版");
+
+        assertTrue(contentChanged);
+        assertEquals(2, plugin.getCurrentVersion().revision());
+        assertFalse(plugin.isEnabled());
+        assertFalse(plugin.synchronizeBuiltin(
+                "内置探针",
+                "第二版说明",
+                List.of("通用", "质量"),
+                "probe.md",
+                "# 第二版"));
+    }
+
+    @Test
+    @DisplayName("内置插件不能走手工编辑入口")
+    void rejectsManualUpdateOfBuiltin() {
+        Plugin plugin = Plugin.createBuiltin(
+                "builtin-probe", "内置探针", null, List.of(), "probe.md", "content", true);
+
+        DomainException error = assertThrows(DomainException.class, () -> plugin.update(
+                "内置探针", null, List.of(), "probe.md", "changed", true));
+
+        assertTrue(error.getMessage().contains("内置插件"));
     }
 }

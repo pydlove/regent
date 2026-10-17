@@ -25,6 +25,7 @@ export const buttonVariants = tv({
       sm: 'h-control-sm px-2',
       regular: 'h-control px-3',
       lg: 'h-control-lg px-4',
+      xl: 'h-control-xl px-4',
     },
     block: { true: 'w-full', false: '' },
   },

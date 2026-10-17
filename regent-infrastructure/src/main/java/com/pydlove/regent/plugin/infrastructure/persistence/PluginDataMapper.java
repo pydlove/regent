@@ -20,6 +20,7 @@ public final class PluginDataMapper {
     public static PluginData toData(Plugin plugin) {
         PluginData data = new PluginData();
         data.setId(plugin.getId() == null ? null : plugin.getId().value());
+        data.setBuiltinKey(plugin.getBuiltinKey());
         data.setName(plugin.getName());
         data.setDescription(plugin.getDescription());
         data.setTags(plugin.getTags().isEmpty() ? null : String.join(",", plugin.getTags()));
@@ -44,6 +45,7 @@ public final class PluginDataMapper {
     public static Plugin toPlugin(PluginRow row, PluginVersionRow version) {
         return Plugin.restore(
                 PluginId.of(row.getId()),
+                row.getBuiltinKey(),
                 row.getName(),
                 row.getDescription(),
                 parseTags(row.getTags()),

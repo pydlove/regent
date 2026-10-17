@@ -1,5 +1,6 @@
 package com.pydlove.regent.execution.domain.repository;
 
+import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
@@ -17,6 +18,7 @@ import com.pydlove.regent.shared.kernel.DecisionLevel;
 public record TaskQuery(TaskStatus status,
                         DecisionLevel level,
                         ProjectId projectId,
+                        TaskId taskId,
                         String keyword,
                         int page,
                         int size) {
@@ -30,10 +32,21 @@ public record TaskQuery(TaskStatus status,
         keyword = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
     }
 
+    /** 兼容不按任务号筛选的调用方。 */
+    public TaskQuery(TaskStatus status,
+                     DecisionLevel level,
+                     ProjectId projectId,
+                     String keyword,
+                     int page,
+                     int size) {
+        this(status, level, projectId, null, keyword, page, size);
+    }
+
     /** 供接口层直接使用：把 URL 参数一次性换成受校验的查询条件。 */
     public static TaskQuery of(String status,
                                String level,
                                Long projectId,
+                               Long taskId,
                                String keyword,
                                Integer page,
                                Integer size) {
@@ -42,9 +55,20 @@ public record TaskQuery(TaskStatus status,
                 (level == null || level.isBlank()) ? null : DecisionLevel.parse(level),
                 // 非法 ID（0、负数）走 ProjectId 的守卫直接报错：那说明调用方理解错了契约
                 projectId == null ? null : ProjectId.of(projectId),
+                taskId == null ? null : TaskId.of(taskId),
                 keyword,
                 page == null ? 1 : page,
                 size == null ? DEFAULT_SIZE : size);
+    }
+
+    /** 兼容不按任务号筛选的调用方。 */
+    public static TaskQuery of(String status,
+                               String level,
+                               Long projectId,
+                               String keyword,
+                               Integer page,
+                               Integer size) {
+        return of(status, level, projectId, null, keyword, page, size);
     }
 
     /** 不带筛选的查询，测试与小工具用。 */
@@ -62,6 +86,10 @@ public record TaskQuery(TaskStatus status,
 
     public boolean hasProjectFilter() {
         return projectId != null;
+    }
+
+    public boolean hasTaskFilter() {
+        return taskId != null;
     }
 
     public boolean hasKeywordFilter() {

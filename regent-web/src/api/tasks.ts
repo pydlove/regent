@@ -17,6 +17,8 @@ export type TaskListParams = {
   level?: DecisionLevel | 'ALL'
   /** 项目筛选；不传表示全部项目 */
   projectId?: number | null
+  /** 精确任务号；用于从决策等页面直接定位单条任务 */
+  taskId?: number | null
   keyword?: string
   page?: number
   size?: number
@@ -28,6 +30,7 @@ export const listTasks = (params: TaskListParams = {}) =>
     status: params.status === 'ALL' ? undefined : params.status,
     level: params.level === 'ALL' ? undefined : params.level,
     projectId: params.projectId,
+    taskId: params.taskId,
     keyword: params.keyword,
     page: params.page,
     size: params.size,

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 
 import DecisionLevelBadge from '@/components/business/DecisionLevelBadge.vue'
 import DecisionReviewDialog from '@/components/business/DecisionReviewDialog.vue'
@@ -84,7 +85,7 @@ const onReviewed = async (payload: { mode: 'approve' | 'reject'; note: string })
     return
   }
   if (payload.mode === 'approve') {
-    toast.success(`任务 #${taskId} 已批准`, '执行器从断点续跑，上下文里带着你的决定')
+    toast.success(`任务 #${taskId} 已批准`, '任务已放行；已有执行会话时会从断点续跑')
   } else {
     toast.show(`任务 #${taskId} 已驳回，任务终止`, { description: '理由已写入决策留痕' })
   }
@@ -121,9 +122,15 @@ const resolvedByText = (by: string | null) => (by === 'AI' ? 'AI' : '人工')
         @select="openReview($event, 'view')"
       >
         <template #cell="{ row, column }">
-          <span v-if="column.key === 'taskId'" class="tnum text-label-tertiary">
+          <RouterLink
+            v-if="column.key === 'taskId'"
+            :to="{ name: 'tasks', query: { taskId: String(row.taskId) } }"
+            class="tnum rounded-sm text-accent transition-colors duration-100 ease-apple hover:underline hover:underline-offset-2"
+            :aria-label="`在任务页查看任务 #${row.taskId}`"
+            @click.stop
+          >
             #{{ row.taskId }}
-          </span>
+          </RouterLink>
 
           <span v-else-if="column.key === 'level'" class="inline-flex items-center gap-1.5">
             <DecisionLevelBadge :level="row.effectiveLevel" />

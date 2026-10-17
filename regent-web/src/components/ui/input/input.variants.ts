@@ -18,6 +18,7 @@ export const inputVariants = tv({
       sm: '',
       regular: '',
       lg: '',
+      xl: '',
     },
     invalid: {
       true: 'border-danger',
@@ -34,6 +35,7 @@ export const inputVariants = tv({
     { multiline: false, size: 'sm', class: 'h-control-sm' },
     { multiline: false, size: 'regular', class: 'h-control' },
     { multiline: false, size: 'lg', class: 'h-control-lg' },
+    { multiline: false, size: 'xl', class: 'h-control-xl' },
   ],
   defaultVariants: { size: 'regular', invalid: false, multiline: false },
 })

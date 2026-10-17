@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Blocks, Pencil, Plus, RefreshCw } from '@lucide/vue'
-import { onMounted, ref } from 'vue'
+import { Blocks, Eye, Pencil, Plus, RefreshCw, Search, X } from '@lucide/vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { ApiError } from '@/api/http'
 import { listPlugins, setPluginEnabled } from '@/api/plugins'
@@ -10,23 +10,14 @@ import Button from '@/components/ui/button/Button.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
+import Input from '@/components/ui/input/Input.vue'
+import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
 import Switch from '@/components/ui/switch/Switch.vue'
-import Table from '@/components/ui/table/Table.vue'
-import type { TableColumn } from '@/components/ui/table/table.types'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
 import { useToast } from '@/composables/useToast'
 import type { PluginSummary } from '@/types/api'
 import { formatDateTime } from '@/utils/format'
-
-const columns: TableColumn[] = [
-  { key: 'name', label: '插件' },
-  { key: 'revision', label: '版本', width: '72px', numeric: true },
-  { key: 'filename', label: '文件', width: '190px', hideBelow: 'lg' },
-  { key: 'tags', label: '标签', width: '200px', hideBelow: 'md' },
-  { key: 'updatedAt', label: '更新时间', width: '150px', hideBelow: 'lg' },
-  { key: 'enabled', label: '启用', width: '76px' },
-  { key: 'actions', label: '', width: '48px' },
-]
+import { filterPlugins, type PluginFilterStatus } from '@/utils/pluginCatalog'
 
 const toast = useToast()
 const plugins = ref<PluginSummary[]>([])
@@ -35,6 +26,27 @@ const error = ref<string | null>(null)
 const dialogOpen = ref(false)
 const editing = ref<PluginSummary | null>(null)
 const toggling = ref(new Set<number>())
+const keyword = ref('')
+const statusFilter = ref<PluginFilterStatus>('all')
+
+const enabledCount = computed(() => plugins.value.filter((plugin) => plugin.enabled).length)
+const filteredPlugins = computed(() =>
+  filterPlugins(plugins.value, {
+    keyword: keyword.value,
+    status: statusFilter.value,
+  }),
+)
+const statusItems = computed(() => [
+  { value: 'all', label: `全部 ${plugins.value.length}` },
+  { value: 'enabled', label: `启用 ${enabledCount.value}` },
+  { value: 'disabled', label: `停用 ${plugins.value.length - enabledCount.value}` },
+])
+const statusFilterModel = computed({
+  get: () => statusFilter.value,
+  set: (value: string) => {
+    statusFilter.value = value as PluginFilterStatus
+  },
+})
 
 function messageOf(e: unknown): string {
   if (e instanceof ApiError) return e.message
@@ -65,6 +77,11 @@ const openEdit = (plugin: PluginSummary) => {
   dialogOpen.value = true
 }
 
+const clearFilters = () => {
+  keyword.value = ''
+  statusFilter.value = 'all'
+}
+
 const toggle = async (plugin: PluginSummary, enabled: boolean) => {
   if (toggling.value.has(plugin.id)) return
   toggling.value = new Set(toggling.value).add(plugin.id)
@@ -87,9 +104,16 @@ const toggle = async (plugin: PluginSummary, enabled: boolean) => {
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div class="flex h-toolbar shrink-0 items-center gap-3 border-b border-separator px-5">
-      <h1 class="text-body font-emphasis text-label">插件</h1>
-      <span class="tnum text-body text-label-tertiary">{{ plugins.length }}</span>
+    <div
+      class="flex min-h-toolbar shrink-0 flex-wrap items-center gap-2 border-b border-separator px-4 py-2 sm:px-5 lg:h-toolbar lg:flex-nowrap lg:py-0"
+    >
+      <div class="mr-auto flex min-w-0 items-baseline gap-2">
+        <h1 class="text-body font-emphasis text-label">插件</h1>
+        <span class="tnum text-caption text-label-tertiary">
+          {{ enabledCount }} 启用 / {{ plugins.length }} 全部
+        </span>
+      </div>
+
       <div class="ml-auto flex items-center gap-2">
         <Tooltip content="刷新">
           <IconButton label="刷新插件" size="lg" :disabled="loading" @click="load">
@@ -100,48 +124,110 @@ const toggle = async (plugin: PluginSummary, enabled: boolean) => {
           <Icon :as="Plus" size="inline" />新增插件
         </Button>
       </div>
+
+      <div class="order-last flex w-full items-center gap-2 sm:order-none sm:ml-auto sm:w-auto">
+        <div class="relative min-w-0 flex-1 sm:w-56 sm:flex-none">
+          <Icon
+            :as="Search"
+            size="inline"
+            class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-label-tertiary"
+          />
+          <Input
+            v-model="keyword"
+            size="lg"
+            placeholder="搜索名称、标签或文件"
+            aria-label="搜索插件"
+            class="pl-7 pr-7"
+          />
+          <button
+            v-if="keyword"
+            type="button"
+            class="absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-control text-label-tertiary hover:bg-hover hover:text-label"
+            aria-label="清空插件搜索"
+            @click="keyword = ''"
+          >
+            <Icon :as="X" size="inline" />
+          </button>
+        </div>
+        <SegmentedControl v-model="statusFilterModel" :items="statusItems" size="lg" />
+      </div>
     </div>
 
     <div class="scroll-area min-h-0 flex-1 overflow-auto">
-      <Table :columns="columns" :rows="plugins" :show-empty="false">
-        <template #cell="{ row, column }">
-          <div v-if="column.key === 'name'" class="min-w-0">
-            <p class="truncate font-emphasis text-label">{{ row.name }}</p>
-            <p class="mt-0.5 truncate text-caption text-label-tertiary">
-              {{ row.description || '没有说明' }}
-            </p>
+      <div
+        v-if="!error && filteredPlugins.length > 0"
+        class="mx-4 my-4 overflow-hidden rounded-panel border border-separator-soft bg-content shadow-panel"
+      >
+        <div
+          class="grid h-8 select-none grid-cols-[minmax(0,1fr)_90px_32px] items-center gap-3 border-b border-separator bg-sidebar px-3 text-caption font-emphasis text-label-secondary md:grid-cols-[minmax(0,1fr)_180px_90px_76px_32px] xl:grid-cols-[minmax(0,1fr)_220px_110px_150px_76px_32px]"
+        >
+          <span>插件</span>
+          <span class="hidden md:block">标签</span>
+          <span class="hidden md:block">版本</span>
+          <span class="hidden xl:block">更新时间</span>
+          <span>启用</span>
+          <span />
+        </div>
+
+        <div
+          v-for="plugin in filteredPlugins"
+          :key="plugin.id"
+          class="group grid min-h-16 grid-cols-[minmax(0,1fr)_90px_32px] items-center gap-3 border-b border-separator-soft px-3 py-2 transition-colors duration-100 ease-apple last:border-b-0 hover:bg-hover md:grid-cols-[minmax(0,1fr)_180px_90px_76px_32px] xl:grid-cols-[minmax(0,1fr)_220px_110px_150px_76px_32px]"
+          @dblclick="openEdit(plugin)"
+        >
+          <div class="flex min-w-0 items-center gap-2.5">
+            <span
+              class="flex size-8 shrink-0 items-center justify-center rounded-panel"
+              :class="plugin.enabled ? 'bg-accent/10 text-accent' : 'bg-neutral/10 text-label-tertiary'"
+            >
+              <Icon :as="Blocks" size="regular" />
+            </span>
+            <div class="min-w-0">
+              <div class="flex min-w-0 items-center gap-1.5">
+                <p class="truncate text-body font-emphasis text-label">{{ plugin.name }}</p>
+                <Badge v-if="plugin.builtin" tone="neutral" class="shrink-0">内置</Badge>
+              </div>
+              <p class="mt-0.5 truncate text-caption text-label-secondary" :title="plugin.filename">
+                {{ plugin.description || plugin.filename }}
+              </p>
+            </div>
           </div>
-          <span v-else-if="column.key === 'revision'" class="tnum text-label-secondary">
-            v{{ row.currentRevision }}
-          </span>
-          <span v-else-if="column.key === 'filename'" class="truncate font-mono text-caption text-label-secondary">
-            {{ row.filename }}
-          </span>
-          <div v-else-if="column.key === 'tags'" class="flex min-w-0 items-center gap-1">
-            <Badge v-for="tag in (row.tags as string[]).slice(0, 3)" :key="tag" tone="accent">
+
+          <div class="hidden min-w-0 items-center gap-1 overflow-hidden md:flex">
+            <Badge v-for="tag in plugin.tags.slice(0, 2)" :key="tag" tone="accent" class="shrink-0">
               {{ tag }}
             </Badge>
-            <span v-if="(row.tags as string[]).length === 0" class="text-label-tertiary">—</span>
+            <span v-if="plugin.tags.length > 2" class="text-caption text-label-tertiary">
+              +{{ plugin.tags.length - 2 }}
+            </span>
+            <span v-if="plugin.tags.length === 0" class="text-caption text-label-tertiary">—</span>
           </div>
-          <span v-else-if="column.key === 'updatedAt'" class="tnum text-caption text-label-secondary">
-            {{ formatDateTime(row.updatedAt as string) }}
+
+          <span class="tnum hidden text-caption text-label-secondary md:block">
+            v{{ plugin.currentRevision }}
+          </span>
+          <span class="tnum hidden text-caption text-label-secondary xl:block">
+            {{ formatDateTime(plugin.updatedAt) }}
           </span>
           <Switch
-            v-else-if="column.key === 'enabled'"
-            :model-value="row.enabled as boolean"
-            :disabled="toggling.has(row.id as number)"
-            :aria-label="`切换插件 ${row.name} 状态`"
-            @update:model-value="toggle(row as PluginSummary, $event === true)"
+            :model-value="plugin.enabled"
+            :disabled="toggling.has(plugin.id)"
+            :aria-label="`切换插件 ${plugin.name} 状态`"
+            @update:model-value="toggle(plugin, $event === true)"
           />
-          <div v-else-if="column.key === 'actions'" class="flex justify-end">
-            <Tooltip content="编辑并生成新版本">
-              <IconButton label="编辑插件" size="sm" @click.stop="openEdit(row as PluginSummary)">
-                <Icon :as="Pencil" size="inline" />
+          <div class="flex justify-end">
+            <Tooltip :content="plugin.builtin ? '查看内置插件' : '编辑并生成新版本'">
+              <IconButton
+                :label="plugin.builtin ? '查看内置插件' : '编辑插件'"
+                size="sm"
+                @click.stop="openEdit(plugin)"
+              >
+                <Icon :as="plugin.builtin ? Eye : Pencil" size="inline" />
               </IconButton>
             </Tooltip>
           </div>
-        </template>
-      </Table>
+        </div>
+      </div>
 
       <EmptyState
         v-if="loading && plugins.length === 0"
@@ -157,6 +243,13 @@ const toggle = async (plugin: PluginSummary, enabled: boolean) => {
         <Button variant="primary" @click="openCreate">
           <Icon :as="Blocks" size="inline" />新增插件
         </Button>
+      </EmptyState>
+      <EmptyState
+        v-else-if="filteredPlugins.length === 0"
+        title="没有匹配的插件"
+        description="换个关键词，或把状态切回「全部」"
+      >
+        <Button @click="clearFilters">清除筛选</Button>
       </EmptyState>
     </div>
 

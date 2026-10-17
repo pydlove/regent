@@ -135,7 +135,7 @@ spring:
 | `environment_entry` | `V9__environment_entry.sql` | 任务环境信息：全局或项目归属、环境键、任意文本值、标签与描述；项目同键值覆盖全局 |
 | `relay_setting` | `V10__relay_settings.sql` | 中继服务器地址与状态监听开关；连接器共享密钥仍只保存在本机部署配置 |
 | `relay_install_settings` | `V11__relay_install_settings.sql` | 中继安装的服务器 IP、SSH 用户名与安装目录；SSH 密码只在安装请求中使用，不落库 |
-| `plugin` / `plugin_version` / `task_plugin` | `V17__plugin_library.sql` | 可复用能力包、不可变内容版本与任务固定版本绑定；插件正文不保存凭据 |
+| `plugin` / `plugin_version` / `task_plugin` | `V17__plugin_library.sql`、`V18__plugin_builtin_key.sql` | 可复用能力包、不可变内容版本与任务固定版本绑定；`builtin_key` 标识随 JAR 发布的内置插件，启动时幂等同步，插件正文不保存凭据 |
 
 全部用 `utf8mb4`，主键用 `BIGINT`，状态字段用 `VARCHAR` 存枚举名（不用 MySQL `ENUM`，避免改枚举要动表结构）。时间统一 `DATETIME(3)` 存 UTC。
 
@@ -336,7 +336,7 @@ regent:
     codex-command: ${REGENT_CODEX_COMMAND:codex}
     timeout: ${REGENT_EXEC_TIMEOUT:PT30M}     # 单次执行的墙钟上限，ISO-8601
     max-concurrency: ${REGENT_MAX_CONCURRENCY:1}   # 仅首次默认；界面保存后以数据库配置为准
-    branch-enabled: ${REGENT_BRANCH_ENABLED:true}  # 一任务一分支；关掉则在当前分支上跑
+    branch-enabled: ${REGENT_BRANCH_ENABLED:true}  # 一任务一分支；新建分支必须先人工审批，关闭则在当前分支跑
     dispatch:                                 # 派发心跳。关了就只能靠人点「派发执行」
       enabled: ${REGENT_DISPATCH_ENABLED:true}
       interval-ms: 15000

@@ -131,6 +131,19 @@ class DecisionRaiseServiceTest {
         }
 
         @Test
+        void 强制人工的动作即使阈值内且可逆也必须等待批准() {
+            RaiseDecisionCommand branchApproval = new RaiseDecisionCommand(
+                    TASK, PROJECT, DecisionLevel.L3, DecisionLevel.L2,
+                    "允许创建任务分支吗？", List.of("允许", "不允许"), "允许", true,
+                    "只影响本地分支", List.of(), true);
+
+            RaisedDecision raised = service.raise(branchApproval);
+
+            assertTrue(raised.needsHuman(), "分支创建属于平台安全动作，不能被项目阈值自动放行");
+            assertEquals(DecisionStatus.PENDING, raised.decision().getStatus());
+        }
+
+        @Test
         void 规则命中路径通配把等级抬过阈值() {
             rules.with(rule(7, RuleType.PATH_GLOB, "deploy/**", DecisionLevel.L3));
 

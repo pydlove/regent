@@ -35,13 +35,14 @@ public class MyBatisTaskQueryRepository implements TaskQueryRepository {
         String status = query.status() == null ? null : query.status().name();
         String level = query.level() == null ? null : query.level().name();
         Long projectId = query.projectId() == null ? null : query.projectId().value();
+        Long taskId = query.taskId() == null ? null : query.taskId().value();
         String keyword = escapeLike(query.keyword());
-        long total = taskMapper.countListBy(status, level, projectId, keyword);
+        long total = taskMapper.countListBy(status, level, projectId, taskId, keyword);
         if (total == 0) {
             return new TaskListItemPage(List.of(), 0, query.page(), query.size());
         }
         List<TaskListItem> items = taskMapper
-                .selectListPage(status, level, projectId, keyword, query.size(), query.offset())
+                .selectListPage(status, level, projectId, taskId, keyword, query.size(), query.offset())
                 .stream()
                 .map(MyBatisTaskQueryRepository::toItem)
                 .toList();

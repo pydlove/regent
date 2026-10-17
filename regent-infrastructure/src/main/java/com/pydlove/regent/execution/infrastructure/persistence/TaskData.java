@@ -32,6 +32,7 @@ public class TaskData {
     private Integer priority;
     private String codexThreadId;
     private String branchName;
+    private String branchApprovalState;
     private Long blockingDecisionId;
     private Integer attemptCount;
     private LocalDateTime startedAt;

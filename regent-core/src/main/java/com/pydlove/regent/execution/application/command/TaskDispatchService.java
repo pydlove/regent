@@ -53,6 +53,7 @@ public class TaskDispatchService {
     private final TaskRepository taskRepository;
     private final ProjectProfileRepository projectProfileRepository;
     private final BranchManager branchManager;
+    private final BranchProvisioningService branchProvisioningService;
     private final TaskRunService taskRunService;
     private final ExecutorService workers;
     private final ExecutionConcurrencyGate concurrencyGate;
@@ -64,6 +65,7 @@ public class TaskDispatchService {
     public TaskDispatchService(TaskRepository taskRepository,
                                ProjectProfileRepository projectProfileRepository,
                                BranchManager branchManager,
+                               BranchProvisioningService branchProvisioningService,
                                TaskRunService taskRunService,
                                ExecutorService workers,
                                ExecutionConcurrencyGate concurrencyGate,
@@ -71,6 +73,7 @@ public class TaskDispatchService {
         this.taskRepository = taskRepository;
         this.projectProfileRepository = projectProfileRepository;
         this.branchManager = branchManager;
+        this.branchProvisioningService = branchProvisioningService;
         this.taskRunService = taskRunService;
         this.workers = workers;
         this.concurrencyGate = concurrencyGate;
@@ -114,13 +117,20 @@ public class TaskDispatchService {
             return queue(task, project);
         }
         ExecutionConcurrencyGate.Permit acquired = permit.orElseThrow();
+        BranchPreparation preparation;
         try {
-            prepare(task, project);
+            preparation = prepare(task, project);
             taskRepository.save(task);
         } catch (RuntimeException e) {
             acquired.release();
             inFlight.remove(taskId.value());
             throw e;
+        }
+
+        // 需要新建分支时只生成了审批单，Git 仍未被触碰；这不是一次执行，不能提交工作线程。
+        if (!preparation.ready()) {
+            cleanup(taskId, acquired);
+            return task;
         }
 
         try {
@@ -218,19 +228,18 @@ public class TaskDispatchService {
         return claimed;
     }
 
-    /** 认领：把任务状态推进到「已派发」，并把分支准备好。 */
-    private void prepare(Task task, ProjectProfile project) {
+    /** 认领：把任务状态推进到「已派发」，并把分支准备好；需要审批时只挂起，不创建分支。 */
+    private BranchPreparation prepare(Task task, ProjectProfile project) {
         if (task.getStatus() == TaskStatus.PENDING || task.getStatus() == TaskStatus.QUEUED) {
             project.requireDispatchable();
-            task.dispatch(branchManager.createFor(project.path(), task.getId()));
-            return;
+            return branchProvisioningService.prepare(task, project);
         }
         if (task.getStatus() == TaskStatus.RUNNING) {
             // 续跑：批准之后工作区可能已经切到别的分支上了，先切回去再接着跑
             branchManager.switchTo(project.path(), task.getBranchName().orElseThrow(
                     () -> new DomainException("任务没有分支名，无法续跑：" + task.getId())));
             task.beginContinuation();
-            return;
+            return BranchPreparation.started(task.getBranchName().orElseThrow());
         }
         throw new DomainException("任务当前状态不可派发：" + task.getId() + "，状态：" + task.getStatus());
     }

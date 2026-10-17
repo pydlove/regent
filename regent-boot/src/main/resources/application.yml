@@ -98,7 +98,7 @@ regent:
     timeout: ${REGENT_EXEC_TIMEOUT:PT30M}
     # 首次启动的并发上限默认值。界面保存后以 execution_setting 表为准，运行时立即生效
     max-concurrency: ${REGENT_MAX_CONCURRENCY:1}
-    # 是否给每个任务开独立分支。关掉之后在当前分支上执行，并如实记录当前分支名
+    # 是否给每个任务开独立分支。首次新建必须先经人工审批；关掉之后在当前分支上执行
     branch-enabled: ${REGENT_BRANCH_ENABLED:true}
     dispatch:
       # 派发扫描。关掉之后任务只能靠人点「派发」

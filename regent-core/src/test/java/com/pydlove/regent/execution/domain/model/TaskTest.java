@@ -228,6 +228,64 @@ class TaskTest {
     }
 
     @Nested
+    @DisplayName("分支创建审批")
+    class BranchApproval {
+
+        @Test
+        void 申请创建分支只挂起任务且不记执行尝试() {
+            Task task = pendingTask();
+
+            task.requestBranchApproval(DECISION);
+
+            assertEquals(TaskStatus.BLOCKED, task.getStatus());
+            assertEquals(BranchApprovalState.PENDING, task.getBranchApprovalState());
+            assertEquals(DECISION, task.getBlockingDecisionId().orElseThrow());
+            assertTrue(task.getBranchName().isEmpty(), "审批前不能留下已创建分支的假象");
+            assertEquals(0, task.getAttemptCount());
+        }
+
+        @Test
+        void 批准后排队并能创建分支() {
+            Task task = pendingTask();
+            task.requestBranchApproval(DECISION);
+
+            task.approveBranchCreation();
+
+            assertEquals(TaskStatus.QUEUED, task.getStatus());
+            assertEquals(BranchApprovalState.APPROVED, task.getBranchApprovalState());
+            assertTrue(task.getBlockingDecisionId().isEmpty());
+
+            task.dispatch("codex/task-1");
+
+            assertEquals(BranchApprovalState.NONE, task.getBranchApprovalState(), "分支创建成功后清掉一次性批准");
+            assertEquals("codex/task-1", task.getBranchName().orElseThrow());
+        }
+
+        @Test
+        void 驳回后终止且重试要重新申请() {
+            Task task = pendingTask();
+            task.requestBranchApproval(DECISION);
+
+            task.rejectBranchCreation();
+
+            assertEquals(TaskStatus.CANCELLED, task.getStatus());
+            assertEquals(BranchApprovalState.NONE, task.getBranchApprovalState());
+            assertTrue(task.getBlockingDecisionId().isEmpty());
+
+            task.retry();
+            assertEquals(TaskStatus.PENDING, task.getStatus());
+            assertEquals(BranchApprovalState.NONE, task.getBranchApprovalState());
+        }
+
+        @Test
+        void 已执行过的任务不能补申请创建分支() {
+            Task task = runningTask();
+
+            assertThrows(DomainException.class, () -> task.requestBranchApproval(DECISION));
+        }
+    }
+
+    @Nested
     @DisplayName("阻塞与续跑")
     class Blocking {
 

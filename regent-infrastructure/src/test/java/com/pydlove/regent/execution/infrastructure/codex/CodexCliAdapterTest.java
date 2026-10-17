@@ -203,6 +203,39 @@ class CodexCliAdapterTest {
     }
 
     @Test
+    @DisplayName("有任务分支时给子进程注入 Git 引用守卫")
+    void 注入Git分支守卫() throws IOException {
+        写脚本("printf '%s|%s' \"$GIT_CONFIG_KEY_0\" \"$GIT_CONFIG_VALUE_0\" > \""
+                + environmentFile + "\"\n" + 回放(DONE_REPORT) + 事件流 + "exit 0");
+        ExecRequest request = new ExecRequest(ProjectId.of(1L), workspace.toString(), 指令原文, null,
+                Duration.ofSeconds(30), List.of(), Map.of(), "codex/task-7");
+
+        ExecResult result = adapter().execute(request, (type, payload) -> {
+        });
+
+        assertEquals(RunStatus.SUCCESS, result.status());
+        String guard = Files.readString(environmentFile, StandardCharsets.UTF_8);
+        assertTrue(guard.startsWith("core.hooksPath|"), guard);
+        assertTrue(guard.contains("git-guard-"), guard);
+    }
+
+    @Test
+    @DisplayName("执行器目录注入子进程 PATH：npm 版 codex 靠它找到同目录的 node")
+    void 注入执行器目录到PATH() throws IOException {
+        写脚本("printf '%s' \"$PATH\" > \"" + environmentFile + "\"\n"
+                + 回放(DONE_REPORT) + 事件流 + "exit 0");
+
+        adapter().execute(请求(null), (type, payload) -> {
+        });
+
+        String childPath = Files.readString(environmentFile, StandardCharsets.UTF_8);
+        String executorDirectory = script.getParent().toAbsolutePath().normalize().toString();
+        assertTrue(childPath.equals(executorDirectory)
+                        || childPath.startsWith(executorDirectory + java.io.File.pathSeparator),
+                "子进程 PATH 必须以执行器目录开头，实际：" + childPath);
+    }
+
+    @Test
     @DisplayName("非 JSON 行不算解析失败：降级成 raw 事件，执行照旧成功")
     void 噪音行不影响结论() throws IOException {
         写脚本(回放(DONE_REPORT)

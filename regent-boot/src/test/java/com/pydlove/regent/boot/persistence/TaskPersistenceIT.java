@@ -1,5 +1,6 @@
 package com.pydlove.regent.boot.persistence;
 
+import com.pydlove.regent.execution.domain.model.BranchApprovalState;
 import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
@@ -95,6 +96,21 @@ class TaskPersistenceIT {
         assertEquals("codex/it-probe", loaded.getBranchName().orElseThrow());
         assertEquals(1, loaded.getAttemptCount());
         assertTrue(loaded.getStartedAt().isPresent());
+    }
+
+    @Test
+    @DisplayName("分支创建审批状态可以持久化并重建")
+    void 分支审批状态往返() {
+        Task task = Task.manual(ProjectId.of(PROBE_PROJECT_ID), "IT 分支审批任务", "验证审批状态", 0);
+        taskRepository.save(task);
+        task.requestBranchApproval(com.pydlove.regent.governance.domain.model.DecisionId.of(9001L));
+        taskRepository.save(task);
+
+        Task loaded = taskRepository.findById(task.getId()).orElseThrow();
+
+        assertEquals(TaskStatus.BLOCKED, loaded.getStatus());
+        assertEquals(BranchApprovalState.PENDING, loaded.getBranchApprovalState());
+        assertTrue(loaded.isAwaitingBranchApproval());
     }
 
     @Test
@@ -202,6 +218,21 @@ class TaskPersistenceIT {
 
         assertEquals(1, page.total(), "另一个项目的任务不该混进来");
         assertEquals(mine.getId().value(), page.items().get(0).id());
+    }
+
+    @Test
+    @DisplayName("按任务号精确筛选，只返回指定任务")
+    void 按任务号筛选() {
+        Task target = Task.manual(ProjectId.of(PROBE_PROJECT_ID), "IT 任务号筛选目标", "指令", 0);
+        Task other = Task.manual(ProjectId.of(PROBE_PROJECT_ID), "IT 任务号筛选其他", "指令", 0);
+        taskRepository.save(target);
+        taskRepository.save(other);
+
+        TaskListItemPage page = taskQueryRepository.findPage(TaskQuery.of(
+                null, null, null, target.getId().value(), null, 1, 20));
+
+        assertEquals(1, page.total());
+        assertEquals(target.getId().value(), page.items().get(0).id());
     }
 
     @Test

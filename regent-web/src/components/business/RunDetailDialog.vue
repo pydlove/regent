@@ -72,7 +72,8 @@ const humanItems = computed(() => translateRunEvents(props.detail?.events ?? [])
 
 const tabItems = computed(() => [
   { value: 'process', label: '执行过程' },
-  { value: 'events', label: `原始事件（${props.detail?.events.length ?? 0}）` },
+  // 手机上三列各只有约 85px；全角括号会让事件数单独折一行。空格分隔在 300px 下仍能完整显示。
+  { value: 'events', label: `原始事件 ${props.detail?.events.length ?? 0}` },
   { value: 'raw', label: '出参原文' },
 ])
 
@@ -166,7 +167,7 @@ const tokenBreakdown = computed(() => {
         </ul>
       </div>
 
-      <SegmentedControl v-model="tab" :items="tabItems" size="sm" class="mt-4" />
+      <SegmentedControl v-model="tab" :items="tabItems" size="sm" class="mt-4 w-full" />
 
       <div
         v-if="tab === 'process'"

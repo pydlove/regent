@@ -76,7 +76,9 @@ public class DecisionRaiseService {
     }
 
     private static boolean autoResolvable(ArbitrationResult arbitration, RaiseDecisionCommand command) {
-        return arbitration.autoResolvable() && command.reversible();
+        return !command.requiresHumanApproval()
+                && arbitration.autoResolvable()
+                && command.reversible();
     }
 
     /**

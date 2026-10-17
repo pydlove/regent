@@ -21,6 +21,11 @@ const trackHeight = computed(
   () => ({ sm: 'h-control-sm', regular: 'h-control', lg: 'h-control-lg' })[props.size],
 )
 const thumbWidth = computed(() => `${100 / props.items.length}%`)
+// 小号控件优先出现在窄窗口的弹框里，标签长度不可控。缩字号与横向内边距换一行高度，
+// 比让「原始事件（258）」折成两行更像原生分段控件。
+const itemClasses = computed(() =>
+  props.size === 'sm' ? 'px-1 text-caption sm:px-1.5 sm:text-subhead' : 'px-2.5 text-body',
+)
 </script>
 
 <template>
@@ -48,7 +53,8 @@ const thumbWidth = computed(() => `${100 / props.items.length}%`)
       :aria-checked="item.value === model"
       :disabled="disabled || item.disabled"
       :class="[
-        'relative z-10 rounded-[6px] px-2.5 text-body transition-colors duration-[120ms] ease-apple disabled:opacity-40',
+        'relative z-10 whitespace-nowrap rounded-[6px] transition-colors duration-[120ms] ease-apple disabled:opacity-40',
+        itemClasses,
         item.value === model
           ? 'font-emphasis text-label'
           : 'text-label-secondary hover:text-label',

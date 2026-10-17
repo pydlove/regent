@@ -21,26 +21,38 @@ const total = ref(0)
 const loaded = ref(false)
 const loading = ref(false)
 const error = ref<string | null>(null)
+let loadSequence = 0
 
 const badgeCount = computed(() => (loaded.value ? total.value : store.counts.FAILED))
+const scopeLabel = computed(() => {
+  if (store.projectId === null) return '全部项目'
+  return store.projects.find((project) => project.id === store.projectId)?.name ?? '当前项目'
+})
 const buttonLabel = computed(() => {
   if (!loaded.value || badgeCount.value === 0) return '失败任务通知'
   return `失败任务通知，共 ${badgeCount.value} 个失败任务`
 })
 
 const load = async () => {
-  if (loading.value) return
+  const sequence = ++loadSequence
   loading.value = true
   error.value = null
   try {
-    const result = await listTasks({ status: 'FAILED', page: 1, size: 5 })
+    const result = await listTasks({
+      status: 'FAILED',
+      projectId: store.projectId,
+      page: 1,
+      size: 5,
+    })
+    if (sequence !== loadSequence) return
     failedTasks.value = result.items
     total.value = result.total
     loaded.value = true
   } catch {
+    if (sequence !== loadSequence) return
     error.value = '暂时无法读取失败任务'
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -52,10 +64,11 @@ onMounted(() => {
   void load()
 })
 
+watch(() => store.projectId, () => void load())
+
 const showFailedTasks = async () => {
   store.statusFilter = 'FAILED'
   store.levelFilter = 'ALL'
-  store.projectId = null
   store.keyword = ''
   store.page = 1
   store.clearSelection()
@@ -66,7 +79,6 @@ const showFailedTasks = async () => {
 const openTask = async (task: TaskSummary) => {
   store.statusFilter = 'FAILED'
   store.levelFilter = 'ALL'
-  store.projectId = task.projectId
   store.keyword = ''
   store.page = 1
   store.clearSelection()
@@ -96,7 +108,7 @@ const openTask = async (task: TaskSummary) => {
         <div>
           <h2 class="text-body font-emphasis text-label">失败任务</h2>
           <p class="mt-0.5 text-caption text-label-secondary">
-            {{ total > 0 ? `${total} 个任务需要处理` : '暂时没有失败任务' }}
+            {{ scopeLabel }} · {{ total > 0 ? `${total} 个任务需要处理` : '暂时没有失败任务' }}
           </p>
         </div>
         <span
@@ -138,7 +150,7 @@ const openTask = async (task: TaskSummary) => {
       </div>
 
       <Button v-if="total > 0" variant="ghost" block class="mt-2" @click="showFailedTasks">
-        查看全部失败任务
+        查看{{ store.projectId === null ? '全部' : '该项目' }}失败任务
       </Button>
     </section>
   </Popover>

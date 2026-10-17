@@ -20,6 +20,7 @@ import com.pydlove.regent.execution.domain.model.TaskRunId;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.execution.domain.port.AgentExecutor;
 import com.pydlove.regent.execution.domain.port.BranchManager;
+import com.pydlove.regent.execution.domain.port.BranchPlan;
 import com.pydlove.regent.execution.domain.port.RunEventListener;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
 import com.pydlove.regent.execution.domain.repository.TaskAttachmentRepository;
@@ -127,7 +128,17 @@ public final class ExecutionFakes {
         public final List<String> created = new ArrayList<>();
         public final List<String> switched = new ArrayList<>();
         public String current = "main";
+        /** 默认模拟「分支已获准/已存在」；审批用例显式设为 true。 */
+        public boolean requiresCreation;
         public RuntimeException failure;
+
+        @Override
+        public BranchPlan plan(String projectPath, TaskId taskId) {
+            if (failure != null) {
+                throw failure;
+            }
+            return new BranchPlan("codex/task-" + taskId.value(), requiresCreation);
+        }
 
         @Override
         public String createFor(String projectPath, TaskId taskId) {

@@ -76,6 +76,8 @@ export const useTaskStore = defineStore('tasks', () => {
   /** null 表示全部项目。工具栏的筛选与新建任务弹框共用 projects 这一份列表 */
   const projectId = ref<number | null>(readProjectSelection())
   const projects = ref<Project[]>([])
+  /** 精确任务号筛选；由决策页跳转等外部入口设置 */
+  const taskIdFilter = ref<number | null>(null)
   const keyword = ref('')
 
   const loading = ref(false)
@@ -96,6 +98,7 @@ export const useTaskStore = defineStore('tasks', () => {
         status: statusFilter.value,
         level: levelFilter.value,
         projectId: projectId.value,
+        taskId: taskIdFilter.value,
         keyword: keyword.value,
         page: page.value,
         size: pageSize.value,
@@ -170,6 +173,21 @@ export const useTaskStore = defineStore('tasks', () => {
   const clearSelection = () => {
     selected.value = null
     detail.value = null
+  }
+
+  /** 精确聚焦一条任务：清掉可能把它挡住的筛选，并回到第一页。 */
+  const focusTask = (taskId: number) => {
+    statusFilter.value = 'ALL'
+    levelFilter.value = 'ALL'
+    projectId.value = null
+    keyword.value = ''
+    taskIdFilter.value = taskId
+    page.value = 1
+  }
+
+  const clearTaskFocus = () => {
+    taskIdFilter.value = null
+    page.value = 1
   }
 
   /** 返回 null 表示成功，否则是给用户看的失败原因。 */
@@ -267,7 +285,7 @@ export const useTaskStore = defineStore('tasks', () => {
   }
 
   // 筛选条件一变就回第 1 页：停在原页码上会得到一张空表，而且看不出为什么空
-  watch([statusFilter, levelFilter, projectId, keyword], () => {
+  watch([statusFilter, levelFilter, projectId, taskIdFilter, keyword], () => {
     page.value = 1
     void load()
   })
@@ -286,6 +304,7 @@ export const useTaskStore = defineStore('tasks', () => {
     levelFilter,
     projectId,
     projects,
+    taskIdFilter,
     keyword,
     loading,
     error,
@@ -299,6 +318,8 @@ export const useTaskStore = defineStore('tasks', () => {
     select,
     refresh,
     clearSelection,
+    focusTask,
+    clearTaskFocus,
     retry,
     dispatch,
     dispatchMany,

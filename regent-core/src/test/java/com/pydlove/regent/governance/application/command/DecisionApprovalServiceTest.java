@@ -81,6 +81,14 @@ class DecisionApprovalServiceTest {
         return task;
     }
 
+    private Task branchApprovalTask() {
+        Task task = Task.manual(ProjectId.of(1L), "新建任务", "实现一个页面", 0);
+        task.assignIdentity(TaskId.of(TASK_ID));
+        task.requestBranchApproval(DECISION_ID);
+        tasks.save(task);
+        return task;
+    }
+
     /**
      * 把计数清零。布置场景本身也会写库，不清零的话断言里夹着布置阶段的写入次数，
      * 一旦布置方式变了（比如多存一次决策），断言就会失败在一个与被测行为无关的地方。
@@ -108,6 +116,21 @@ class DecisionApprovalServiceTest {
             assertTrue(task.getBlockingDecisionId().isEmpty(), "续跑后不该还挂着决策单号");
             assertEquals(1, tasks.saveCount());
             assertEquals(1, decisions.saveCount());
+        }
+
+        @Test
+        void 分支创建批准后进入排队而不是直接执行() {
+            pendingDecision();
+            Task task = branchApprovalTask();
+            resetCounters();
+
+            service.approve(DECISION_ID.value(), ReviewCommand.of("批准创建分支", "同意"));
+
+            assertEquals(TaskStatus.QUEUED, task.getStatus(), "批准只放行建分支，执行仍由派发器在分支创建后启动");
+            assertEquals(com.pydlove.regent.execution.domain.model.BranchApprovalState.APPROVED,
+                    task.getBranchApprovalState());
+            assertTrue(task.getBlockingDecisionId().isEmpty());
+            assertEquals(1, tasks.saveCount());
         }
 
         @Test
@@ -157,6 +180,20 @@ class DecisionApprovalServiceTest {
             assertEquals(DecisionStatus.REJECTED, result.getStatus());
             assertEquals(TaskStatus.CANCELLED, task.getStatus());
             assertNull(task.getBlockingDecisionId().orElse(null));
+        }
+
+        @Test
+        void 分支创建驳回后终止且不留下批准状态() {
+            pendingDecision();
+            Task task = branchApprovalTask();
+            resetCounters();
+
+            service.reject(DECISION_ID.value(), ReviewCommand.of(null, "不允许创建新分支"));
+
+            assertEquals(TaskStatus.CANCELLED, task.getStatus());
+            assertEquals(com.pydlove.regent.execution.domain.model.BranchApprovalState.NONE,
+                    task.getBranchApprovalState());
+            assertTrue(task.getBlockingDecisionId().isEmpty());
         }
 
         @Test

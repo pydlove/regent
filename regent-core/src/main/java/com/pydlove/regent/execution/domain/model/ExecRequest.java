@@ -20,6 +20,7 @@ import java.util.Objects;
  *                       是路径不是字节：图片由平台落在自己的存储目录里，执行器只需按路径挂上去，
  *                       把几兆的字节在领域对象里搬来搬去没有任何意义
  * @param environmentVariables 注入执行器进程的环境变量；同名项目值已在应用层覆盖全局值
+ * @param branchName 平台已批准并切换到的任务分支；为空表示调用方没有提供分支约束
  */
 public record ExecRequest(
         ProjectId projectId,
@@ -28,7 +29,8 @@ public record ExecRequest(
         String resumeThreadId,
         Duration timeout,
         List<String> imagePaths,
-        Map<String, String> environmentVariables) {
+        Map<String, String> environmentVariables,
+        String branchName) {
 
     /** 不附加环境变量的兼容构造器，现有调用方可继续只描述一次基础执行。 */
     public ExecRequest(ProjectId projectId,
@@ -38,6 +40,17 @@ public record ExecRequest(
                        Duration timeout,
                        List<String> imagePaths) {
         this(projectId, projectPath, prompt, resumeThreadId, timeout, imagePaths, Map.of());
+    }
+
+    /** 不附加分支约束的兼容构造器。生产执行路径应由 TaskRunService 传入真实分支。 */
+    public ExecRequest(ProjectId projectId,
+                       String projectPath,
+                       String prompt,
+                       String resumeThreadId,
+                       Duration timeout,
+                       List<String> imagePaths,
+                       Map<String, String> environmentVariables) {
+        this(projectId, projectPath, prompt, resumeThreadId, timeout, imagePaths, environmentVariables, null);
     }
 
     public ExecRequest {
@@ -54,6 +67,7 @@ public record ExecRequest(
         }
         imagePaths = imagePaths == null ? List.of() : List.copyOf(imagePaths);
         environmentVariables = environmentVariables == null ? Map.of() : Map.copyOf(environmentVariables);
+        branchName = (branchName == null || branchName.isBlank()) ? null : branchName.trim();
     }
 
     public boolean hasImages() {

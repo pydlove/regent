@@ -15,6 +15,9 @@ public interface PluginRepository {
     /** 修改插件时锁住聚合并按最新版本生成下一版。 */
     Optional<Plugin> findByIdForUpdate(PluginId id);
 
+    /** 启动同步内置插件时锁住聚合并读取当前版本。 */
+    Optional<Plugin> findByBuiltinKeyForUpdate(String builtinKey);
+
     Optional<PluginVersion> findVersion(PluginId id, int revision);
 
     List<Plugin> findAll();

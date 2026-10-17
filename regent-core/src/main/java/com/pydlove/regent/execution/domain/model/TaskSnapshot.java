@@ -29,10 +29,34 @@ public record TaskSnapshot(
         TaskStatus status,
         String codexThreadId,
         String branchName,
+        BranchApprovalState branchApprovalState,
         DecisionId blockingDecisionId,
         int attemptCount,
         Instant startedAt,
         Instant finishedAt,
         Instant createdAt,
         Instant updatedAt) {
+
+    /** 兼容旧快照：没有分支审批字段的数据一律视为从未申请过。 */
+    public TaskSnapshot(TaskId id,
+                        ProjectId projectId,
+                        RequirementId requirementId,
+                        BugId bugId,
+                        TaskSource source,
+                        String title,
+                        String prompt,
+                        int priority,
+                        TaskStatus status,
+                        String codexThreadId,
+                        String branchName,
+                        DecisionId blockingDecisionId,
+                        int attemptCount,
+                        Instant startedAt,
+                        Instant finishedAt,
+                        Instant createdAt,
+                        Instant updatedAt) {
+        this(id, projectId, requirementId, bugId, source, title, prompt, priority, status,
+                codexThreadId, branchName, BranchApprovalState.NONE, blockingDecisionId,
+                attemptCount, startedAt, finishedAt, createdAt, updatedAt);
+    }
 }

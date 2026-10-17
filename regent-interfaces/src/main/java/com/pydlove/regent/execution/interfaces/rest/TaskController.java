@@ -72,11 +72,12 @@ public class TaskController {
     public PageResponse<TaskSummaryResponse> list(@RequestParam(required = false) String status,
                                                   @RequestParam(required = false) String level,
                                                   @RequestParam(required = false) Long projectId,
+                                                  @RequestParam(required = false) Long taskId,
                                                   @RequestParam(required = false) String keyword,
                                                   @RequestParam(required = false) Integer page,
                                                   @RequestParam(required = false) Integer size) {
         TaskListItemPage result = taskQueryService.list(
-                TaskQuery.of(status, level, projectId, keyword, page, size));
+                TaskQuery.of(status, level, projectId, taskId, keyword, page, size));
         return PageResponse.of(
                 result.items().stream().map(TaskSummaryResponse::from).toList(),
                 result.total(), result.page(), result.size());

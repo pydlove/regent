@@ -20,6 +20,7 @@ public interface TaskMapper {
     List<TaskListRow> selectListPage(@Param("status") String status,
                                      @Param("level") String level,
                                      @Param("projectId") Long projectId,
+                                     @Param("taskId") Long taskId,
                                      @Param("keyword") String keyword,
                                      @Param("size") int size,
                                      @Param("offset") int offset);
@@ -27,6 +28,7 @@ public interface TaskMapper {
     long countListBy(@Param("status") String status,
                      @Param("level") String level,
                      @Param("projectId") Long projectId,
+                     @Param("taskId") Long taskId,
                      @Param("keyword") String keyword);
 
     /** 返回 {@code status -> count}，缺失的状态不会出现在结果里。 */

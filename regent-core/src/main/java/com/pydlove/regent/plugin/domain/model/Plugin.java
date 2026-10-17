@@ -7,6 +7,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 可复用能力包聚合。
@@ -22,6 +23,7 @@ public class Plugin {
     private static final int MAX_TAG_LENGTH = 32;
 
     private PluginId id;
+    private final String builtinKey;
     private String name;
     private String description;
     private List<String> tags;
@@ -31,6 +33,7 @@ public class Plugin {
     private Instant updatedAt;
 
     private Plugin(PluginId id,
+                   String builtinKey,
                    String name,
                    String description,
                    List<String> tags,
@@ -39,6 +42,7 @@ public class Plugin {
                    Instant createdAt,
                    Instant updatedAt) {
         this.id = id;
+        this.builtinKey = builtinKey == null ? null : requireBuiltinKey(builtinKey);
         this.name = requireName(name);
         this.description = optionalText(description, MAX_DESCRIPTION_LENGTH, "插件说明");
         this.tags = normalizeTags(tags);
@@ -57,6 +61,27 @@ public class Plugin {
         Instant now = now();
         return new Plugin(
                 null,
+                null,
+                name,
+                description,
+                tags,
+                enabled,
+                PluginVersion.initial(filename, content),
+                now,
+                now);
+    }
+
+    public static Plugin createBuiltin(String builtinKey,
+                                       String name,
+                                       String description,
+                                       List<String> tags,
+                                       String filename,
+                                       String content,
+                                       boolean enabled) {
+        Instant now = now();
+        return new Plugin(
+                null,
+                builtinKey,
                 name,
                 description,
                 tags,
@@ -67,6 +92,7 @@ public class Plugin {
     }
 
     public static Plugin restore(PluginId id,
+                                 String builtinKey,
                                  String name,
                                  String description,
                                  List<String> tags,
@@ -76,6 +102,7 @@ public class Plugin {
                                  Instant updatedAt) {
         return new Plugin(
                 requireNotNull(id, "插件 ID"),
+                builtinKey,
                 name,
                 description,
                 tags,
@@ -92,12 +119,49 @@ public class Plugin {
                        String filename,
                        String content,
                        boolean enabled) {
+        requireManualEditable();
         this.name = requireName(name);
         this.description = optionalText(description, MAX_DESCRIPTION_LENGTH, "插件说明");
         this.tags = normalizeTags(tags);
         this.enabled = enabled;
         this.currentVersion = PluginVersion.next(currentVersion, filename, content);
         this.updatedAt = now();
+    }
+
+    /**
+     * 将内置插件同步到发行包中的最新定义。
+     *
+     * <p>只更新内容和元数据，保留用户设置的启停状态；内容与文件名都未变化时只更新元数据，
+     * 不生成无意义的新版本。返回是否有字段发生变化，便于启动同步统计。
+     */
+    public boolean synchronizeBuiltin(String name,
+                                      String description,
+                                      List<String> tags,
+                                      String filename,
+                                      String content) {
+        if (!isBuiltin()) {
+            throw new DomainException("只有内置插件可以执行发行包同步：" + this.name);
+        }
+        String nextName = requireName(name);
+        String nextDescription = optionalText(description, MAX_DESCRIPTION_LENGTH, "插件说明");
+        List<String> nextTags = normalizeTags(tags);
+        boolean contentChanged = !currentVersion.filename().equals(filename)
+                || !currentVersion.content().equals(content);
+        boolean changed = !this.name.equals(nextName)
+                || !Objects.equals(this.description, nextDescription)
+                || !this.tags.equals(nextTags)
+                || contentChanged;
+        if (!changed) {
+            return false;
+        }
+        this.name = nextName;
+        this.description = nextDescription;
+        this.tags = nextTags;
+        if (contentChanged) {
+            this.currentVersion = PluginVersion.next(currentVersion, filename, content);
+        }
+        this.updatedAt = now();
+        return true;
     }
 
     public void changeEnabled(boolean enabled) {
@@ -139,6 +203,20 @@ public class Plugin {
             throw new DomainException("插件名称超长（上限 " + MAX_NAME_LENGTH + " 字符）：" + value.length());
         }
         return value;
+    }
+
+    private static String requireBuiltinKey(String builtinKey) {
+        String value = requireText(builtinKey, "内置插件标识").trim();
+        if (value.length() > 64 || !value.matches("[a-z0-9]+(?:-[a-z0-9]+)*")) {
+            throw new DomainException("内置插件标识必须是 1-64 位小写字母、数字或连字符：" + value);
+        }
+        return value;
+    }
+
+    private void requireManualEditable() {
+        if (isBuiltin()) {
+            throw new DomainException("内置插件随发行包更新，不能手工编辑：" + name);
+        }
     }
 
     private static List<String> normalizeTags(List<String> tags) {
@@ -196,6 +274,14 @@ public class Plugin {
 
     public PluginId getId() {
         return id;
+    }
+
+    public String getBuiltinKey() {
+        return builtinKey;
+    }
+
+    public boolean isBuiltin() {
+        return builtinKey != null;
     }
 
     public String getName() {

@@ -5,18 +5,22 @@ import com.pydlove.regent.execution.domain.model.ExecResult;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.port.AgentExecutor;
 import com.pydlove.regent.execution.domain.port.RunEventListener;
+import com.pydlove.regent.execution.infrastructure.git.GitRefGuard;
 import com.pydlove.regent.shared.kernel.TokenUsage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -63,12 +67,19 @@ public class CodexCliAdapter implements AgentExecutor {
     private static final long POLL_MILLIS = 200;
 
     private final String command;
+    private final Path executable;
     private final Path runDirectory;
     private final SchemaFileProvider schemaFileProvider;
     private final CodexJsonlParser parser = new CodexJsonlParser();
 
     public CodexCliAdapter(String command, Path runDirectory, SchemaFileProvider schemaFileProvider) {
         this.command = command;
+        this.executable = CodexCommandResolver.resolve(command).orElse(null);
+        if (executable != null && !command.equals(executable.toString())) {
+            log.info("codex 执行器解析：配置={} 实际={}", command, executable);
+        } else if (executable == null) {
+            log.warn("codex 执行器未找到：配置={}，将按原值启动（可能失败）", command);
+        }
         this.runDirectory = runDirectory;
         this.schemaFileProvider = schemaFileProvider;
     }
@@ -78,20 +89,36 @@ public class CodexCliAdapter implements AgentExecutor {
         Path outputFile;
         Path errorFile;
         Path promptFile;
+        Path gitGuard;
         try {
             Files.createDirectories(runDirectory);
             outputFile = Files.createTempFile(runDirectory, "result-", ".json");
             errorFile = Files.createTempFile(runDirectory, "stderr-", ".log");
             promptFile = Files.createTempFile(runDirectory, "prompt-", ".txt");
             Files.writeString(promptFile, instruction(request), StandardCharsets.UTF_8);
+            gitGuard = request.branchName() == null
+                    ? null : GitRefGuard.install(runDirectory, request.branchName());
         } catch (IOException e) {
             return CodexReportTranslator.invalid(null, null, TokenUsage.ZERO,
                     "运行目录不可写：" + e.getMessage(), null);
+        } catch (RuntimeException e) {
+            return CodexReportTranslator.invalid(null, null, TokenUsage.ZERO,
+                    "无法启用 Git 分支守卫：" + e.getMessage(), null);
         }
 
         ProcessBuilder builder = new ProcessBuilder(commandLine(request, outputFile));
         builder.directory(Path.of(request.projectPath()).toFile());
-        builder.environment().putAll(request.environmentVariables());
+        Map<String, String> childEnvironment = new HashMap<>(request.environmentVariables());
+        if (gitGuard != null) {
+            childEnvironment.putAll(GitRefGuard.environment(gitGuard));
+        }
+        builder.environment().putAll(childEnvironment);
+        if (executable != null) {
+            String binDirectory = executable.getParent().toString();
+            String currentPath = builder.environment().getOrDefault("PATH", "");
+            builder.environment().put("PATH",
+                    currentPath.isBlank() ? binDirectory : binDirectory + File.pathSeparator + currentPath);
+        }
         builder.redirectError(errorFile.toFile());
         builder.redirectInput(promptFile.toFile());
 
@@ -100,8 +127,9 @@ public class CodexCliAdapter implements AgentExecutor {
             process = builder.start();
         } catch (IOException e) {
             cleanup(outputFile, errorFile, promptFile);
+            GitRefGuard.cleanup(gitGuard);
             return CodexReportTranslator.invalid(null, null, TokenUsage.ZERO,
-                    "无法启动执行器（" + command + "）：" + e.getMessage(), null);
+                    "无法启动执行器（" + executor() + "）：" + e.getMessage(), null);
         }
 
         log.info("codex 已启动：项目={} 会话={} 超时={}",
@@ -118,6 +146,8 @@ public class CodexCliAdapter implements AgentExecutor {
             joinQuietly(pump);
             drain(listener, summary);
             process.destroyForcibly();
+            cleanup(outputFile, errorFile, promptFile);
+            GitRefGuard.cleanup(gitGuard);
             log.warn("codex 执行超时，已终止进程：项目={} 会话={}", request.projectId(), summary.threadId());
             return new ExecResult(RunStatus.TIMEOUT, null, summary.threadId(), summary.tokens(),
                     "执行超过 " + request.timeout() + " 未结束，已终止进程", readQuietly(outputFile),
@@ -130,6 +160,7 @@ public class CodexCliAdapter implements AgentExecutor {
         String rawResult = readQuietly(outputFile);
         String stderrTail = tail(readQuietly(errorFile));
         cleanup(outputFile, errorFile, promptFile);
+        GitRefGuard.cleanup(gitGuard);
         log.info("codex 已结束：项目={} 退出码={} 会话={} token={}",
                 request.projectId(), exitCode, summary.threadId(), summary.tokens().total());
 
@@ -159,7 +190,7 @@ public class CodexCliAdapter implements AgentExecutor {
      */
     private List<String> commandLine(ExecRequest request, Path outputFile) {
         List<String> args = new ArrayList<>();
-        args.add(command);
+        args.add(executor());
         args.add("exec");
         if (request.isResume()) {
             args.add("resume");
@@ -183,6 +214,10 @@ public class CodexCliAdapter implements AgentExecutor {
         args.add(outputFile.toString());
         args.add("-");
         return args;
+    }
+
+    private String executor() {
+        return executable == null ? command : executable.toString();
     }
 
     /**

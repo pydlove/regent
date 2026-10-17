@@ -11,6 +11,8 @@ public interface PluginMapper {
 
     PluginRow selectByIdForUpdate(@Param("id") long id);
 
+    PluginRow selectByBuiltinKeyForUpdate(@Param("builtinKey") String builtinKey);
+
     List<PluginRow> selectAll();
 
     PluginVersionRow selectVersion(@Param("pluginId") long pluginId,

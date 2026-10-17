@@ -91,6 +91,7 @@ public class AgentRunService {
     private final TaskPluginRepository taskPluginRepository;
     private final DecisionRepository decisionRepository;
     private final BranchManager branchManager;
+    private final BranchProvisioningService branchProvisioningService;
     private final RunSettlementService settlement;
     private final ExecutorContract contract;
     private final ExecutionConcurrencyGate concurrencyGate;
@@ -107,6 +108,7 @@ public class AgentRunService {
                            TaskPluginRepository taskPluginRepository,
                            DecisionRepository decisionRepository,
                            BranchManager branchManager,
+                           BranchProvisioningService branchProvisioningService,
                            RunSettlementService settlement,
                            ExecutorContract contract,
                            ExecutionConcurrencyGate concurrencyGate,
@@ -121,6 +123,7 @@ public class AgentRunService {
         this.taskPluginRepository = taskPluginRepository;
         this.decisionRepository = decisionRepository;
         this.branchManager = branchManager;
+        this.branchProvisioningService = branchProvisioningService;
         this.settlement = settlement;
         this.contract = contract;
         this.concurrencyGate = concurrencyGate;
@@ -169,9 +172,13 @@ public class AgentRunService {
                 permit.release();
                 return Optional.empty();
             }
-            AgentWorkPackage work = startAttempt(task, agentName, sessionId, now);
-            activePermits.put(work.runId(), permit);
-            return Optional.of(work);
+            Optional<AgentWorkPackage> work = startAttempt(task, agentName, sessionId, now);
+            if (work.isEmpty()) {
+                permit.release();
+                return Optional.empty();
+            }
+            activePermits.put(work.orElseThrow().runId(), permit);
+            return work;
         } catch (RuntimeException e) {
             permit.release();
             throw e;
@@ -388,7 +395,7 @@ public class AgentRunService {
         }
     }
 
-    private AgentWorkPackage startAttempt(Task task, String agentName, String sessionId, Instant now) {
+    private Optional<AgentWorkPackage> startAttempt(Task task, String agentName, String sessionId, Instant now) {
         ProjectProfile project = loadProject(task);
         requireWorkspaceFree(project, now);
         EnvironmentContext environment = EnvironmentContext.resolve(
@@ -403,7 +410,11 @@ public class AgentRunService {
         TaskStatus status = task.getStatus();
         if (status == TaskStatus.PENDING || status == TaskStatus.QUEUED) {
             project.requireDispatchable();
-            task.dispatch(branchManager.createFor(project.path(), task.getId()));
+            BranchPreparation preparation = branchProvisioningService.prepare(task, project);
+            if (!preparation.ready()) {
+                taskRepository.save(task);
+                return Optional.empty();
+            }
         } else if (status == TaskStatus.RUNNING) {
             branchManager.switchTo(project.path(), task.getBranchName().orElseThrow(
                     () -> new DomainException("任务没有分支名，无法续跑：" + task.getId())));
@@ -442,13 +453,13 @@ public class AgentRunService {
                         plugin.contentHash(),
                         plugin.content()))
                 .toList();
-        return new AgentWorkPackage(PROTOCOL, task.getId().value(), run.getId().value(), run.getAttemptNo(),
+        return Optional.of(new AgentWorkPackage(PROTOCOL, task.getId().value(), run.getId().value(), run.getAttemptNo(),
                 task.getTitle(), project.code(), project.path(), branch,
                 instruction + plugins.referenceSection() + environment.promptSection()
                         + "\n\n---\n\n" + contract.reportingRules(),
                 task.getCodexThreadId().orElse(null), images, pluginSnapshots, variables,
                 project.defaultDecisionLevel().name(), (int) lease.toSeconds(), run.getLeaseExpiresAt(),
-                contractUrl);
+                contractUrl));
     }
 
     private AgentRunSnapshot snapshot(TaskRun run, Task task) {

@@ -1,5 +1,6 @@
 package com.pydlove.regent.execution.domain.repository;
 
+import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.shared.domain.DomainException;
@@ -63,6 +64,18 @@ class TaskQueryTest {
         assertEquals(ProjectId.of(7L), TaskQuery.of(null, null, 7L, null, 1, 20).projectId());
         assertThrows(DomainException.class, () -> TaskQuery.of(null, null, 0L, null, 1, 20));
         assertThrows(DomainException.class, () -> TaskQuery.of(null, null, -1L, null, 1, 20));
+    }
+
+    @Test
+    @DisplayName("任务筛选：缺省不筛，非法 ID 直接拒绝")
+    void 解析任务筛选() {
+        assertNull(TaskQuery.of(null, null, null, null, null, 1, 20).taskId());
+        assertEquals(TaskId.of(126L),
+                TaskQuery.of(null, null, null, 126L, null, 1, 20).taskId());
+        assertThrows(DomainException.class,
+                () -> TaskQuery.of(null, null, null, 0L, null, 1, 20));
+        assertThrows(DomainException.class,
+                () -> TaskQuery.of(null, null, null, -1L, null, 1, 20));
     }
 
     @Test

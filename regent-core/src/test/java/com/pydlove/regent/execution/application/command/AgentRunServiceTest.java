@@ -69,9 +69,10 @@ class AgentRunServiceTest {
     }
 
     private AgentRunService serviceWithLease(Duration lease) {
+        DecisionRaiseService decisionRaiseService = new DecisionRaiseService(rules, decisions);
         return new AgentRunService(tasks, runs, events, attachments, projects, environments, plugins,
-                decisions, branches,
-                new RunSettlementService(tasks, decisions, new DecisionRaiseService(rules, decisions), bugs),
+                decisions, branches, new BranchProvisioningService(branches, decisionRaiseService),
+                new RunSettlementService(tasks, decisions, decisionRaiseService, bugs),
                 contract(), concurrencyGate, lease, "http://127.0.0.1:8787/api/agent/contract");
     }
 
@@ -167,6 +168,25 @@ class AgentRunServiceTest {
 
         assertEquals(7L, work.taskId());
         assertEquals(TaskStatus.RUNNING.name(), tasks.get(7L).getStatus().name());
+    }
+
+    @Test
+    @DisplayName("首次创建分支先等人工批准，批准前不发出工作包")
+    void 分支审批前不认领() {
+        branches.requiresCreation = true;
+        Task task = ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING);
+        tasks.add(task);
+
+        assertTrue(service.claim(AGENT, "sess-1", "p1", null).isEmpty());
+        assertEquals(TaskStatus.BLOCKED.name(), tasks.get(7L).getStatus().name());
+        assertTrue(runs.all().isEmpty(), "没有执行尝试，就不该出现执行记录");
+        assertTrue(branches.created.isEmpty());
+
+        task.approveBranchCreation();
+        AgentWorkPackage work = service.claim(AGENT, "sess-1", "p1", null).orElseThrow();
+
+        assertEquals(7L, work.taskId());
+        assertEquals(List.of("codex/task-7"), branches.created);
     }
 
     @Test

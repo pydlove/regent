@@ -10,6 +10,7 @@ import com.pydlove.regent.plugin.domain.model.Plugin;
 import com.pydlove.regent.plugin.domain.model.PluginBinding;
 import com.pydlove.regent.plugin.domain.repository.PluginRepository;
 import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.shared.domain.DomainException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 插件、版本与任务绑定在真实 MySQL 上的往返验证。 */
@@ -90,5 +92,33 @@ class PluginPersistenceIT {
         pluginCommandService.setEnabled(plugin.getId(), false);
 
         assertFalse(taskPluginService.list(task.getId()).get(0).enabled());
+    }
+
+    @Test
+    @DisplayName("内置插件标识可以持久化，且不能走手工编辑入口")
+    void 内置插件只读往返() {
+        Plugin builtin = Plugin.createBuiltin(
+                "plugin-it-builtin",
+                "内置 IT 探针",
+                "验证 builtin_key",
+                List.of("测试"),
+                "probe.md",
+                "# 探针",
+                true);
+        pluginRepository.save(builtin);
+
+        Plugin restored = pluginRepository.findByBuiltinKeyForUpdate("plugin-it-builtin").orElseThrow();
+
+        assertTrue(restored.isBuiltin());
+        assertEquals(builtin.getId(), restored.getId());
+        assertThrows(DomainException.class, () -> pluginCommandService.update(
+                restored.getId(),
+                new SavePluginCommand(
+                        restored.getName(),
+                        restored.getDescription(),
+                        restored.getTags(),
+                        "probe.md",
+                        "changed",
+                        true)));
     }
 }

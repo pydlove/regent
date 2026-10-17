@@ -8,10 +8,18 @@ const props = withDefaults(
     size?: InputVariantProps['size']
     invalid?: boolean
     disabled?: boolean
+    readonly?: boolean
     placeholder?: string
     type?: string
   }>(),
-  { size: 'regular', invalid: false, disabled: false, placeholder: '', type: 'text' },
+  {
+    size: 'regular',
+    invalid: false,
+    disabled: false,
+    readonly: false,
+    placeholder: '',
+    type: 'text',
+  },
 )
 
 const model = defineModel<string>({ default: '' })
@@ -25,6 +33,7 @@ const classes = computed(() => inputVariants({ size: props.size, invalid: props.
     :type="type"
     :placeholder="placeholder"
     :disabled="disabled"
+    :readonly="readonly"
     :aria-invalid="invalid || undefined"
     :class="classes"
   />

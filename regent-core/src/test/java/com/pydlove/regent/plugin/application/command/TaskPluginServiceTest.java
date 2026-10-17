@@ -120,6 +120,13 @@ class TaskPluginServiceTest {
         }
 
         @Override
+        public Optional<Plugin> findByBuiltinKeyForUpdate(String builtinKey) {
+            return store.values().stream()
+                    .filter(plugin -> builtinKey.equals(plugin.getBuiltinKey()))
+                    .findFirst();
+        }
+
+        @Override
         public Optional<PluginVersion> findVersion(PluginId id, int revision) {
             return findById(id)
                     .map(Plugin::getCurrentVersion)

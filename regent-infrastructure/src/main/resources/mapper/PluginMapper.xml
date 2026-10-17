@@ -3,7 +3,7 @@
 <mapper namespace="com.pydlove.regent.plugin.infrastructure.persistence.PluginMapper">
 
     <sql id="pluginColumns">
-        id, name, description, tags, enabled, current_revision, created_at, updated_at
+        id, builtin_key, name, description, tags, enabled, current_revision, created_at, updated_at
     </sql>
 
     <select id="selectById"
@@ -18,6 +18,14 @@
         SELECT <include refid="pluginColumns"/>
         FROM plugin
         WHERE id = #{id}
+        FOR UPDATE
+    </select>
+
+    <select id="selectByBuiltinKeyForUpdate"
+            resultType="com.pydlove.regent.plugin.infrastructure.persistence.PluginRow">
+        SELECT <include refid="pluginColumns"/>
+        FROM plugin
+        WHERE builtin_key = #{builtinKey}
         FOR UPDATE
     </select>
 
@@ -45,13 +53,14 @@
     </select>
 
     <insert id="insertPlugin" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO plugin (name, description, tags, enabled, current_revision, created_at, updated_at)
-        VALUES (#{name}, #{description}, #{tags}, #{enabled}, #{currentRevision}, #{createdAt}, #{updatedAt})
+        INSERT INTO plugin (builtin_key, name, description, tags, enabled, current_revision, created_at, updated_at)
+        VALUES (#{builtinKey}, #{name}, #{description}, #{tags}, #{enabled}, #{currentRevision}, #{createdAt}, #{updatedAt})
     </insert>
 
     <update id="updatePlugin">
         UPDATE plugin
-        SET name = #{name},
+        SET builtin_key = #{builtinKey},
+            name = #{name},
             description = #{description},
             tags = #{tags},
             enabled = #{enabled},
