@@ -34,6 +34,22 @@ spring:
   jackson:
     time-zone: UTC
 
+  # 注册验证码邮件。账号密码只从环境变量或 application-local.yml 读取，不写进仓库。
+  mail:
+    host: ${SPRING_MAIL_HOST:smtp.126.com}
+    port: ${SPRING_MAIL_PORT:465}
+    username: ${SPRING_MAIL_USERNAME:}
+    password: ${SPRING_MAIL_PASSWORD:}
+    protocol: smtp
+    default-encoding: UTF-8
+    properties:
+      mail.smtp.auth: ${SPRING_MAIL_AUTH:true}
+      mail.smtp.ssl.enable: ${SPRING_MAIL_SSL:true}
+      mail.smtp.starttls.enable: ${SPRING_MAIL_STARTTLS:false}
+      mail.smtp.connectiontimeout: 10000
+      mail.smtp.timeout: 10000
+      mail.smtp.writetimeout: 10000
+
   # 图片附件是任务的一部分（截图、设计稿），默认的 1MB 只够传图标。
   # 这里的两道限额只是容器层的兜底，真正的判据在 regent.attachments.max-bytes：
   # 超出它由应用服务拒绝并给出人话，超出这里则是 MaxUploadSizeExceededException —— 也映射成 400。
@@ -57,6 +73,17 @@ regent:
   # 运行时目录：schema、执行临时文件。日志与 pid 由 deploy/ 脚本写在同一目录下，
   # 约定见 TECH_STACK.md 六：运行时产物一律不写仓库。
   home: ${REGENT_HOME:${user.home}/.regent}
+  auth:
+    # 浏览器会话默认七天；数据库只保存令牌摘要，不保存 Cookie 明文。
+    session-ttl: ${REGENT_AUTH_SESSION_TTL:PT168H}
+    # 本地 HTTP 开发默认 false；生产由反向代理提供 HTTPS 时必须设成 true。
+    cookie-secure: ${REGENT_AUTH_COOKIE_SECURE:false}
+    email-code:
+      # 注册验证码 5 分钟有效，同一邮箱 60 秒后才能重发，每天最多 10 次。
+      ttl: ${REGENT_EMAIL_CODE_TTL:PT5M}
+      resend-cooldown: ${REGENT_EMAIL_CODE_COOLDOWN:PT60S}
+      max-per-day: ${REGENT_EMAIL_CODE_MAX_PER_DAY:10}
+      home-url: ${REGENT_PUBLIC_URL:http://127.0.0.1:12580}
   attachments:
     # 图片落盘目录。运行时产物不进仓库（TECH_STACK.md 六），与日志、schema、runs 同级
     dir: ${REGENT_ATTACHMENTS_DIR:${regent.home}/attachments}
@@ -93,6 +120,10 @@ regent:
       interval-ms: 60000
       initial-delay-ms: 45000
   relay:
+    install:
+      # 设置页点击安装时调用的远程部署脚本。脚本必须能访问项目构建产物。
+      script: ${REGENT_RELAY_INSTALL_SCRIPT:deploy/remote/deploy.sh}
+      timeout: ${REGENT_RELAY_INSTALL_TIMEOUT:PT15M}
     monitor:
       # 默认地址只用于首次启动；界面保存后以 relay_setting 表为准。
       # 这里不读取共享密钥，密钥仍由 ~/.regent/relay-connector.env 独占。

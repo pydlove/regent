@@ -6,12 +6,18 @@ import com.pydlove.regent.settings.application.query.RelaySettingsView;
 public record RelaySettingsResponse(
         String serverUrl,
         boolean monitoringEnabled,
+        String serverIp,
+        String sshUsername,
+        String installDirectory,
         RelayStatusResponse status
 ) {
     public static RelaySettingsResponse from(RelaySettingsView view) {
         return new RelaySettingsResponse(
                 view.serverUrl(),
                 view.monitoringEnabled(),
+                view.serverIp(),
+                view.sshUsername(),
+                view.installDirectory(),
                 RelayStatusResponse.from(view.status())
         );
     }

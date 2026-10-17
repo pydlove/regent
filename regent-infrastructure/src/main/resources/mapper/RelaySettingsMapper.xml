@@ -3,16 +3,24 @@
 <mapper namespace="com.pydlove.regent.settings.infrastructure.persistence.RelaySettingsMapper">
 
     <select id="select" resultType="com.pydlove.regent.settings.infrastructure.persistence.RelaySettingsRow">
-        SELECT id, server_url, monitoring_enabled, updated_at
+        SELECT id, server_url, server_ip, ssh_username, install_directory, monitoring_enabled, updated_at
         FROM relay_setting
         WHERE id = 1
     </select>
 
     <insert id="upsert">
-        INSERT INTO relay_setting (id, server_url, monitoring_enabled, updated_at)
-        VALUES (#{id}, #{serverUrl}, #{monitoringEnabled}, #{updatedAt})
+        INSERT INTO relay_setting (
+            id, server_url, server_ip, ssh_username, install_directory, monitoring_enabled, updated_at
+        )
+        VALUES (
+            #{id}, #{serverUrl}, #{serverIp}, #{sshUsername}, #{installDirectory},
+            #{monitoringEnabled}, #{updatedAt}
+        )
         ON DUPLICATE KEY UPDATE
             server_url = VALUES(server_url),
+            server_ip = VALUES(server_ip),
+            ssh_username = VALUES(ssh_username),
+            install_directory = VALUES(install_directory),
             monitoring_enabled = VALUES(monitoring_enabled),
             updated_at = VALUES(updated_at)
     </insert>

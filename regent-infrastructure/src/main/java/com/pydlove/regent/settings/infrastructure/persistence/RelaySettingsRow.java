@@ -10,6 +10,9 @@ public class RelaySettingsRow {
 
     private Integer id;
     private String serverUrl;
+    private String serverIp;
+    private String sshUsername;
+    private String installDirectory;
     private Boolean monitoringEnabled;
     private LocalDateTime updatedAt;
 }

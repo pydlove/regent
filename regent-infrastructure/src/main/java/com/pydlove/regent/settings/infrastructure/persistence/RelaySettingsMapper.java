@@ -11,6 +11,9 @@ public interface RelaySettingsMapper {
 
     int upsert(@Param("id") int id,
                @Param("serverUrl") String serverUrl,
+               @Param("serverIp") String serverIp,
+               @Param("sshUsername") String sshUsername,
+               @Param("installDirectory") String installDirectory,
                @Param("monitoringEnabled") boolean monitoringEnabled,
                @Param("updatedAt") LocalDateTime updatedAt);
 }

@@ -5,6 +5,8 @@ import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
+  // 生产包由 Nginx 挂在站点根目录。显式固定为 '/'，避免构建环境把资源路径推断成本机 file:// 地址。
+  base: '/',
   plugins: [vue(), tailwindcss()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },

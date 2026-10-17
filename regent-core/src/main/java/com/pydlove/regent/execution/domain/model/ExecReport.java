@@ -55,7 +55,7 @@ public record ExecReport(String status,
      * 落成平台结果。三条合法结局 + 一条「读不懂」的兜底，全都写在这里。
      *
      * <p>不合法一律返回 {@link ExecResult#invalidOutput}：执行记录会被判失败、原因写进摘要，
-     * 而不是抛出异常 —— 抛出会让任务停在 RUNNING 上，看板里出现一条永远不动的记录。
+     * 而不是抛出异常 —— 抛出会让任务停在 RUNNING 上，工作台里出现一条永远不动的记录。
      */
     public ExecResult toResult(Integer exitCode, String threadId, TokenUsage tokens, String rawResult) {
         if (hasInvalidBug()) {

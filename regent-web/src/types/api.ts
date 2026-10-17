@@ -26,6 +26,13 @@ export type ApiErrorBody = {
   timestamp: string
 }
 
+/** 当前登录用户的公开信息。后端不会返回密码或会话令牌。 */
+export type AuthUser = {
+  id: number
+  username: string
+  email: string | null
+}
+
 /** 批量删除中的一个失败项。 */
 export type TaskBatchDeleteFailure = {
   taskId: number
@@ -50,7 +57,7 @@ export type TaskBatchDispatchResult = {
   failures: TaskBatchDispatchFailure[]
 }
 
-/** 看板趋势柱状图的一天；后端已按天补齐，不存在空档。 */
+/** 工作台趋势柱状图的一天；后端已按天补齐，不存在空档。 */
 export type TaskTrendPoint = {
   /** yyyy-MM-dd，按本机时区切天 */
   date: string
@@ -231,11 +238,20 @@ export type RelayStatus = {
   message: string
 }
 
-/** 中继状态监听设置；共享密钥不经过浏览器接口。 */
+/** 中继连接、安装与状态监听设置；SSH 密码和共享密钥都不经过读取接口。 */
 export type RelaySettings = {
   serverUrl: string
   monitoringEnabled: boolean
+  serverIp: string
+  sshUsername: string
+  installDirectory: string
   status: RelayStatus
+}
+
+export type RelayInstallResult = {
+  success: boolean
+  installDirectory: string
+  message: string
 }
 
 /**

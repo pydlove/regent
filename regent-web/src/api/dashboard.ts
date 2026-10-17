@@ -19,7 +19,7 @@ export type DashboardSnapshot = {
 }
 
 /**
- * 看板只从各上下文已有的查询能力取数，不在前端复制业务判断。
+ * 工作台只从各上下文已有的查询能力取数，不在前端复制业务判断。
  * 页面需要同时回答「平台整体怎么样」和「现在先处理什么」，所以统计与最近事项并行发出。
  */
 export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {

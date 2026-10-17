@@ -2,7 +2,7 @@ package com.pydlove.regent.execution.interfaces.dto;
 
 import com.pydlove.regent.shared.kernel.TokenUsage;
 
-/** 看板展示的全平台 token 汇总。 */
+/** 工作台展示的全平台 token 汇总。 */
 public record TaskTokenUsageResponse(
         long input,
         long cachedInput,

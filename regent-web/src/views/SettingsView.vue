@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Gauge, Palette, RadioTower, RefreshCw } from '@lucide/vue'
+import { Download, Gauge, Palette, RadioTower, RefreshCw } from '@lucide/vue'
 import type { Component } from 'vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -8,6 +8,7 @@ import { ApiError } from '@/api/http'
 import {
   getExecutionSettings,
   getRelaySettings,
+  installRelay as installRelayOnServer,
   updateExecutionSettings,
   updateRelaySettings,
 } from '@/api/settings'
@@ -21,7 +22,7 @@ import Switch from '@/components/ui/switch/Switch.vue'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
 import { useTheme, type ThemePreference } from '@/composables/useTheme'
 import { useToast } from '@/composables/useToast'
-import type { RelaySettings, RelayState, RelayStatus } from '@/types/api'
+import type { RelayInstallResult, RelaySettings, RelayState, RelayStatus } from '@/types/api'
 
 type SettingsSection = 'appearance' | 'execution' | 'relay'
 type SectionItem = {
@@ -122,17 +123,26 @@ async function saveExecutionSettings() {
 const relayForm = reactive({
   serverUrl: '',
   monitoringEnabled: false,
+  serverIp: '',
+  sshUsername: 'root',
+  installDirectory: '/root/app/regent-relay',
+  password: '',
 })
 const savedRelayForm = reactive({
   serverUrl: '',
   monitoringEnabled: false,
+  serverIp: '',
+  sshUsername: 'root',
+  installDirectory: '/root/app/regent-relay',
 })
 const relayStatus = ref<RelayStatus | null>(null)
 const relayLoading = ref(false)
 const relaySaving = ref(false)
+const relayInstalling = ref(false)
 const relayRefreshing = ref(false)
 const relayLoaded = ref(false)
 const relayError = ref<string | null>(null)
+const relayInstallResult = ref<RelayInstallResult | null>(null)
 
 const relayPagePaths = new Set([
   '/baseline',
@@ -184,21 +194,66 @@ function inspectRelayServerUrl(rawValue: string) {
 
 const relayUrlState = computed(() => inspectRelayServerUrl(relayForm.serverUrl))
 const relayUrlValid = computed(() => relayUrlState.value.valid)
+const relayServerIpValid = computed(
+  () =>
+    relayForm.serverIp.trim().length > 0 &&
+    !/\s/.test(relayForm.serverIp) &&
+    /^[A-Za-z0-9.-]+$/.test(relayForm.serverIp),
+)
+const relayUsernameValid = computed(() => /^[A-Za-z_][A-Za-z0-9_-]{0,31}$/.test(relayForm.sshUsername))
+const relayDirectoryValid = computed(() => {
+  const value = relayForm.installDirectory.trim()
+  return /^\/[A-Za-z0-9._/-]+$/.test(value) &&
+    value !== '/' &&
+    !value.includes('//') &&
+    !value.includes('/./') &&
+    !value.includes('/../') &&
+    !value.endsWith('/.') &&
+    !value.endsWith('/..') &&
+    !value.endsWith('/')
+})
+const relayConnectionValid = computed(
+  () => relayServerIpValid.value && relayUsernameValid.value && relayDirectoryValid.value,
+)
 const relayDirty = computed(
   () =>
     relayLoaded.value &&
     (relayForm.serverUrl.trim() !== savedRelayForm.serverUrl ||
-      relayForm.monitoringEnabled !== savedRelayForm.monitoringEnabled),
+      relayForm.monitoringEnabled !== savedRelayForm.monitoringEnabled ||
+      relayForm.serverIp.trim() !== savedRelayForm.serverIp ||
+      relayForm.sshUsername.trim() !== savedRelayForm.sshUsername ||
+      relayForm.installDirectory.trim() !== savedRelayForm.installDirectory),
 )
 const relayCanSave = computed(
-  () => relayLoaded.value && relayUrlValid.value && relayDirty.value && !relaySaving.value,
+  () =>
+    relayLoaded.value &&
+    relayUrlValid.value &&
+    relayConnectionValid.value &&
+    relayDirty.value &&
+    !relaySaving.value &&
+    !relayInstalling.value,
+)
+const relayCanInstall = computed(
+  () =>
+    relayLoaded.value &&
+    relayUrlValid.value &&
+    relayConnectionValid.value &&
+    !relaySaving.value &&
+    !relayInstalling.value,
 )
 
 function applyRelaySettings(settings: RelaySettings) {
   relayForm.serverUrl = settings.serverUrl
   relayForm.monitoringEnabled = settings.monitoringEnabled
+  relayForm.serverIp = settings.serverIp
+  relayForm.sshUsername = settings.sshUsername
+  relayForm.installDirectory = settings.installDirectory
+  relayForm.password = ''
   savedRelayForm.serverUrl = settings.serverUrl
   savedRelayForm.monitoringEnabled = settings.monitoringEnabled
+  savedRelayForm.serverIp = settings.serverIp
+  savedRelayForm.sshUsername = settings.sshUsername
+  savedRelayForm.installDirectory = settings.installDirectory
   relayStatus.value = settings.status
   relayLoaded.value = true
 }
@@ -237,6 +292,9 @@ async function saveRelaySettings() {
     const settings = await updateRelaySettings(
       relayUrlState.value.normalized,
       relayForm.monitoringEnabled,
+      relayForm.serverIp.trim(),
+      relayForm.sshUsername.trim(),
+      relayForm.installDirectory.trim(),
     )
     applyRelaySettings(settings)
     toast.success('中继设置已保存', settings.monitoringEnabled ? '正在监听中继状态' : '状态监听已关闭')
@@ -245,6 +303,42 @@ async function saveRelaySettings() {
     relayError.value = messageOf(error, '无法保存中继设置')
   } finally {
     relaySaving.value = false
+  }
+}
+
+async function installRelay() {
+  if (!relayCanInstall.value) return
+  relayInstalling.value = true
+  relayError.value = null
+  relayInstallResult.value = null
+  if (!relayForm.serverUrl.trim()) {
+    relayForm.serverUrl = `http://${relayForm.serverIp.trim()}:18787`
+    relayForm.monitoringEnabled = true
+  }
+  const password = relayForm.password
+  try {
+    if (relayDirty.value) {
+      applyRelaySettings(
+        await updateRelaySettings(
+          relayUrlState.value.normalized,
+          relayForm.monitoringEnabled,
+          relayForm.serverIp.trim(),
+          relayForm.sshUsername.trim(),
+          relayForm.installDirectory.trim(),
+        ),
+      )
+    }
+    const result = await installRelayOnServer(password)
+    relayInstallResult.value = result
+    if (result.success) {
+      toast.success('中继器安装完成', result.installDirectory)
+      await refreshRelayStatus()
+    }
+  } catch (error) {
+    relayError.value = messageOf(error, '无法安装中继器')
+  } finally {
+    relayForm.password = ''
+    relayInstalling.value = false
   }
 }
 
@@ -482,7 +576,7 @@ onBeforeUnmount(() => {
           <header class="mb-6">
             <h1 class="text-metric font-emphasis text-label">中继</h1>
             <p class="mt-1 text-body text-label-secondary">
-              配置公网中继服务器，并监听服务器与本地连接器是否保持连通。
+              配置公网中继服务器，自动安装中继器，并监听服务器与本地连接器是否保持连通。
             </p>
           </header>
 
@@ -544,7 +638,11 @@ onBeforeUnmount(() => {
                   设置页可见时每 8 秒检查一次。
                 </div>
               </div>
-              <Switch v-model="relayForm.monitoringEnabled" class="ml-auto" />
+              <Switch
+                v-model="relayForm.monitoringEnabled"
+                class="ml-auto"
+                :disabled="relayLoading || relaySaving || relayInstalling"
+              />
             </div>
             <div class="h-px bg-separator-soft" />
             <div
@@ -561,7 +659,7 @@ onBeforeUnmount(() => {
                   v-model="relayForm.serverUrl"
                   size="lg"
                   placeholder="https://regent.example.com"
-                  :disabled="relayLoading || relaySaving"
+                  :disabled="relayLoading || relaySaving || relayInstalling"
                   :invalid="!relayUrlValid"
                 />
                 <p class="mt-1.5 text-caption text-label-tertiary">
@@ -579,11 +677,135 @@ onBeforeUnmount(() => {
                 </p>
               </div>
             </div>
+            <div class="h-px bg-separator-soft" />
+            <div
+              class="grid grid-cols-[180px_minmax(0,1fr)] items-start gap-6 px-4 py-3 max-sm:grid-cols-1 max-sm:gap-2"
+            >
+              <div>
+                <div class="text-body font-emphasis text-label">服务器 IP</div>
+                <div class="mt-0.5 text-caption text-label-secondary">安装前必填</div>
+              </div>
+              <div class="min-w-0">
+                <Input
+                  v-model="relayForm.serverIp"
+                  size="lg"
+                  placeholder="203.0.113.10"
+                  :disabled="relayLoading || relaySaving || relayInstalling"
+                  :invalid="relayForm.serverIp.length > 0 && !relayServerIpValid"
+                />
+                <p
+                  v-if="relayForm.serverIp.length > 0 && !relayServerIpValid"
+                  class="mt-1.5 text-caption text-danger"
+                >
+                  请填写不含空格和路径的服务器 IP 或主机名。
+                </p>
+                <p
+                  v-else-if="relayForm.serverIp.length === 0"
+                  class="mt-1.5 text-caption text-label-tertiary"
+                >
+                  填写公网服务器地址后即可自动安装。
+                </p>
+              </div>
+            </div>
+            <div class="h-px bg-separator-soft" />
+            <div
+              class="grid grid-cols-[180px_minmax(0,1fr)] items-start gap-6 px-4 py-3 max-sm:grid-cols-1 max-sm:gap-2"
+            >
+              <div>
+                <div class="text-body font-emphasis text-label">SSH 用户名</div>
+                <div class="mt-0.5 text-caption text-label-secondary">需具备服务器写入权限</div>
+              </div>
+              <Input
+                v-model="relayForm.sshUsername"
+                size="lg"
+                placeholder="root"
+                :disabled="relayLoading || relaySaving || relayInstalling"
+                :invalid="!relayUsernameValid"
+                class="max-w-64"
+              />
+            </div>
+            <div class="h-px bg-separator-soft" />
+            <div
+              class="grid grid-cols-[180px_minmax(0,1fr)] items-start gap-6 px-4 py-3 max-sm:grid-cols-1 max-sm:gap-2"
+            >
+              <div>
+                <div class="text-body font-emphasis text-label">SSH 密码</div>
+                <div class="mt-0.5 text-caption text-label-secondary">只在本次安装中使用</div>
+              </div>
+              <div class="min-w-0">
+                <Input
+                  v-model="relayForm.password"
+                  type="password"
+                  size="lg"
+                  placeholder="留空则使用本机 SSH 密钥"
+                  :disabled="relayLoading || relaySaving || relayInstalling"
+                  autocomplete="current-password"
+                />
+                <p class="mt-1.5 text-caption text-label-tertiary">
+                  密码不会保存到数据库，也不会在安装完成后保留在页面中。
+                </p>
+              </div>
+            </div>
+            <div class="h-px bg-separator-soft" />
+            <div
+              class="grid grid-cols-[180px_minmax(0,1fr)] items-start gap-6 px-4 py-3 max-sm:grid-cols-1 max-sm:gap-2"
+            >
+              <div>
+                <div class="text-body font-emphasis text-label">安装目录</div>
+                <div class="mt-0.5 text-caption text-label-secondary">服务器上的绝对路径</div>
+              </div>
+              <div class="min-w-0">
+                <Input
+                  v-model="relayForm.installDirectory"
+                  size="lg"
+                  placeholder="/root/app/regent-relay"
+                  :disabled="relayLoading || relaySaving || relayInstalling"
+                  :invalid="!relayDirectoryValid"
+                  class="font-mono"
+                />
+                <p
+                  v-if="!relayDirectoryValid"
+                  class="mt-1.5 text-caption text-danger"
+                >
+                  请输入不以 / 结尾的安全绝对路径。
+                </p>
+                <p v-else class="mt-1.5 text-caption text-label-tertiary">
+                  中继程序、配置、脚本和日志都安装在该目录下。
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-if="relayInstallResult"
+            class="mt-3 rounded-panel bg-content px-4 py-3 shadow-panel"
+          >
+            <StatusDot :dot="relayInstallResult.success ? 'bg-success' : 'bg-danger'">
+              <span class="font-emphasis text-label">
+                {{ relayInstallResult.success ? '安装完成' : '安装失败' }}
+              </span>
+            </StatusDot>
+            <div class="mt-2 break-all font-mono text-caption text-label-secondary">
+              {{ relayInstallResult.installDirectory }}
+            </div>
+            <pre
+              v-if="!relayInstallResult.success"
+              class="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-control bg-field p-2 font-mono text-caption text-label-secondary"
+            >{{ relayInstallResult.message }}</pre>
           </div>
 
           <p v-if="relayError" class="mt-3 text-caption text-danger">{{ relayError }}</p>
           <div class="mt-5 flex items-center justify-end gap-2">
             <span v-if="relayDirty" class="mr-auto text-caption text-label-secondary">有未保存的更改</span>
+            <Button
+              variant="default"
+              size="lg"
+              :disabled="!relayCanInstall"
+              @click="installRelay"
+            >
+              <Icon :as="Download" size="inline" class="mr-1.5" />
+              {{ relayInstalling ? '安装中…' : '安装中继器' }}
+            </Button>
             <Button
               variant="primary"
               size="lg"

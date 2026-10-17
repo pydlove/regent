@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * 看板趋势读侧测试。
+ * 工作台趋势读侧测试。
  *
  * <p>守住两件事：日期必须逐日连续（前端拿到就能画，不用判空档），以及切天用的是调用方时区
  * —— 这两点一旦破了，柱状图会静默画歪，界面上看不出错。

@@ -17,6 +17,9 @@ spring:
     locations: classpath:db/migration
 
 regent:
+  auth:
+    # 本地 HTTP 开发保持 false；生产 HTTPS 环境通过环境变量设为 true。
+    cookie-secure: false
   execution:
     # 本地默认关掉派发心跳：一旦灌了演示数据（项目路径就是真实仓库），
     # 心跳一开就会真的把演示任务跑起来（烧 token、切分支、改文件）。

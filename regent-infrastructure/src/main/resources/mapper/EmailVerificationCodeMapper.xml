@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.identity.infrastructure.persistence.EmailVerificationCodeMapper">
+
+    <select id="findActive"
+            resultType="com.pydlove.regent.identity.infrastructure.persistence.EmailVerificationCodeData">
+        SELECT id, email, code_hash, expires_at, consumed_at, failed_attempts, created_at
+        FROM email_verification_code
+        WHERE email = #{email}
+          AND consumed_at IS NULL
+          AND expires_at &gt; #{now}
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+    <select id="findLatestCreatedAt" resultType="java.time.LocalDateTime">
+        SELECT MAX(created_at)
+        FROM email_verification_code
+        WHERE email = #{email}
+    </select>
+
+    <select id="countCreatedSince" resultType="long">
+        SELECT COUNT(*)
+        FROM email_verification_code
+        WHERE email = #{email}
+          AND created_at &gt;= #{since}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO email_verification_code
+            (email, code_hash, expires_at, consumed_at, failed_attempts, created_at)
+        VALUES
+            (#{email}, #{codeHash}, #{expiresAt}, #{consumedAt}, #{failedAttempts}, #{createdAt})
+    </insert>
+
+    <update id="update">
+        UPDATE email_verification_code
+        SET consumed_at = #{consumedAt},
+            failed_attempts = #{failedAttempts}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

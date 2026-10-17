@@ -22,6 +22,7 @@ fi
 # -Dfile.encoding=UTF-8 不是可选项：JVM 的默认字符集跟着运行环境走（LANG 没设时是 US-ASCII），
 # 它决定日志文件按什么编码写、也决定交给子进程的参数按什么编码编。后者会把中文指令打成问号
 # （适配器已改走 stdin 绕开 argv），但前者同样致命 —— 日志里一排问号是没法排错的。
+export REGENT_RELAY_INSTALL_SCRIPT="${REGENT_RELAY_INSTALL_SCRIPT:-$PROJECT_DIR/deploy/remote/deploy.sh}"
 echo "启动后端（${JAR}）..."
 nohup java -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8 \
     -jar "$JAR" > "$BACKEND_LOG" 2>&1 &

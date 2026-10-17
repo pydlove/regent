@@ -14,7 +14,7 @@ export LC_CTYPE=UTF-8
 #
 # 直接运行即可：会交互询问服务器 IP、SSH 端口、用户名、密码。
 # 非交互场景用 REGENT_SERVER_IP / REGENT_SSH_PORT / REGENT_SERVER_USER /
-# REGENT_SERVER_PASSWORD（密码，需 sshpass）或 REGENT_SSH_KEY（密钥）跳过询问。
+# REGENT_SERVER_PASSWORD（密码）或 REGENT_SSH_KEY（密钥）跳过询问。
 # ===================================================================
 
 SERVER_IP="${REGENT_SERVER_IP:-}"
@@ -26,12 +26,31 @@ SSH_PORT="${REGENT_SSH_PORT:-}"
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$(dirname "$DEPLOY_DIR")")"
 APP_NAME="regent-relay"
-REMOTE_BASE="/root/app/$APP_NAME"
+REMOTE_BASE="${REGENT_REMOTE_BASE:-/root/app/$APP_NAME}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 log_info()  { printf '%b\n' "${GREEN}[INFO]${NC} $*"; }
 log_warn()  { printf '%b\n' "${YELLOW}[WARN]${NC} $*"; }
 log_error() { printf '%b\n' "${RED}[ERROR]${NC} $*"; }
+
+case "$REMOTE_BASE" in
+    /*) ;;
+    *) log_error "REGENT_REMOTE_BASE 必须是绝对路径：$REMOTE_BASE"; exit 1 ;;
+esac
+case "$REMOTE_BASE" in
+    *[!A-Za-z0-9._/-]*) log_error "REGENT_REMOTE_BASE 含不支持的字符：$REMOTE_BASE"; exit 1 ;;
+esac
+REMOTE_BASE="${REMOTE_BASE%/}"
+if [ -z "$REMOTE_BASE" ] || [ "$REMOTE_BASE" = "/" ]; then
+    log_error "REGENT_REMOTE_BASE 不能是根目录"
+    exit 1
+fi
+case "/$REMOTE_BASE/" in
+    *'/../'*|*'/./'*|*'//'*)
+        log_error "REGENT_REMOTE_BASE 不能包含 .、.. 或重复斜杠"
+        exit 1
+        ;;
+esac
 
 require_tty() {
     if [ ! -t 0 ]; then
@@ -69,6 +88,9 @@ if [ "$SERVER_IP" = "127.0.0.1" ]; then
     log_error "服务器 IP 不能是 127.0.0.1，请填公网服务器地址。"
     exit 1
 fi
+case "$SERVER_IP" in
+    ''|*[!A-Za-z0-9.-]*) log_error "服务器 IP 格式不正确：$SERVER_IP"; exit 1 ;;
+esac
 
 if [ -z "$SSH_PORT" ]; then
     if [ -t 0 ]; then
@@ -92,12 +114,10 @@ if [ -z "$SERVER_USER" ]; then
 fi
 
 if [ -z "$SERVER_PASSWORD" ]; then
-    if [ ! -t 0 ]; then
-        log_error "非交互场景需要设置 REGENT_SERVER_PASSWORD（密码认证）或 REGENT_SSH_KEY（密钥认证）。"
-        exit 1
+    if [ -t 0 ]; then
+        read -r -s -p "  SSH 密码（直接回车改用密钥登录）: " SERVER_PASSWORD
+        echo
     fi
-    read -r -s -p "  SSH 密码（直接回车改用密钥登录）: " SERVER_PASSWORD
-    echo
 fi
 
 REMOTE_HOST="$SERVER_USER@$SERVER_IP"
@@ -109,13 +129,25 @@ fi
 
 SSH_OPTS=(-p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o NumberOfPasswordPrompts=1)
 if [ -n "$SERVER_PASSWORD" ]; then
-    command -v sshpass >/dev/null || {
-        log_error "密码认证需要 sshpass：brew install hudochenkov/sshpass/sshpass"
-        exit 1
-    }
-    export SSHPASS="$SERVER_PASSWORD"
-    SSH_COMMAND=(sshpass -e ssh "${SSH_OPTS[@]}" "$REMOTE_HOST")
-    RSYNC_SSH="sshpass -e ssh -p $SSH_PORT -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o NumberOfPasswordPrompts=1"
+    if command -v sshpass >/dev/null 2>&1; then
+        export SSHPASS="$SERVER_PASSWORD"
+        SSH_COMMAND=(sshpass -e ssh "${SSH_OPTS[@]}" "$REMOTE_HOST")
+        RSYNC_SSH="sshpass -e ssh -p $SSH_PORT -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o NumberOfPasswordPrompts=1"
+    else
+        # Web 调用没有 TTY。OpenSSH 在 SSH_ASKPASS_REQUIRE=force 时会调用辅助脚本，
+        # 密码只通过子进程环境传递，不进入 argv。
+        export REGENT_SSH_PASSWORD="$SERVER_PASSWORD"
+        export SSH_ASKPASS="$DEPLOY_DIR/ssh-askpass.sh"
+        export SSH_ASKPASS_REQUIRE=force
+        export DISPLAY="${DISPLAY:-regent}"
+        PASSWORD_SSH_OPTS=(
+            -o BatchMode=no
+            -o PreferredAuthentications=password,keyboard-interactive
+            -o PubkeyAuthentication=no
+        )
+        SSH_COMMAND=(ssh "${PASSWORD_SSH_OPTS[@]}" "${SSH_OPTS[@]}" "$REMOTE_HOST")
+        RSYNC_SSH="ssh -o BatchMode=no -o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no -p $SSH_PORT -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o NumberOfPasswordPrompts=1"
+    fi
 else
     SSH_COMMAND=(ssh -i "$SSH_KEY_PATH" "${SSH_OPTS[@]}" "$REMOTE_HOST")
     RSYNC_SSH="ssh -i $SSH_KEY_PATH -p $SSH_PORT -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o NumberOfPasswordPrompts=1"
@@ -170,8 +202,8 @@ else
 fi
 
 log_info "6/7 安装并启动中继，再配对本机连接器"
-rsync -az -e "$RSYNC_SSH" "$DEPLOY_DIR/systemd/regent-relay.service" \
-    "$REMOTE_HOST:/etc/systemd/system/regent-relay.service"
+sed "s#/root/app/regent-relay#$REMOTE_BASE#g" "$DEPLOY_DIR/systemd/regent-relay.service" \
+    | "${SSH_COMMAND[@]}" "umask 022; cat > /etc/systemd/system/regent-relay.service"
 "${SSH_COMMAND[@]}" "systemctl daemon-reload && systemctl enable regent-relay && systemctl restart regent-relay"
 sleep 3
 if "${SSH_COMMAND[@]}" "systemctl is-active --quiet regent-relay"; then
@@ -190,6 +222,7 @@ else
         REGENT_SSH_PORT="$SSH_PORT" \
         REGENT_SERVER_USER="$SERVER_USER" \
         REGENT_SERVER_PASSWORD="$SERVER_PASSWORD" \
+        REGENT_REMOTE_BASE="$REMOTE_BASE" \
         REGENT_RELAY_SHARED_SECRET="$RELAY_SECRET" \
         bash "$PROJECT_DIR/deploy/local/connect-relay.sh"; then
         log_error "本机连接器未上线，公网 API 仍会返回 RELAY_OFFLINE"
@@ -200,6 +233,8 @@ else
 fi
 
 log_info "7/7 自动配置服务器 Nginx"
+"${SSH_COMMAND[@]}" \
+    "sed -i 's#/root/app/regent-relay#$REMOTE_BASE#g' $REMOTE_BASE/nginx/regent.conf.example"
 NGINX_OUTPUT=$("${SSH_COMMAND[@]}" "REMOTE_BASE='$REMOTE_BASE' bash -s" <<'REMOTE_NGINX'
 if ! command -v nginx >/dev/null 2>&1; then
     echo "[nginx] 服务器未安装 nginx，跳过自动配置"
@@ -273,6 +308,7 @@ cat <<TIP
 部署完成。
 
   访问地址：http://$SERVER_IP:18787
+  安装目录：$REMOTE_BASE
   （外网打不开就先检查云厂商安全组是否放行 18787/tcp）
 
   本机中继连接器已自动配对（~/.regent/relay-connector.env）。

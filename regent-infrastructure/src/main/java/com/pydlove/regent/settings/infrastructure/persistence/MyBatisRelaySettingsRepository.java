@@ -23,7 +23,13 @@ public class MyBatisRelaySettingsRepository implements RelaySettingsRepository {
     @Override
     public Optional<RelaySettings> find() {
         return Optional.ofNullable(mapper.select())
-                .map(row -> new RelaySettings(row.getServerUrl(), row.getMonitoringEnabled()));
+                .map(row -> new RelaySettings(
+                        row.getServerUrl(),
+                        row.getMonitoringEnabled(),
+                        row.getServerIp(),
+                        row.getSshUsername(),
+                        row.getInstallDirectory()
+                ));
     }
 
     @Override
@@ -32,6 +38,9 @@ public class MyBatisRelaySettingsRepository implements RelaySettingsRepository {
         mapper.upsert(
                 SETTINGS_ID,
                 settings.serverUrl(),
+                settings.serverIp(),
+                settings.sshUsername(),
+                settings.installDirectory(),
                 settings.monitoringEnabled(),
                 LocalDateTime.ofInstant(now, ZoneOffset.UTC)
         );

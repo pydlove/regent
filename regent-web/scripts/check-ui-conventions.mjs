@@ -40,7 +40,15 @@ for (const file of walk(SRC)) {
 
   // 同一个 class 串里同时出现字号和颜色令牌时，提醒作者这两组靠 tv.ts 的配置区分
   if (file === ALLOWED) continue
-  const sizeTokens = ['text-caption', 'text-body', 'text-control', 'text-metric']
+  const sizeTokens = [
+    'text-caption',
+    'text-body',
+    'text-control',
+    'text-metric',
+    'text-subhead',
+    'text-title',
+    'text-display',
+  ]
   const colorTokens = /\btext-(label|label-secondary|label-tertiary|accent|danger|warning|success|neutral|white)\b/
   const hasSize = sizeTokens.some((t) => text.includes(t))
   if (hasSize && colorTokens.test(text) && /tv\(/.test(text)) {

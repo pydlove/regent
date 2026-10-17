@@ -6,17 +6,35 @@ import java.net.URI;
 import java.net.URISyntaxException;
 
 /**
- * 中继服务器状态监听的平台设置。
+ * 中继服务器的连接、安装与状态监听设置。
  *
- * <p>这里只保存可公开的服务器地址。连接器共享密钥仍由本机部署配置维护，
- * 不进入领域对象、数据库或浏览器。
+ * <p>SSH 密码与连接器共享密钥都不进入这个对象：密码只随安装命令使用一次，
+ * 共享密钥仍由部署脚本写入运行时目录。
  */
-public record RelaySettings(String serverUrl, boolean monitoringEnabled) {
+public record RelaySettings(
+        String serverUrl,
+        boolean monitoringEnabled,
+        String serverIp,
+        String sshUsername,
+        String installDirectory
+) {
 
     public static final int MAX_SERVER_URL_LENGTH = 2048;
+    public static final int MAX_SERVER_IP_LENGTH = 255;
+    public static final int MAX_SSH_USERNAME_LENGTH = 32;
+    public static final int MAX_INSTALL_DIRECTORY_LENGTH = 512;
+    public static final String DEFAULT_SSH_USERNAME = "root";
+    public static final String DEFAULT_INSTALL_DIRECTORY = "/root/app/regent-relay";
 
     public RelaySettings {
         serverUrl = serverUrl == null ? "" : serverUrl.trim();
+        serverIp = serverIp == null ? "" : serverIp.trim();
+        sshUsername = sshUsername == null || sshUsername.isBlank()
+                ? DEFAULT_SSH_USERNAME
+                : sshUsername.trim();
+        installDirectory = installDirectory == null || installDirectory.isBlank()
+                ? DEFAULT_INSTALL_DIRECTORY
+                : installDirectory.trim();
         if (serverUrl.length() > MAX_SERVER_URL_LENGTH) {
             throw new DomainException("中继服务器地址不能超过 " + MAX_SERVER_URL_LENGTH + " 个字符");
         }
@@ -27,14 +45,31 @@ public record RelaySettings(String serverUrl, boolean monitoringEnabled) {
         } else {
             validateServerUrl(serverUrl);
         }
+        validateServerIp(serverIp);
+        validateSshUsername(sshUsername);
+        validateInstallDirectory(installDirectory);
+    }
+
+    public RelaySettings(String serverUrl, boolean monitoringEnabled) {
+        this(
+                serverUrl,
+                monitoringEnabled,
+                "",
+                DEFAULT_SSH_USERNAME,
+                DEFAULT_INSTALL_DIRECTORY
+        );
     }
 
     public static RelaySettings unconfigured() {
-        return new RelaySettings("", false);
+        return new RelaySettings("", false, "", DEFAULT_SSH_USERNAME, DEFAULT_INSTALL_DIRECTORY);
     }
 
     public boolean configured() {
         return !serverUrl.isEmpty();
+    }
+
+    public boolean installConfigured() {
+        return !serverIp.isEmpty();
     }
 
     private static void validateServerUrl(String value) {
@@ -58,6 +93,43 @@ public record RelaySettings(String serverUrl, boolean monitoringEnabled) {
         }
         if (uri.getPath() != null && !uri.getPath().isEmpty() && !"/".equals(uri.getPath())) {
             throw new DomainException("中继服务器地址必须指向站点根地址");
+        }
+    }
+
+    private static void validateServerIp(String value) {
+        if (value.isEmpty()) {
+            return;
+        }
+        if (value.length() > MAX_SERVER_IP_LENGTH) {
+            throw new DomainException("服务器 IP 不能超过 " + MAX_SERVER_IP_LENGTH + " 个字符");
+        }
+        if (value.chars().anyMatch(Character::isWhitespace)
+                || !value.matches("[A-Za-z0-9.-]+")) {
+            throw new DomainException("服务器 IP 格式不正确");
+        }
+    }
+
+    private static void validateSshUsername(String value) {
+        if (value.length() > MAX_SSH_USERNAME_LENGTH
+                || !value.matches("[A-Za-z_][A-Za-z0-9_-]*")) {
+            throw new DomainException("SSH 用户名格式不正确");
+        }
+    }
+
+    private static void validateInstallDirectory(String value) {
+        if (value.length() > MAX_INSTALL_DIRECTORY_LENGTH) {
+            throw new DomainException("中继安装目录不能超过 " + MAX_INSTALL_DIRECTORY_LENGTH + " 个字符");
+        }
+        if (!value.startsWith("/")
+                || value.equals("/")
+                || !value.matches("/[A-Za-z0-9._/-]+")
+                || value.contains("//")
+                || value.contains("/./")
+                || value.contains("/../")
+                || value.endsWith("/.")
+                || value.endsWith("/..")
+                || value.endsWith("/")) {
+            throw new DomainException("中继安装目录必须是安全的绝对路径");
         }
     }
 }

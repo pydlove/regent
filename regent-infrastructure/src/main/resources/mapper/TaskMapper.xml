@@ -90,7 +90,7 @@
         GROUP BY status
     </select>
 
-    <!-- 看板累计口径与任务列表一致：只汇总未逻辑删除任务的执行记录。 -->
+    <!-- 工作台累计口径与任务列表一致：只汇总未逻辑删除任务的执行记录。 -->
     <select id="summarizeTokens"
             resultType="com.pydlove.regent.execution.infrastructure.persistence.TokenUsageRow">
         SELECT COALESCE(SUM(r.token_input), 0)        AS token_input,
@@ -104,7 +104,7 @@
     <!--
       按自然日统计收场任务。时间列按约定存 UTC 字面量，所以切天要先把字面量平移
       offsetMinutes 再取 DATE —— 否则东八区晚上 8 点之后完成的任务会算到第二天，
-      看板柱状图与列表里的「几分钟前」就对不上了。
+      工作台柱状图与列表里的「几分钟前」就对不上了。
       范围条件按时区反推成 UTC 边界，不用 DATE() 直接比较，避免完成时间列失去索引。
     -->
     <select id="countCompletionPerDay"

@@ -1,8 +1,24 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+import { useAuthStore } from '@/stores/useAuthStore'
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/AuthView.vue'),
+      props: { mode: 'login' },
+      meta: { title: '登录', layout: 'auth' },
+    },
+    {
+      path: '/register',
+      name: 'register',
+      component: () => import('@/views/AuthView.vue'),
+      props: { mode: 'register' },
+      meta: { title: '注册', layout: 'auth' },
+    },
     {
       path: '/',
       // 默认落地在任务页：样式基准页只是展示用，放在侧边栏底部，不当首屏
@@ -18,7 +34,7 @@ const router = createRouter({
       path: '/dashboard',
       name: 'dashboard',
       component: () => import('@/views/DashboardView.vue'),
-      meta: { title: '看板' },
+      meta: { title: '工作台' },
     },
     {
       path: '/tasks',
@@ -55,6 +71,24 @@ const router = createRouter({
       meta: { title: '设置' },
     },
   ],
+})
+
+router.beforeEach(async (to) => {
+  const auth = useAuthStore()
+  if (!auth.initialized) {
+    await auth.loadCurrentUser()
+  }
+
+  const authPage = to.meta.layout === 'auth'
+  if (authPage && auth.isAuthenticated) {
+    return { name: 'tasks' }
+  }
+  if (!authPage && !auth.isAuthenticated) {
+    return {
+      name: 'login',
+      query: to.fullPath === '/' ? undefined : { redirect: to.fullPath },
+    }
+  }
 })
 
 export default router

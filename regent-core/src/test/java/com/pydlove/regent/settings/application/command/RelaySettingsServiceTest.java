@@ -4,6 +4,7 @@ import com.pydlove.regent.settings.application.query.RelaySettingsView;
 import com.pydlove.regent.settings.application.query.RelayState;
 import com.pydlove.regent.settings.domain.model.RelaySettings;
 import com.pydlove.regent.settings.domain.port.RelayHealthProbe;
+import com.pydlove.regent.settings.domain.port.RelayInstaller;
 import com.pydlove.regent.settings.domain.repository.RelaySettingsRepository;
 import com.pydlove.regent.shared.domain.DomainException;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,15 +29,18 @@ class RelaySettingsServiceTest {
 
     private MemoryRepository repository;
     private RecordingProbe probe;
+    private RecordingInstaller installer;
     private RelaySettingsService service;
 
     @BeforeEach
     void setUp() {
         repository = new MemoryRepository();
         probe = new RecordingProbe();
+        installer = new RecordingInstaller();
         service = new RelaySettingsService(
                 repository,
                 probe,
+                installer,
                 RelaySettings.unconfigured(),
                 Clock.fixed(NOW, ZoneOffset.UTC)
         );
@@ -120,26 +124,116 @@ class RelaySettingsServiceTest {
     void updatesAndNormalizesSettings() {
         probe.result = new RelayHealthProbe.ProbeResult(true, true, 0, 18, "正常");
 
-        RelaySettingsView view = service.update("  https://relay.example.com/  ", true);
+        RelaySettingsView view = service.update(
+                "  https://relay.example.com/  ",
+                true,
+                " 203.0.113.10 ",
+                " deploy ",
+                " /opt/regent/relay "
+        );
 
         assertEquals("https://relay.example.com/", repository.settings.serverUrl());
         assertTrue(repository.settings.monitoringEnabled());
+        assertEquals("203.0.113.10", repository.settings.serverIp());
+        assertEquals("deploy", repository.settings.sshUsername());
+        assertEquals("/opt/regent/relay", repository.settings.installDirectory());
+        assertEquals("203.0.113.10", view.serverIp());
         assertEquals(RelayState.ONLINE, view.status().state());
     }
 
     @Test
     @DisplayName("启用监听时不能使用空地址或带凭据的地址")
     void rejectsUnsafeOrIncompleteSettings() {
-        assertThrows(DomainException.class, () -> service.update(" ", true));
         assertThrows(
                 DomainException.class,
-                () -> service.update("https://user:password@relay.example.com", true)
+                () -> service.update(" ", true, "", "root", "/opt/regent/relay")
         );
         assertThrows(
                 DomainException.class,
-                () -> service.update("ftp://relay.example.com", true)
+                () -> service.update(
+                        "https://user:password@relay.example.com",
+                        true,
+                        "203.0.113.10",
+                        "root",
+                        "/opt/regent/relay"
+                )
+        );
+        assertThrows(
+                DomainException.class,
+                () -> service.update(
+                        "ftp://relay.example.com",
+                        true,
+                        "203.0.113.10",
+                        "root",
+                        "/opt/regent/relay"
+                )
         );
         assertFalse(repository.saved);
+    }
+
+    @Test
+    @DisplayName("安装时把一次性密码与已保存的连接信息交给安装端口")
+    void installsWithSavedConnectionAndOneTimePassword() {
+        repository.settings = new RelaySettings(
+                "https://relay.example.com",
+                true,
+                "203.0.113.10",
+                "deploy",
+                "/opt/regent/relay"
+        );
+        installer.result = new RelayInstaller.InstallResult(
+                true,
+                "/opt/regent/relay",
+                "完成"
+        );
+
+        var result = service.install("temporary-secret");
+
+        assertTrue(result.success());
+        assertEquals("/opt/regent/relay", result.installDirectory());
+        assertEquals("203.0.113.10", installer.request.serverIp());
+        assertEquals("deploy", installer.request.sshUsername());
+        assertEquals("temporary-secret", installer.request.password());
+        assertEquals("/opt/regent/relay", installer.request.installDirectory());
+    }
+
+    @Test
+    @DisplayName("没有服务器 IP 时拒绝安装且不调用安装端口")
+    void rejectsInstallWithoutServerIp() {
+        assertThrows(DomainException.class, () -> service.install("password"));
+        assertEquals(0, installer.calls);
+    }
+
+    @Test
+    @DisplayName("拒绝异常超长的 SSH 密码")
+    void rejectsOversizedPassword() {
+        repository.settings = new RelaySettings(
+                "https://relay.example.com",
+                true,
+                "203.0.113.10",
+                "root",
+                "/opt/regent/relay"
+        );
+
+        assertThrows(DomainException.class, () -> service.install("x".repeat(4097)));
+        assertEquals(0, installer.calls);
+    }
+
+    @Test
+    @DisplayName("拒绝可逃逸或带 Shell 元字符的安装目录")
+    void rejectsUnsafeInstallDirectories() {
+        assertThrows(
+                DomainException.class,
+                () -> service.update("", false, "203.0.113.10", "root", "/opt/../etc")
+        );
+        assertThrows(
+                DomainException.class,
+                () -> service.update("", false, "203.0.113.10", "root", "/opt/relay/..")
+        );
+        assertThrows(
+                DomainException.class,
+                () -> service.update("", false, "203.0.113.10", "root", "/opt/relay;rm")
+        );
     }
 
     private static final class MemoryRepository implements RelaySettingsRepository {
@@ -173,6 +267,20 @@ class RelaySettingsServiceTest {
             if (failure != null) {
                 throw failure;
             }
+            return result;
+        }
+    }
+
+    private static final class RecordingInstaller implements RelayInstaller {
+
+        private InstallRequest request;
+        private InstallResult result = new InstallResult(true, "", "完成");
+        private int calls;
+
+        @Override
+        public InstallResult install(InstallRequest request) {
+            this.request = request;
+            this.calls++;
             return result;
         }
     }

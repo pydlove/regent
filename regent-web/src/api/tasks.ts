@@ -65,7 +65,7 @@ export const updateTask = (id: number, input: UpdateTaskInput) =>
 
 export const getTaskStats = () => get<Record<TaskStatus, number>>('/tasks/stats')
 
-/** 全平台已结算 token 汇总，供看板展示。 */
+/** 全平台已结算 token 汇总，供工作台展示。 */
 export const getTaskTokenUsage = () => get<TaskTokenUsage>('/tasks/token-usage')
 
 /** 失败重试或已终止任务重新执行，统一回到 PENDING。 */

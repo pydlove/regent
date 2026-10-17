@@ -35,6 +35,18 @@ async function toApiError(response: Response): Promise<ApiError> {
   }
 }
 
+async function throwApiError(path: string, response: Response): Promise<never> {
+  const error = await toApiError(response)
+  if (
+    error.status === 401 &&
+    !path.startsWith('/auth/') &&
+    typeof window !== 'undefined'
+  ) {
+    window.dispatchEvent(new Event('regent:unauthorized'))
+  }
+  throw error
+}
+
 type QueryValue = string | number | undefined | null
 
 function withQuery(path: string, params?: Record<string, QueryValue>): string {
@@ -53,7 +65,7 @@ export async function get<T>(path: string, params?: Record<string, QueryValue>):
   const response = await fetch(withQuery(path, params), {
     headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/json' },
   })
-  if (!response.ok) throw await toApiError(response)
+  if (!response.ok) await throwApiError(path, response)
   return (await response.json()) as T
 }
 
@@ -62,8 +74,17 @@ export async function post<T>(path: string): Promise<T> {
     method: 'POST',
     headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/json' },
   })
-  if (!response.ok) throw await toApiError(response)
+  if (!response.ok) await throwApiError(path, response)
   return (await response.json()) as T
+}
+
+/** 无响应体的 POST。用于登出这类只改变 Cookie、没有业务数据返回的命令。 */
+export async function postNoContent(path: string): Promise<void> {
+  const response = await fetch(`/api${path}`, {
+    method: 'POST',
+    headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/json' },
+  })
+  if (!response.ok) await throwApiError(path, response)
 }
 
 /**
@@ -83,8 +104,22 @@ export async function postJson<T>(path: string, body: unknown): Promise<T> {
     },
     body: JSON.stringify(body ?? {}),
   })
-  if (!response.ok) throw await toApiError(response)
+  if (!response.ok) await throwApiError(path, response)
   return (await response.json()) as T
+}
+
+/** 带 JSON 请求体、但成功响应没有响应体的 POST。 */
+export async function postJsonNoContent(path: string, body: unknown): Promise<void> {
+  const response = await fetch(`/api${path}`, {
+    method: 'POST',
+    headers: {
+      ...RELAY_REQUEST_HEADER,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body ?? {}),
+  })
+  if (!response.ok) await throwApiError(path, response)
 }
 
 /** 带 JSON 请求体的 PUT：用于整体替换一组可编辑字段。 */
@@ -98,7 +133,7 @@ export async function putJson<T>(path: string, body: unknown): Promise<T> {
     },
     body: JSON.stringify(body ?? {}),
   })
-  if (!response.ok) throw await toApiError(response)
+  if (!response.ok) await throwApiError(path, response)
   return (await response.json()) as T
 }
 
@@ -108,5 +143,5 @@ export async function deleteRequest(path: string): Promise<void> {
     method: 'DELETE',
     headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/json' },
   })
-  if (!response.ok) throw await toApiError(response)
+  if (!response.ok) await throwApiError(path, response)
 }

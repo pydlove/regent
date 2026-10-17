@@ -25,7 +25,7 @@
 
 **目标运行载体（本节唯一需要你拍板的事）**：目标是**浏览器里的 Web 应用**，macOS 上的
 Safari / Chrome 为基准平台，不做 Electron/Tauri 桌面壳。三个理由：平台本身是常驻服务，
-你多数时候在手机上批决策、在浏览器里看板，桌面壳收益有限；`backdrop-filter` 与
+你多数时候在手机上批决策、在浏览器里看工作台，桌面壳收益有限；`backdrop-filter` 与
 `-apple-system` 在 macOS 浏览器上能力齐全，材质观感不打折；少一层壳就少一套打包与升级负担。
 
 代价必须提前说清：`-apple-system` 只在 macOS 上才解析成真正的 SF Pro，Windows / Linux 上
@@ -77,7 +77,14 @@ Safari / Chrome 为基准平台，不做 Electron/Tauri 桌面壳。三个理由
 | 正文与控件 | **13px** | 400 |
 | 辅助文字 | 11px | 400 |
 | 分组标题 | 11px | `font-emphasis`（500） |
-| 仪表盘大数字 | 22px | 700 |
+| 通用指标数字 | 22px | 700 |
+| 摘要页主标题 / 大数字 | 28px | 700 |
+| 摘要页分区标题 | 15px | `font-emphasis`（500） |
+| 摘要页辅助文字 | 12px / 18px 行高 | 400 |
+
+摘要页（目前是工作台）使用 `text-display` / `text-title` / `text-subhead` 三个扩展令牌。
+它不是全站字号整体放大：任务表和弹框仍保持 macOS 紧凑控件尺度，只有需要「远读」的统计，
+才用更大的数字、更宽的行距和留白。
 
 **字体栈是验证过的，别随手改。** 用 Chrome DevTools Protocol 的
 `CSS.getPlatformFontsForNode`（唯一能回答「这个节点最终由哪套平台字体渲染」的接口）实测本机：
@@ -119,6 +126,7 @@ body 实测 → 西文/数字: .SF NS (.SFNS-Regular)      中文: PingFang SC (
 | 控件（按钮 / 输入 / 下拉） | 6px |
 | 卡片 / 弹出层 / 菜单 | 10px |
 | 窗口 / 大面板 | 12px |
+| 工作台卡片 | 16px |
 | 徽章 / 小标签 | 4px |
 
 > macOS 用的是连续圆角（squircle），CSS 的 `border-radius` 画不出真正的超椭圆。
@@ -390,6 +398,7 @@ macOS 用户对常驻的灰色滚动条极其敏感。这一条不做，前面�
 
   --window-bg: #ececec;
   --content-bg: #ffffff;
+  --fx-dashboard-bg: #f3f7fd;
   --sidebar-bg: #f5f5f5;
   --material-bg: rgba(246, 246, 246, 0.72);
   --hover-bg: rgba(0, 0, 0, 0.03);
@@ -433,6 +442,7 @@ macOS 用户对常驻的灰色滚动条极其敏感。这一条不做，前面�
 
   --window-bg: #1e1e1e;
   --content-bg: #2c2c2e;
+  --fx-dashboard-bg: #181b21;
   --sidebar-bg: #232325;
   --material-bg: rgba(40, 40, 42, 0.72);
   --hover-bg: rgba(255, 255, 255, 0.06);
@@ -479,6 +489,7 @@ macOS 用户对常驻的灰色滚动条极其敏感。这一条不做，前面�
   --color-separator-soft: var(--separator-soft);
   --color-window: var(--window-bg);
   --color-content: var(--content-bg);
+  --color-dashboard: var(--fx-dashboard-bg);
   --color-sidebar: var(--sidebar-bg);
   --color-material: var(--material-bg);
   --color-hover: var(--hover-bg);
@@ -498,6 +509,7 @@ macOS 用户对常驻的灰色滚动条极其敏感。这一条不做，前面�
   --radius-control: 6px;
   --radius-panel: 10px;
   --radius-window: 12px;
+  --radius-card: 16px;
 
   --spacing-toolbar: 52px;
   --spacing-toolbar-compact: 38px;
@@ -809,7 +821,7 @@ regent-web/
     │   ├── ui/               # 基础层，macOS 观感在此封死；每个组件配 xxx.variants.ts
     │   └── business/         # 业务层，只组装不改视觉
     ├── router/
-    ├── views/                # 业务页：看板 / 任务 / 决策 / Bug 单 / 项目 / 环境（+ 样式基准页，仅展示）
+    ├── views/                # 业务页：工作台 / 任务 / 决策 / Bug 单 / 项目 / 环境（+ 样式基准页，仅展示）
     ├── stores/               # Pinia：分页、筛选、搜索词、选中行都在这里
     │   ├── useTaskStore.ts
     │   ├── useDecisionStore.ts
@@ -817,7 +829,7 @@ regent-web/
     │   └── useBugStore.ts
     ├── api/                  # 唯一的 HTTP 出口，按领域分文件
     │   ├── http.ts           # 拼 query、解 {code,message} 错误体
-    │   ├── dashboard.ts      # 看板快照：并行拉统计、趋势与最近事项
+    │   ├── dashboard.ts      # 工作台快照：并行拉统计、趋势与最近事项
     │   ├── tasks.ts
     │   ├── decisions.ts
     │   ├── projects.ts       # 项目列表与注册
@@ -1259,33 +1271,47 @@ pointer-events 就被 reka-ui 关掉，鼠标根本落不到需要提示的按�
 
 ---
 
-## 十七、看板与图表
+## 十七、工作台与图表
 
-看板回答两个问题：**平台整体怎么样**、**我现在该动哪一件事**。整页按「磁贴 → 图表 → 队列 →
-需要你处理 → 执行健康」排，从上到下正好是这两个问题的展开。
+工作台回答两个问题：**平台整体怎么样**、**我现在该动哪一件事**。视觉采用浅蓝画布、
+白色卡片和蓝色强调色，参考企业数据看板的阅读节奏，而不是靠大面积渐变制造层次：
 
-### 17.1 磁贴：只在需要动作时上色
+1. **运行焦点**：顶部是白色卡片，只保留状态标签、动态结论、更新时间和主操作，不叠加装饰性图形；
+2. **指标卡**：待处理、正在执行、任务总数、成功率、Token 消耗各自成为一张白卡，图标和关键数字负责着色；
+3. **主工作区**：左侧执行趋势与执行队列，右侧待办中心；两块都用白卡加发丝线，避免多个彩色面板互相抢注意力；
+4. **底部复盘区**：任务构成与执行质量并排，延续白卡结构，回答「系统由什么组成」和「执行是否健康」。
 
-四个磁贴（任务总数 / 正在处理 / 待批决策 / 开放缺陷）常态是**黑字 + 灰底图标块**，
-只有该数字需要人处理时才染色：有待批决策 → 图标块与数字转橙，有未修缺陷 → 转红。
-四个全彩互相抵消，等于没有重点。
+### 17.1 指标卡：白底负责秩序，图标与数字负责提示
 
-图标块是 24px 圆角方块（`rounded-[6px]`）+ 同色 12% 底色，这是 macOS 设置与健康里
-「图标chip」的标准做法；hover 才出现的箭头表示整块可点。
+指标固定为五项（待处理 / 正在执行 / 任务总数 / 成功率 / Token）。五张卡片统一使用
+`bg-content` 白底、`border-separator-soft` 发丝线与 `shadow-panel`，页面画布使用
+`bg-dashboard` 的淡蓝底色。工作台的整体层次由「画布 → 白卡 → 发丝线」建立，不靠整卡渐变。
+
+图标块承担“类别识别”，大数字承担“是否需要行动”：有待处理事项时用橙色，执行成功率
+低于 90% 时才降级为橙/红，其余保持标签色。白色卡片让五类信息保持同一层级，报警数字
+不会因为五张卡片同时有颜色而被稀释。
+
+图标块是 36px 圆角方块（`rounded-panel`）+ 同色 12% 底色；
+hover 才出现的箭头改为绝对定位，不占文字宽度，390px 下标签不会被无意义的空白挤断。
+卡片圆角用 `rounded-card`（16px），不直接写 `16px`。
 
 ### 17.2 图表：手写 SVG，不引图表库
 
-需求 90 要求「看板重新设计」，最终只加了两个图：
+需求 90 要求「工作台重新设计」，最终只加了两个图：
 
 | 图表 | 用在哪 | 关键做法 |
 |---|---|---|
 | `DonutChart` | 任务构成 | 圆头线帽、段间留 `gap + thickness`（线帽会向两端各多画半个线宽，不让位就会粘住）、单段占满整圈时不留缝 |
-| `TrendBars` | 近 7 天收场 | 只画柱子 + 一条基线；零值那天留 3px 短桩，说明这天算过；今天那根用满色 + 加粗标签 |
+| `TrendArea` | 近 7 天收场 | 完成数用绿色面积线，失败数用低对比红色细线；非零点直接标数，今天加虚线基准与加粗标签 |
 
 不引 ECharts / Chart.js 的理由：只需要两个图，而图表库会把一套自己的色板、字体、
 动画和 tooltip 一起带进来 —— 这三样在这个项目里都已经有明确规范，接进来必然要压回去。
-两个组件加起来不到 200 行，且颜色走**工具类**（`toneClass: 'text-success'`）而不是色值，
+两个组件加起来不到 300 行，且颜色走**工具类**（`toneClass: 'text-success'`）或 CSS 主题变量，
 深浅色主题、系统色令牌全部自动继承，图表里不会出现第二套色板。
+
+趋势图不做悬浮 tooltip 作为唯一读数：关键点直接标数，触屏和键盘用户不 hover 也能读到。
+SVG 只负责面积与折线；日期与数值标签用 DOM 定位，避免 `preserveAspectRatio="none"` 把文字压扁。
+折线使用单调三次 Hermite 贝塞尔曲线：拐角圆润，但不会在尖峰或零点附近过冲而伪造数据。
 
 `toneClass` 传类名而不是 `color` 属性，是因为 Tailwind 只认得源码里出现过的类名：
 把 `text-success` 写在 TS 里（`statusDefinitions`）比在 JS 里拼 `#34C759` 更安全，
@@ -1298,8 +1324,15 @@ pointer-events 就被 reka-ui 关掉，鼠标根本落不到需要提示的按�
 
 - 时间列按约定存 UTC 字面量，SQL 里先 `DATE_ADD(finished_at, INTERVAL offsetMinutes MINUTE)`
   再取 `DATE`，范围条件同时按时区反推成 UTC 边界（不用 `DATE()` 直接比较，否则走不上索引）；
-- 偏移量由应用层按「此刻」的时区算出来传给仓储。一个时区偏一小时，柱状图就会整体错位，
+- 偏移量由应用层按「此刻」的时区算出来传给仓储。一个时区偏一小时，趋势图就会整体错位，
   而界面上看不出来 —— 所以这条口径写在仓储接口的注释里，不留在实现里。
 
-磁贴的数字来自 `/api/tasks/stats`，任务构成来自同一份统计，近 7 天来自 `/api/tasks/trend`，
-三者在 `api/dashboard.ts` 里并行发出：看板不该为一屏数据串行等三次。
+### 17.4 响应式
+
+- 指标带在手机上保持两列，Token 独占末行；
+- 趋势与待办在 `xl` 以下纵向排列，待办紧随执行趋势，不会掉到页面最底部；
+- 待办摘要固定三列；条目正文允许两行截断，指标说明允许两行，元信息始终单行省略，
+  避免 390px 宽度出现横向滚动。
+
+指标带的数字来自 `/api/tasks/stats`，任务构成来自同一份统计，近 7 天来自 `/api/tasks/trend`，
+三者在 `api/dashboard.ts` 里并行发出：工作台不该为一屏数据串行等三次。

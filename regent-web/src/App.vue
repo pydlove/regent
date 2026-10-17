@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   LayoutPanelLeft,
   ListChecks,
+  LogOut,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -28,6 +29,7 @@ import Toolbar from '@/components/ui/toolbar/Toolbar.vue'
 import { useOverlayScrollbar } from '@/composables/useOverlayScrollbar'
 import { useProjectDialog } from '@/composables/useProjectDialog'
 import { useTheme, type ThemePreference } from '@/composables/useTheme'
+import { useAuthStore } from '@/stores/useAuthStore'
 import { useDecisionStore } from '@/stores/useDecisionStore'
 import { useTaskStore } from '@/stores/useTaskStore'
 
@@ -35,6 +37,7 @@ const { preference, setTheme } = useTheme()
 const route = useRoute()
 const router = useRouter()
 const routeTitle = computed(() => (route.meta.title as string | undefined) ?? '')
+const authPage = computed(() => route.meta.layout === 'auth')
 
 // 标签页标题统一带上产品名：切页是「任务 · Regent AI 任务执行平台」，而不是永远一个笼统的 Regent
 watchEffect(() => {
@@ -62,6 +65,7 @@ const themeOptions = [
  */
 const store = useTaskStore()
 const decisionStore = useDecisionStore()
+const auth = useAuthStore()
 
 const project = computed({
   get: () => (store.projectId === null ? 'all' : String(store.projectId)),
@@ -84,7 +88,7 @@ const projects = computed(() => [
 
 // 角标只挂「需要人管」的数：待批决策的数字和决策页是同一个源，不会两处对不上
 const navItems = computed(() => [
-  { label: '看板', to: '/dashboard', icon: LayoutDashboard },
+  { label: '工作台', to: '/dashboard', icon: LayoutDashboard },
   { label: '任务', to: '/tasks', icon: ListChecks, badge: String(store.taskTotal) },
   {
     label: '决策',
@@ -105,13 +109,28 @@ const footerNavItems = [
   { label: '样式基准页', to: '/baseline', icon: LayoutPanelLeft },
 ]
 
-// 角标与项目下拉都挂在侧边栏/工具栏上，与具体页面无关，所以在应用启动时拉一次。
-// 项目列表取不到就算了：下拉里只剩「全部项目」，比让整个应用起不来强
-onMounted(() => {
-  void store.loadStats()
-  void store.loadProjects().catch(() => undefined)
-  void decisionStore.loadPendingCount()
-})
+// 登录页不请求业务数据；登录成功并切换到管理界面后再拉角标与项目下拉。
+watch(
+  () => auth.isAuthenticated,
+  (authenticated) => {
+    if (!authenticated) return
+    void store.loadStats()
+    void store.loadProjects().catch(() => undefined)
+    void decisionStore.loadPendingCount()
+  },
+  { immediate: true },
+)
+
+const logout = async () => {
+  await auth.logout()
+  await router.push({ name: 'login' })
+}
+
+const handleUnauthorized = () => {
+  auth.clear()
+  if (authPage.value) return
+  void router.push({ name: 'login', query: { redirect: route.fullPath } })
+}
 
 const compactViewport = ref(window.matchMedia('(max-width: 1023px)').matches)
 const sidebarCollapsed = ref(compactViewport.value)
@@ -127,8 +146,14 @@ const syncViewport = () => {
   compactViewport.value = nextCompact
 }
 
-onMounted(() => window.addEventListener('resize', syncViewport))
-onUnmounted(() => window.removeEventListener('resize', syncViewport))
+onMounted(() => {
+  window.addEventListener('resize', syncViewport)
+  window.addEventListener('regent:unauthorized', handleUnauthorized)
+})
+onUnmounted(() => {
+  window.removeEventListener('resize', syncViewport)
+  window.removeEventListener('regent:unauthorized', handleUnauthorized)
+})
 
 // 手机端点导航后自动收起抽屉：否则点了「决策」还要再点一次遮罩才能看到内容
 watch(
@@ -148,7 +173,7 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
 
 <template>
   <TooltipProvider :delay-duration="400">
-    <div class="flex h-screen flex-col overflow-hidden bg-window">
+    <div v-if="!authPage" class="flex h-screen flex-col overflow-hidden bg-window">
       <Toolbar>
         <template #leading>
           <div class="lg:hidden">
@@ -231,6 +256,11 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
             <SegmentedControl v-model="themeModel" :items="themeOptions" size="lg" />
           </div>
           <FailedTaskNotifications />
+          <Tooltip :content="auth.user ? `退出登录（${auth.user.email ?? auth.user.username}）` : '退出登录'">
+            <IconButton label="退出登录" size="lg" @click="logout">
+              <Icon :as="LogOut" size="large" />
+            </IconButton>
+          </Tooltip>
           <Tooltip content="设置">
             <IconButton label="设置" size="lg" @click="router.push('/settings')">
               <Icon :as="Settings" size="large" />
@@ -253,7 +283,8 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
         </main>
       </div>
     </div>
-    <ProjectFormDialog v-model:open="projectDialogOpen" />
+    <RouterView v-else />
+    <ProjectFormDialog v-if="!authPage" v-model:open="projectDialogOpen" />
     <ToastHost />
   </TooltipProvider>
 </template>

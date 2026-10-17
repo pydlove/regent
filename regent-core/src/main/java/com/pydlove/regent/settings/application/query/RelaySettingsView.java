@@ -4,6 +4,9 @@ package com.pydlove.regent.settings.application.query;
 public record RelaySettingsView(
         String serverUrl,
         boolean monitoringEnabled,
+        String serverIp,
+        String sshUsername,
+        String installDirectory,
         RelayStatusView status
 ) {
 }

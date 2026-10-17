@@ -134,6 +134,7 @@ spring:
 | `bug_attachment` | `V8__bug_attachment.sql` | Bug 单图片附件：复现截图与现场证据，存储规则与任务附件一致，外键挂 `bug` |
 | `environment_entry` | `V9__environment_entry.sql` | 任务环境信息：全局或项目归属、环境键、任意文本值、标签与描述；项目同键值覆盖全局 |
 | `relay_setting` | `V10__relay_settings.sql` | 中继服务器地址与状态监听开关；连接器共享密钥仍只保存在本机部署配置 |
+| `relay_install_settings` | `V11__relay_install_settings.sql` | 中继安装的服务器 IP、SSH 用户名与安装目录；SSH 密码只在安装请求中使用，不落库 |
 
 全部用 `utf8mb4`，主键用 `BIGINT`，状态字段用 `VARCHAR` 存枚举名（不用 MySQL `ENUM`，避免改枚举要动表结构）。时间统一 `DATETIME(3)` 存 UTC。
 

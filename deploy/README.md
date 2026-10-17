@@ -101,7 +101,7 @@ deploy/remote/    公网服务器：构建并部署无状态中继与静态前�
 
 脚本先做一次 SSH 探活，连不通立即退出，不会先花时间构建。
 非交互场景仍可用环境变量跳过询问：`REGENT_SERVER_IP`、`REGENT_SSH_PORT`、
-`REGENT_SERVER_USER`、`REGENT_SERVER_PASSWORD`（密码认证，需 `sshpass`）或
+`REGENT_SERVER_USER`、`REGENT_SERVER_PASSWORD`（密码认证）或
 `REGENT_SSH_KEY`（密钥认证）。
 
 `deploy.sh` 会构建中继与前端，上传产物，并在首次部署时生成服务器端共享密钥。
@@ -126,6 +126,11 @@ Nginx 是自动配置的（第 7/7 步）：脚本探测服务器上的 `nginx.c
 填同一地址。若后续套域名与 HTTPS，把连接器地址换成 `https://域名` 即可，无需改其它配置。
 只想重配连接器、不重新部署前端与中继时，单独跑 `./deploy/local/connect-relay.sh`。
 部署机不是跑 Regent 的那台机器时，设 `REGENT_SKIP_LOCAL_CONNECTOR=1` 跳过本机配对。
+
+安装目录默认为 `/root/app/regent-relay`，可用 `REGENT_REMOTE_BASE` 覆盖。设置页的
+「安装中继器」也调用同一脚本；密码只在本机子进程环境中使用，不写数据库、不返回浏览器。
+Web 安装要求 Regent 进程能访问源码仓库、Maven、Node/npm 与部署脚本；可通过
+`REGENT_RELAY_INSTALL_SCRIPT` 指向实际脚本位置。
 
 前端 `dist/` 是静态产物，没有 Node 运行时依赖；中继由 systemd 托管，开机自启、崩溃重试。
 `SystemMaxUse` 之类的日志轮转不在脚本里，服务器上按需配 `journald` 即可。

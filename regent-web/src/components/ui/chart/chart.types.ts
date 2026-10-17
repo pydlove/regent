@@ -14,3 +14,6 @@ export type TrendBar = {
   failed: number
   highlight?: boolean
 }
+
+/** 趋势折线图的一天。与柱状图共用字段，避免工作台为两种图准备两份数据。 */
+export type TrendDatum = TrendBar

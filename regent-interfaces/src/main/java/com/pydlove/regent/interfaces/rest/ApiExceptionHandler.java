@@ -1,6 +1,7 @@
 package com.pydlove.regent.interfaces.rest;
 
 import com.pydlove.regent.interfaces.dto.ApiError;
+import com.pydlove.regent.shared.domain.AuthenticationException;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import org.slf4j.Logger;
@@ -46,6 +47,12 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiError> domainViolation(DomainException e) {
         return ResponseEntity.badRequest()
                 .body(ApiError.of("DOMAIN_VIOLATION", e.getMessage()));
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ApiError> authenticationFailed(AuthenticationException e) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(ApiError.of("UNAUTHORIZED", e.getMessage()));
     }
 
     /**

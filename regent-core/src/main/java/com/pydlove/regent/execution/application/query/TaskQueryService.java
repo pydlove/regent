@@ -31,7 +31,7 @@ public class TaskQueryService {
     private final ZoneId zone;
 
     /**
-     * {@code zone} 决定「一天」从几点切开。看板上的柱状图与列表里的「几分钟前」必须是同一套
+     * {@code zone} 决定「一天」从几点切开。工作台上的柱状图与列表里的「几分钟前」必须是同一套
      * 时间口径，所以时区由装配方显式给进来，不在服务里读系统默认值。
      */
     public TaskQueryService(TaskRepository taskRepository,
@@ -62,7 +62,7 @@ public class TaskQueryService {
         return counts;
     }
 
-    /** 看板用的全平台 token 汇总，只统计未逻辑删除任务下的执行记录。 */
+    /** 工作台用的全平台 token 汇总，只统计未逻辑删除任务下的执行记录。 */
     public TokenUsage tokenUsage() {
         return taskQueryRepository.summarizeTokens();
     }

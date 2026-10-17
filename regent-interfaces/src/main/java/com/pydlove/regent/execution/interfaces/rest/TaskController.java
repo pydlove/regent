@@ -97,14 +97,14 @@ public class TaskController {
         return counts;
     }
 
-    /** 看板 token 汇总。三个分量分开返回，页面可以解释消耗主要由哪一侧构成。 */
+    /** 工作台 token 汇总。三个分量分开返回，页面可以解释消耗主要由哪一侧构成。 */
     @GetMapping("/token-usage")
     public TaskTokenUsageResponse tokenUsage() {
         return TaskTokenUsageResponse.from(taskQueryService.tokenUsage());
     }
 
     /**
-     * 近 N 天收场趋势（含今天），日期连续、无数据的日子补 0，看板柱状图直接用。
+     * 近 N 天收场趋势（含今天），日期连续、无数据的日子补 0，工作台柱状图直接用。
      */
     @GetMapping("/trend")
     public List<TaskTrendPointResponse> trend(@RequestParam(defaultValue = "7") int days) {
