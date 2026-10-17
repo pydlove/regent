@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.plan.infrastructure.persistence.PlanMapper">
+
+    <sql id="columns">
+        id, name, status, scheduled_at, started_at, finished_at, created_at, updated_at
+    </sql>
+
+    <select id="selectById" resultType="com.pydlove.regent.plan.infrastructure.persistence.PlanData">
+        SELECT <include refid="columns"/>
+        FROM plan
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByIdForUpdate" resultType="com.pydlove.regent.plan.infrastructure.persistence.PlanData">
+        SELECT <include refid="columns"/>
+        FROM plan
+        WHERE id = #{id}
+        FOR UPDATE
+    </select>
+
+    <select id="selectAll" resultType="com.pydlove.regent.plan.infrastructure.persistence.PlanData">
+        SELECT <include refid="columns"/>
+        FROM plan
+        ORDER BY created_at DESC, id DESC
+    </select>
+
+    <select id="selectDue" resultType="com.pydlove.regent.plan.infrastructure.persistence.PlanData">
+        SELECT <include refid="columns"/>
+        FROM plan
+        WHERE status = 'SCHEDULED'
+          AND scheduled_at &lt;= #{now}
+        ORDER BY scheduled_at ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectTaskIds" resultType="long">
+        SELECT task_id
+        FROM plan_task
+        WHERE plan_id = #{planId}
+        ORDER BY sort_order ASC, task_id ASC
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO plan (name, status, scheduled_at, started_at, finished_at, created_at, updated_at)
+        VALUES (#{name}, #{status}, #{scheduledAt}, #{startedAt}, #{finishedAt}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <insert id="insertTask">
+        INSERT INTO plan_task (plan_id, task_id, sort_order, created_at)
+        VALUES (#{planId}, #{taskId}, #{sortOrder}, #{createdAt})
+    </insert>
+
+    <update id="update">
+        UPDATE plan
+        SET name = #{name},
+            status = #{status},
+            scheduled_at = #{scheduledAt},
+            started_at = #{startedAt},
+            finished_at = #{finishedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

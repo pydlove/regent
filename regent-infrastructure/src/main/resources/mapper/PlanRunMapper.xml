@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.plan.infrastructure.persistence.PlanRunMapper">
+
+    <sql id="columns">
+        id, plan_id, plan_name, trigger_type, status, task_count, progress_count,
+        succeeded_count, failed_count, cancelled_count, skipped_count, running_count, blocked_count,
+        summary, started_at, finished_at, created_at
+    </sql>
+
+    <select id="selectById" resultType="com.pydlove.regent.plan.infrastructure.persistence.PlanRunData">
+        SELECT <include refid="columns"/>
+        FROM plan_run
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectLatestByPlan" resultType="com.pydlove.regent.plan.infrastructure.persistence.PlanRunData">
+        SELECT <include refid="columns"/>
+        FROM plan_run
+        WHERE plan_id = #{planId}
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectByPlan" resultType="com.pydlove.regent.plan.infrastructure.persistence.PlanRunData">
+        SELECT <include refid="columns"/>
+        FROM plan_run
+        WHERE plan_id = #{planId}
+        ORDER BY id DESC
+    </select>
+
+    <select id="selectRunning" resultType="com.pydlove.regent.plan.infrastructure.persistence.PlanRunData">
+        SELECT <include refid="columns"/>
+        FROM plan_run
+        WHERE status = 'RUNNING'
+        ORDER BY id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectItems" resultType="com.pydlove.regent.plan.infrastructure.persistence.PlanRunItemData">
+        SELECT plan_run_id, task_id, task_title, status, detail, updated_at
+        FROM plan_run_item
+        WHERE plan_run_id = #{planRunId}
+        ORDER BY task_id ASC
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO plan_run (
+            plan_id, plan_name, trigger_type, status, task_count, progress_count,
+            succeeded_count, failed_count, cancelled_count, skipped_count, running_count, blocked_count,
+            summary, started_at, finished_at, created_at
+        )
+        VALUES (
+            #{planId}, #{planName}, #{triggerType}, #{status}, #{taskCount}, #{progressCount},
+            #{succeededCount}, #{failedCount}, #{cancelledCount}, #{skippedCount}, #{runningCount}, #{blockedCount},
+            #{summary}, #{startedAt}, #{finishedAt}, #{createdAt}
+        )
+    </insert>
+
+    <update id="update">
+        UPDATE plan_run
+        SET status = #{status},
+            task_count = #{taskCount},
+            progress_count = #{progressCount},
+            succeeded_count = #{succeededCount},
+            failed_count = #{failedCount},
+            cancelled_count = #{cancelledCount},
+            skipped_count = #{skippedCount},
+            running_count = #{runningCount},
+            blocked_count = #{blockedCount},
+            summary = #{summary},
+            finished_at = #{finishedAt}
+        WHERE id = #{id}
+    </update>
+
+    <insert id="insertItem">
+        INSERT INTO plan_run_item (plan_run_id, task_id, task_title, status, detail, updated_at)
+        VALUES (#{planRunId}, #{taskId}, #{taskTitle}, #{status}, #{detail}, #{updatedAt})
+    </insert>
+
+    <update id="updateItem">
+        UPDATE plan_run_item
+        SET status = #{status},
+            detail = #{detail},
+            updated_at = #{updatedAt}
+        WHERE plan_run_id = #{planRunId}
+          AND task_id = #{taskId}
+    </update>
+
+</mapper>

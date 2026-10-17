@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.plugin.infrastructure.persistence.PluginMapper">
+
+    <sql id="pluginColumns">
+        id, name, description, tags, enabled, current_revision, created_at, updated_at
+    </sql>
+
+    <select id="selectById"
+            resultType="com.pydlove.regent.plugin.infrastructure.persistence.PluginRow">
+        SELECT <include refid="pluginColumns"/>
+        FROM plugin
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByIdForUpdate"
+            resultType="com.pydlove.regent.plugin.infrastructure.persistence.PluginRow">
+        SELECT <include refid="pluginColumns"/>
+        FROM plugin
+        WHERE id = #{id}
+        FOR UPDATE
+    </select>
+
+    <select id="selectAll"
+            resultType="com.pydlove.regent.plugin.infrastructure.persistence.PluginRow">
+        SELECT <include refid="pluginColumns"/>
+        FROM plugin
+        ORDER BY enabled DESC, name, id
+    </select>
+
+    <select id="selectVersion"
+            resultType="com.pydlove.regent.plugin.infrastructure.persistence.PluginVersionRow">
+        SELECT plugin_id, revision, filename, content, content_hash, created_at
+        FROM plugin_version
+        WHERE plugin_id = #{pluginId} AND revision = #{revision}
+    </select>
+
+    <select id="countByName" resultType="int">
+        SELECT COUNT(*)
+        FROM plugin
+        WHERE name = #{name}
+        <if test="excludingId != null">
+            AND id != #{excludingId}
+        </if>
+    </select>
+
+    <insert id="insertPlugin" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO plugin (name, description, tags, enabled, current_revision, created_at, updated_at)
+        VALUES (#{name}, #{description}, #{tags}, #{enabled}, #{currentRevision}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <update id="updatePlugin">
+        UPDATE plugin
+        SET name = #{name},
+            description = #{description},
+            tags = #{tags},
+            enabled = #{enabled},
+            current_revision = #{currentRevision},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+    </update>
+
+    <insert id="insertVersion">
+        INSERT INTO plugin_version (plugin_id, revision, filename, content, content_hash, created_at)
+        VALUES (#{pluginId}, #{revision}, #{filename}, #{content}, #{contentHash}, #{createdAt})
+    </insert>
+
+    <select id="selectBindingsByTask"
+            resultType="com.pydlove.regent.plugin.infrastructure.persistence.PluginBindingRow">
+        SELECT p.id AS plugin_id,
+               p.name AS plugin_name,
+               tp.revision,
+               pv.filename,
+               pv.content_hash,
+               pv.content,
+               p.enabled,
+               tp.bound_at
+        FROM task_plugin tp
+        JOIN plugin p ON p.id = tp.plugin_id
+        JOIN plugin_version pv
+          ON pv.plugin_id = tp.plugin_id AND pv.revision = tp.revision
+        WHERE tp.task_id = #{taskId}
+        ORDER BY p.name, p.id
+    </select>
+
+    <delete id="deleteBindingsByTask">
+        DELETE FROM task_plugin
+        WHERE task_id = #{taskId}
+    </delete>
+
+    <insert id="insertBinding">
+        INSERT INTO task_plugin (task_id, plugin_id, revision, bound_at)
+        VALUES (#{taskId}, #{pluginId}, #{revision}, #{boundAt})
+    </insert>
+
+</mapper>
