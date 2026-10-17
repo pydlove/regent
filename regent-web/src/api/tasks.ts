@@ -6,6 +6,7 @@ import type {
   TaskDetail,
   TaskRunSummary,
   TaskSummary,
+  TaskTokenUsage,
   TaskTrendPoint,
 } from '@/types/api'
 import type { DecisionLevel, TaskStatus } from '@/types/task'
@@ -63,6 +64,9 @@ export const updateTask = (id: number, input: UpdateTaskInput) =>
   putJson<TaskDetail>(`/tasks/${id}`, input)
 
 export const getTaskStats = () => get<Record<TaskStatus, number>>('/tasks/stats')
+
+/** 全平台已结算 token 汇总，供看板展示。 */
+export const getTaskTokenUsage = () => get<TaskTokenUsage>('/tasks/token-usage')
 
 /** 失败重试或已终止任务重新执行，统一回到 PENDING。 */
 export const retryTask = (id: number) => post<TaskDetail>(`/tasks/${id}/retry`)

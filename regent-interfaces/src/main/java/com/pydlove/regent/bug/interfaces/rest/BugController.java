@@ -10,6 +10,7 @@ import com.pydlove.regent.bug.domain.repository.BugPage;
 import com.pydlove.regent.bug.domain.repository.BugQuery;
 import com.pydlove.regent.bug.interfaces.dto.BugCreateRequest;
 import com.pydlove.regent.bug.interfaces.dto.BugResponse;
+import com.pydlove.regent.bug.interfaces.dto.BugWontFixRequest;
 import com.pydlove.regent.execution.application.command.BugFixDispatchService;
 import com.pydlove.regent.interfaces.dto.PageResponse;
 import com.pydlove.regent.project.domain.model.ProjectId;
@@ -74,6 +75,30 @@ public class BugController {
     @PostMapping("/{id}/fix-task")
     public BugResponse dispatchFixTask(@PathVariable long id) {
         bugFixDispatchService.dispatchFix(BugId.of(id));
+        return BugResponse.from(bugQueryService.get(id));
+    }
+
+    /** 修复完成，进入待验证；此时缺陷仍未关闭。 */
+    @PostMapping("/{id}/mark-fixed")
+    public BugResponse markFixed(@PathVariable long id) {
+        bugCommandService.markFixed(BugId.of(id));
+        return BugResponse.from(bugQueryService.get(id));
+    }
+
+    /** 人工验证通过后关闭缺陷。 */
+    @PostMapping("/{id}/verify")
+    public BugResponse verify(@PathVariable long id) {
+        bugCommandService.verify(BugId.of(id));
+        return BugResponse.from(bugQueryService.get(id));
+    }
+
+    /** 带理由判定不修复，缺陷进入终态。 */
+    @PostMapping("/{id}/wont-fix")
+    public BugResponse wontFix(@PathVariable long id, @RequestBody BugWontFixRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("缺少不修复理由");
+        }
+        bugCommandService.wontFix(BugId.of(id), request.reason());
         return BugResponse.from(bugQueryService.get(id));
     }
 }

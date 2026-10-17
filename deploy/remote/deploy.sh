@@ -146,7 +146,7 @@ rsync -az -e "$RSYNC_SSH" "$DEPLOY_DIR/scripts/" "$REMOTE_HOST:$REMOTE_BASE/scri
 rsync -az -e "$RSYNC_SSH" "$DEPLOY_DIR/nginx/" "$REMOTE_HOST:$REMOTE_BASE/nginx/"
 "${SSH_COMMAND[@]}" "chmod +x $REMOTE_BASE/script/*.sh"
 
-log_info "5/7 初始化服务器凭据并配对本机连接器"
+log_info "5/7 初始化服务器凭据"
 # 已有部署沿用原密钥，保证重复部署不会把已经配好的连接器打挂
 REMOTE_SECRET=$("${SSH_COMMAND[@]}" \
     "grep -m1 '^REGENT_RELAY_SHARED_SECRET=' $REMOTE_BASE/relay/relay.env 2>/dev/null | cut -d= -f2- || true")
@@ -169,22 +169,7 @@ else
     log_info "服务器已有 relay.env，沿用原密钥"
 fi
 
-if [ "${REGENT_SKIP_LOCAL_CONNECTOR:-}" = "1" ]; then
-    log_warn "已跳过本机连接器配对（REGENT_SKIP_LOCAL_CONNECTOR=1）"
-else
-    # 服务器只做中继，真正干活的 Regent 在本机；连接器没上线，公网访问就是一句「本地 Regent 未连接」
-    log_info "配对本机中继连接器"
-    if ! REGENT_SERVER_IP="$SERVER_IP" \
-        REGENT_SSH_PORT="$SSH_PORT" \
-        REGENT_SERVER_USER="$SERVER_USER" \
-        REGENT_SERVER_PASSWORD="$SERVER_PASSWORD" \
-        REGENT_RELAY_SHARED_SECRET="$RELAY_SECRET" \
-        bash "$PROJECT_DIR/deploy/local/connect-relay.sh"; then
-        log_warn "本机连接器未就绪；可稍后单独运行 deploy/local/connect-relay.sh 重配"
-    fi
-fi
-
-log_info "6/7 安装 systemd 单元并启动"
+log_info "6/7 安装并启动中继，再配对本机连接器"
 rsync -az -e "$RSYNC_SSH" "$DEPLOY_DIR/systemd/regent-relay.service" \
     "$REMOTE_HOST:/etc/systemd/system/regent-relay.service"
 "${SSH_COMMAND[@]}" "systemctl daemon-reload && systemctl enable regent-relay && systemctl restart regent-relay"
@@ -194,6 +179,24 @@ if "${SSH_COMMAND[@]}" "systemctl is-active --quiet regent-relay"; then
 else
     log_error "公网中继未启动，执行 ssh $REMOTE_HOST 'journalctl -u regent-relay -n 80' 排查"
     exit 1
+fi
+
+if [ "${REGENT_SKIP_LOCAL_CONNECTOR:-}" = "1" ]; then
+    log_warn "已跳过本机连接器配对（REGENT_SKIP_LOCAL_CONNECTOR=1）"
+else
+    # 远端中继必须先上线。反序会让连接器在部署中反复探活失败，最后只留下误导性的告警。
+    log_info "配对本机中继连接器"
+    if ! REGENT_SERVER_IP="$SERVER_IP" \
+        REGENT_SSH_PORT="$SSH_PORT" \
+        REGENT_SERVER_USER="$SERVER_USER" \
+        REGENT_SERVER_PASSWORD="$SERVER_PASSWORD" \
+        REGENT_RELAY_SHARED_SECRET="$RELAY_SECRET" \
+        bash "$PROJECT_DIR/deploy/local/connect-relay.sh"; then
+        log_error "本机连接器未上线，公网 API 仍会返回 RELAY_OFFLINE"
+        log_error "修复后单独运行 deploy/local/connect-relay.sh，再重试部署"
+        exit 1
+    fi
+    log_info "本机中继连接器已上线"
 fi
 
 log_info "7/7 自动配置服务器 Nginx"

@@ -18,13 +18,13 @@ deploy/remote/    公网服务器：构建并部署无状态中继与静态前�
 | `connect-relay.sh` | 配对中继：读取服务器共享密钥 → 写 `~/.regent/relay-connector.env` → 重启连接器 → 探活 |
 | `relay-agent.sh` | 把连接器交给 launchd 托管（`install` / `uninstall` / `restart` / `status`），开机自启、崩溃自动重启 |
 | `stop-all.sh` | 按 pid 停，pid 文件丢了就按端口兜底 |
-| `restart.sh` | `stop-all` → 等 2 秒 → `start-all` |
+| `restart.sh` | 构建后端 → `stop-all` → 等 2 秒 → `start-all` |
 | `status.sh` | 端口探活 + 健康检查，打印两行状态 |
 
 ```bash
 ./deploy/local/start-all.sh     # 起
 ./deploy/local/status.sh        # 看
-./deploy/local/restart.sh       # 重启（改完后端要重启，前端 vite 自己热更新）
+./deploy/local/restart.sh       # 重新构建并重启（前端 vite 自己热更新）
 ./deploy/local/stop-all.sh      # 停
 ```
 
@@ -63,6 +63,8 @@ deploy/remote/    公网服务器：构建并部署无状态中继与静态前�
 - **前端直接起 `node_modules/.bin/vite`，不走 `npm run dev`。** npm 会多套一层壳进程，
   pid 文件记的是壳的号；停服务时杀掉壳、真正监听端口的 node 还活着，只能靠端口兜底补救。
 - **后端 jar 不存在时自动 `mvn package`。** 首次克隆后直接 `start-all.sh` 也能跑起来。
+- **`restart.sh` 先构建后端再停服务。** 构建失败时旧实例继续运行，避免源码已改但后端仍跑旧 jar，
+  也避免构建失败后本地服务处于停止状态。
 - 数据库凭据读 `regent-boot/src/main/resources/application-local.yml`（已 gitignore），
   也可用 `REGENT_DB_USERNAME` / `REGENT_DB_PASSWORD` 覆盖。
 - **本地派发心跳默认关闭**（`application-local.yml` 里 `regent.execution.dispatch.enabled: false`）。
@@ -115,7 +117,9 @@ Nginx 是自动配置的（第 7/7 步）：脚本探测服务器上的 `nginx.c
 写入前自动备份、写入后 `nginx -t` 校验、校验失败自动回滚；已有该配置则跳过。
 服务器上若开着 firewalld 会自动放行 18787/tcp。
 
-`deploy.sh` 的第 5/7 步会把服务器密钥同步到本机 `~/.regent/relay-connector.env` 并探活连接器，
+`deploy.sh` 的第 6/7 步会先启动远端中继，再把服务器密钥同步到本机
+`~/.regent/relay-connector.env` 并强制探活连接器；连接器未上线时部署直接失败，
+不会再留下一个静态页面能打开、但所有 API 都报 `RELAY_OFFLINE` 的假成功。
 所以「部署完还要手工配连接器」这步已经没有了。仍需手工的只有一件事：
 **云厂商安全组放行 `18787/tcp`**。
 之后手机访问 `http://<服务器IP>:18787`；本机连接器的 `REGENT_RELAY_SERVER_URL`

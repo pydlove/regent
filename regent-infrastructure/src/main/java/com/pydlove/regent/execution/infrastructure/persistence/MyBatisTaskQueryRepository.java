@@ -9,6 +9,7 @@ import com.pydlove.regent.execution.domain.repository.TaskQuery;
 import com.pydlove.regent.execution.domain.repository.TaskQueryRepository;
 import com.pydlove.regent.governance.domain.model.DecisionId;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
+import com.pydlove.regent.shared.kernel.TokenUsage;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
@@ -58,6 +59,18 @@ public class MyBatisTaskQueryRepository implements TaskQueryRepository {
     }
 
     @Override
+    public TokenUsage summarizeTokens() {
+        TokenUsageRow row = taskMapper.summarizeTokens();
+        if (row == null) {
+            return TokenUsage.ZERO;
+        }
+        return TokenUsage.of(
+                nullToZero(row.getTokenInput()),
+                nullToZero(row.getTokenCachedInput()),
+                nullToZero(row.getTokenOutput()));
+    }
+
+    @Override
     public List<DailyCompletionCount> countCompletionPerDay(LocalDate from, LocalDate to, ZoneOffset offset) {
         // 领域侧给的是「用户时区的自然日」，仓储负责换算成 UTC 字面量：库里存的始终是 UTC
         LocalDateTime fromUtc = from.atStartOfDay().toInstant(offset).atZone(ZoneOffset.UTC).toLocalDateTime();
@@ -90,6 +103,10 @@ public class MyBatisTaskQueryRepository implements TaskQueryRepository {
 
     private static Instant fromDb(LocalDateTime value) {
         return value == null ? null : value.toInstant(ZoneOffset.UTC);
+    }
+
+    private static long nullToZero(Long value) {
+        return value == null ? 0L : value;
     }
 
     /** 转义 LIKE 通配符，让用户输入的 % 只匹配它自己（参数是绑定的，这里防的是语义意外，不是注入）。 */

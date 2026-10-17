@@ -1,18 +1,23 @@
 <script setup lang="ts">
-import { AlertTriangle, Check } from '@lucide/vue'
+import { AlertTriangle, Check, ImagePlus, TriangleAlert, X } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 
+import { ACCEPTED_IMAGE_TYPES, listTaskAttachments, uploadTaskAttachment } from '@/api/attachments'
 import DecisionLevelBadge from '@/components/business/DecisionLevelBadge.vue'
-import Textarea from '@/components/ui/input/Textarea.vue'
-import Dialog from '@/components/ui/dialog/Dialog.vue'
+import ImageAttachmentGrid from '@/components/business/ImageAttachmentGrid.vue'
 import Button from '@/components/ui/button/Button.vue'
-import type { DecisionSummary } from '@/types/api'
-import { formatRelative } from '@/utils/format'
+import Dialog from '@/components/ui/dialog/Dialog.vue'
+import Icon from '@/components/ui/icon/Icon.vue'
+import Textarea from '@/components/ui/input/Textarea.vue'
+import Progress from '@/components/ui/progress/Progress.vue'
+import { usePendingImages } from '@/composables/usePendingImages'
+import type { DecisionSummary, ImageAttachment, TaskAttachment } from '@/types/api'
+import { formatBytes, formatRelative } from '@/utils/format'
 
 /*
  * 审批对话框。查看、批准、驳回共用同一个组件：
  *   查看 —— 展示判断所需的完整事实；待批记录可直接切换到批准或驳回
- *   批准 —— 确认从断点续跑，主按钮是蓝的
+ *   批准 —— 可补充建议与图片，确认后从断点续跑
  *   驳回 —— 必须填理由，理由会进上下文带回给下一轮执行
  *
  * 三种模式都只读传进来的 decision，调用点只管 open / decision / mode 三个东西。
@@ -28,19 +33,56 @@ const props = withDefaults(
 const emit = defineEmits<{
   done: [payload: { mode: 'approve' | 'reject'; note: string }]
   review: [mode: 'approve' | 'reject']
+  uploaded: [payload: { taskId: number }]
+  preview: [attachment: ImageAttachment]
 }>()
 
 const open = defineModel<boolean>('open', { default: false })
 
 const note = ref('')
+const approvalError = ref<string | null>(null)
+const reviewing = ref(false)
+const existing = ref<TaskAttachment[]>([])
+const {
+  pending,
+  dragging,
+  fileInput,
+  failed,
+  pendingBytes,
+  onPick,
+  onPaste,
+  onDrop,
+  onDragLeave,
+  removeImage,
+  reset: resetImages,
+  uploadAll: uploadPending,
+} = usePendingImages()
 
-// 每次打开都清空上一次的输入，否则驳回 A 后打开 B 会带着 A 的理由
-watch(open, (value) => {
-  if (value) note.value = ''
+// 打开、切换审批动作或切换决策时都重置，避免把上一条的理由与图片带进下一条。
+watch([open, () => props.mode, () => props.decision?.taskId], async ([value, mode, taskId]) => {
+  if (!value) {
+    resetImages()
+    return
+  }
+  note.value = ''
+  approvalError.value = null
+  reviewing.value = false
+  existing.value = []
+  resetImages()
+  if (mode !== 'approve' || taskId === undefined) return
+  try {
+    const loaded = await listTaskAttachments(taskId)
+    if (open.value && props.mode === 'approve' && props.decision?.taskId === taskId) {
+      existing.value = loaded
+    }
+  } catch {
+    // 已有附件不影响审批本身；新图上传失败会单独报错，不把入口整个堵住
+  }
 })
 
 const REJECT_MIN = 6
 const canReject = computed(() => note.value.trim().length >= REJECT_MIN)
+const canApprove = computed(() => !reviewing.value)
 const isPending = computed(() => props.decision?.status === 'PENDING')
 
 const title = computed(() => {
@@ -50,7 +92,9 @@ const title = computed(() => {
 })
 
 const description = computed(() => {
-  if (props.mode === 'approve') return '批准后执行器会带着当前上下文继续，不会从头重跑。'
+  if (props.mode === 'approve') {
+    return '批准后执行器会带着当前上下文继续，不会从头重跑；可以补充建议和图片。'
+  }
   if (props.mode === 'reject') return '理由会写进决策留痕，也会作为上下文交给下一轮执行。'
   if (!isPending.value) return '这项决策已经处理，下面是当时的判断依据与处理结果。'
   return '先核对完整问题和影响范围，再决定是否放行。'
@@ -65,14 +109,32 @@ const outcomeText = (status: DecisionSummary['status']) => {
   return '待批准'
 }
 
-const confirm = () => {
+const confirm = async () => {
   const decision = props.decision
   const mode = props.mode
   if (!decision || mode === 'view') return
   if (mode === 'reject' && !canReject.value) return
+  if (mode === 'approve' && !canApprove.value) return
 
-  // 对话框只负责收集「批还是驳、理由是什么」；真正改状态的是调用点，它要去打接口。
-  // 关窗在前、发请求在后：接口慢的时候，用户点完不该对着一个不动的弹框等。
+  approvalError.value = null
+  if (mode === 'approve') {
+    reviewing.value = true
+    const uploaded = await uploadPending((file, onProgress) =>
+      uploadTaskAttachment(decision.taskId, file, { onProgress }),
+    )
+    if (!open.value || props.decision?.id !== decision.id || props.mode !== mode) {
+      reviewing.value = false
+      return
+    }
+    if (uploaded > 0) emit('uploaded', { taskId: decision.taskId })
+    if (failed.value.length > 0) {
+      approvalError.value = `${failed.value.length} 张图片没传上去，请重试后再批准`
+      reviewing.value = false
+      return
+    }
+  }
+
+  // 图片先落库再批准：批准后调度器可能立刻续跑，晚到的附件赶不上这一轮。
   open.value = false
   emit('done', { mode, note: note.value.trim() })
 }
@@ -174,21 +236,120 @@ const confirm = () => {
         </div>
       </div>
 
-      <Textarea
-        v-if="mode === 'reject'"
-        v-model="note"
+      <div
+        v-if="mode === 'approve' || mode === 'reject'"
         class="mt-3"
-        :rows="3"
-        placeholder="例如：这个改动会影响线上数据，必须人工确认后再执行"
-      />
+        @paste="mode === 'approve' ? onPaste : undefined"
+      >
+        <p class="text-caption font-emphasis text-label-secondary">
+          {{ mode === 'approve' ? '补充建议（可选）' : '驳回理由' }}
+        </p>
+        <Textarea
+          v-model="note"
+          class="mt-1"
+          :rows="3"
+          :placeholder="
+            mode === 'approve'
+              ? '例如：按第一个方案执行，但保留旧索引'
+              : '例如：这个改动会影响线上数据，必须人工确认后再执行'
+          "
+        />
+      </div>
+
+      <div
+        v-if="mode === 'approve'"
+        class="mt-3 rounded-panel border border-separator-soft p-3"
+        :class="dragging ? 'ring-2 ring-accent/50' : ''"
+        @paste="onPaste"
+        @dragover.prevent="dragging = true"
+        @dragleave="onDragLeave"
+        @drop.prevent="onDrop"
+      >
+        <div class="flex items-center gap-2">
+          <p class="text-caption font-emphasis text-label-secondary">补充图片</p>
+          <span v-if="existing.length + pending.length > 0" class="tnum text-caption text-label-tertiary">
+            {{ existing.length + pending.length }} 张
+          </span>
+          <span v-if="pendingBytes > 0" class="tnum ml-auto text-caption text-label-tertiary">
+            {{ formatBytes(pendingBytes) }}
+          </span>
+        </div>
+
+        <ImageAttachmentGrid
+          v-if="existing.length > 0"
+          :attachments="existing"
+          size="sm"
+          class="mt-2"
+          @select="emit('preview', $event)"
+        />
+
+        <div class="mt-2 flex flex-wrap items-start gap-2">
+          <div v-for="item in pending" :key="item.localId" class="group relative size-16">
+            <div class="size-full overflow-hidden rounded-panel border border-separator-soft bg-content">
+              <img
+                :src="item.previewUrl"
+                :alt="item.file.name"
+                class="size-full object-cover"
+                :class="item.status === 'uploading' ? 'opacity-40' : ''"
+              />
+              <Progress
+                v-if="item.status === 'uploading'"
+                :value="item.progress"
+                class="absolute inset-x-0 bottom-0"
+              />
+              <span
+                v-if="item.status === 'failed'"
+                class="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-danger/15 text-caption text-danger"
+                :title="item.error ?? undefined"
+              >
+                <Icon :as="TriangleAlert" size="inline" />
+                没传上
+              </span>
+            </div>
+
+            <button
+              v-if="item.status !== 'uploading'"
+              type="button"
+              title="移除这张图"
+              class="absolute -right-1.5 -top-1.5 hidden size-5 items-center justify-center rounded-full bg-label text-white shadow-control group-hover:flex focus-visible:flex focus-visible:outline-none"
+              @click="removeImage(item)"
+            >
+              <Icon :as="X" size="inline" />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            title="添加图片"
+            class="flex size-16 items-center justify-center rounded-panel border border-dashed border-separator text-label-secondary transition-colors duration-100 ease-apple hover:border-accent/60 hover:text-accent focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/35"
+            :disabled="reviewing"
+            @click="fileInput?.click()"
+          >
+            <Icon :as="ImagePlus" size="large" />
+          </button>
+
+          <input
+            ref="fileInput"
+            type="file"
+            :accept="ACCEPTED_IMAGE_TYPES.join(',')"
+            multiple
+            class="hidden"
+            @change="onPick"
+          />
+        </div>
+      </div>
+
       <!-- 提示只在人开始写之后才出现：一打开就飘红，等于先把人骂一顿 -->
       <p v-if="mode === 'reject' && note.length > 0 && !canReject" class="mt-1.5 text-caption text-danger">
         至少 {{ REJECT_MIN }} 个字，否则下一轮执行拿不到可用的信息
       </p>
+      <p v-if="approvalError" class="mt-1.5 text-caption text-danger">{{ approvalError }}</p>
     </template>
 
     <template #footer>
-      <Button @click="open = false">{{ mode === 'view' ? '关闭' : '取消' }}</Button>
+      <Button :disabled="reviewing" @click="open = false">
+        {{ mode === 'view' ? '关闭' : '取消' }}
+      </Button>
       <template v-if="mode === 'view' && isPending">
         <Button @click="emit('review', 'reject')">驳回</Button>
         <Button variant="primary" @click="emit('review', 'approve')">批准并续跑</Button>
@@ -196,9 +357,10 @@ const confirm = () => {
       <Button
         v-if="mode === 'approve'"
         variant="primary"
+        :disabled="!canApprove"
         @click="confirm"
       >
-        批准并续跑
+        {{ reviewing ? '上传中…' : '批准并续跑' }}
       </Button>
       <Button
         v-else-if="mode === 'reject'"

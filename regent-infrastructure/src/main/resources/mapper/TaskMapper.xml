@@ -90,6 +90,17 @@
         GROUP BY status
     </select>
 
+    <!-- 看板累计口径与任务列表一致：只汇总未逻辑删除任务的执行记录。 -->
+    <select id="summarizeTokens"
+            resultType="com.pydlove.regent.execution.infrastructure.persistence.TokenUsageRow">
+        SELECT COALESCE(SUM(r.token_input), 0)        AS token_input,
+               COALESCE(SUM(r.token_cached_input), 0) AS token_cached_input,
+               COALESCE(SUM(r.token_output), 0)       AS token_output
+        FROM task_run r
+        JOIN task t ON t.id = r.task_id
+        WHERE t.deleted = 0
+    </select>
+
     <!--
       按自然日统计收场任务。时间列按约定存 UTC 字面量，所以切天要先把字面量平移
       offsetMinutes 再取 DATE —— 否则东八区晚上 8 点之后完成的任务会算到第二天，

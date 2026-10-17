@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 
 import DecisionLevelBadge from '@/components/business/DecisionLevelBadge.vue'
 import DecisionReviewDialog from '@/components/business/DecisionReviewDialog.vue'
+import ImageAttachmentsDialog from '@/components/business/ImageAttachmentsDialog.vue'
 import Button from '@/components/ui/button/Button.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
 import Pagination from '@/components/ui/pagination/Pagination.vue'
@@ -12,7 +13,7 @@ import type { TableColumn } from '@/components/ui/table/table.types'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
 import { useToast } from '@/composables/useToast'
 import { useDecisionStore, type DecisionScope } from '@/stores/useDecisionStore'
-import type { DecisionSummary } from '@/types/api'
+import type { DecisionSummary, ImageAttachment } from '@/types/api'
 import { formatRelative } from '@/utils/format'
 
 /*
@@ -55,11 +56,18 @@ onMounted(() => {
 const reviewOpen = ref(false)
 const reviewMode = ref<'view' | 'approve' | 'reject'>('view')
 const active = ref<DecisionSummary | null>(null)
+const previewOpen = ref(false)
+const previewAttachment = ref<ImageAttachment | null>(null)
 
 const openReview = (decision: DecisionSummary, mode: 'view' | 'approve' | 'reject') => {
   active.value = decision
   reviewMode.value = mode
   reviewOpen.value = true
+}
+
+const openPreview = (attachment: ImageAttachment) => {
+  previewAttachment.value = attachment
+  previewOpen.value = true
 }
 
 const onReviewed = async (payload: { mode: 'approve' | 'reject'; note: string }) => {
@@ -181,6 +189,11 @@ const resolvedByText = (by: string | null) => (by === 'AI' ? 'AI' : '人工')
       :mode="reviewMode"
       @done="onReviewed"
       @review="reviewMode = $event"
+      @preview="openPreview"
+    />
+    <ImageAttachmentsDialog
+      v-model:open="previewOpen"
+      :attachments="previewAttachment ? [previewAttachment] : []"
     />
   </div>
 </template>

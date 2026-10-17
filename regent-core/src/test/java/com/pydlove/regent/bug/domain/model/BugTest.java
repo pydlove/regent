@@ -7,6 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** 缺陷来源与必填字段的领域守卫。 */
@@ -71,6 +72,67 @@ class BugTest {
 
         assertThrows(DomainException.class, () -> bug.requestFix(TaskId.of(13L)));
         assertEquals(TaskId.of(12L), bug.getFixTaskId().orElseThrow());
+    }
+
+    @Test
+    @DisplayName("修复完成后进入待验证，验证通过才关闭")
+    void 修复后等待验证再关闭() {
+        Bug bug = Bug.reportManually(PROJECT, "导出乱码", BugSeverity.MINOR,
+                null, null, null);
+        bug.requestFix(TaskId.of(12L));
+
+        bug.markFixed();
+
+        assertEquals(BugStatus.FIXED, bug.getStatus());
+        assertNotNull(bug.getFixedAt().orElse(null));
+
+        bug.verify();
+        assertEquals(BugStatus.CLOSED, bug.getStatus());
+    }
+
+    @Test
+    @DisplayName("未进入修复中的缺陷不能直接标记为已修复")
+    void 非修复中不能标记已修复() {
+        Bug bug = Bug.reportManually(PROJECT, "导出乱码", BugSeverity.MINOR,
+                null, null, null);
+
+        assertThrows(DomainException.class, bug::markFixed);
+    }
+
+    @Test
+    @DisplayName("待验证缺陷不能跳过验证直接重复验证")
+    void 待验证之外不能验证关闭() {
+        Bug bug = Bug.reportManually(PROJECT, "导出乱码", BugSeverity.MINOR,
+                null, null, null);
+
+        assertThrows(DomainException.class, bug::verify);
+    }
+
+    @Test
+    @DisplayName("不修复必须留下足够具体的理由")
+    void 不修复理由必填() {
+        Bug bug = Bug.reportManually(PROJECT, "导出乱码", BugSeverity.MINOR,
+                null, null, null);
+
+        assertThrows(DomainException.class, () -> bug.wontFix("不修"));
+        assertEquals(BugStatus.OPEN, bug.getStatus());
+
+        bug.wontFix("上游接口决定保留该行为");
+        assertEquals(BugStatus.WONTFIX, bug.getStatus());
+        assertEquals("上游接口决定保留该行为", bug.getWontFixReason().orElseThrow());
+    }
+
+    @Test
+    @DisplayName("已关闭缺陷不能改为不修复")
+    void 终态不能改为不修复() {
+        Bug bug = Bug.reportManually(PROJECT, "导出乱码", BugSeverity.MINOR,
+                null, null, null);
+        bug.requestFix(TaskId.of(12L));
+        bug.markFixed();
+        bug.verify();
+
+        assertThrows(DomainException.class, () -> bug.wontFix("验证后改变主意"));
+        assertEquals(BugStatus.CLOSED, bug.getStatus());
     }
 
     @Test

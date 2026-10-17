@@ -21,6 +21,7 @@ import com.pydlove.regent.execution.interfaces.dto.TaskCreateRequest;
 import com.pydlove.regent.execution.interfaces.dto.TaskDetailResponse;
 import com.pydlove.regent.execution.interfaces.dto.TaskRunSummaryResponse;
 import com.pydlove.regent.execution.interfaces.dto.TaskSummaryResponse;
+import com.pydlove.regent.execution.interfaces.dto.TaskTokenUsageResponse;
 import com.pydlove.regent.execution.interfaces.dto.TaskTrendPointResponse;
 import com.pydlove.regent.execution.interfaces.dto.TaskUpdateRequest;
 import com.pydlove.regent.interfaces.dto.PageResponse;
@@ -94,6 +95,12 @@ public class TaskController {
             counts.putIfAbsent(status.name(), 0L);
         }
         return counts;
+    }
+
+    /** 看板 token 汇总。三个分量分开返回，页面可以解释消耗主要由哪一侧构成。 */
+    @GetMapping("/token-usage")
+    public TaskTokenUsageResponse tokenUsage() {
+        return TaskTokenUsageResponse.from(taskQueryService.tokenUsage());
     }
 
     /**

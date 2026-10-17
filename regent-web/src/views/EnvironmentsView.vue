@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { Eye, EyeOff, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from '@lucide/vue'
+import { Copy, Eye, EyeOff, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 
 import { deleteEnvironment, listEnvironments } from '@/api/environments'
 import { ApiError } from '@/api/http'
+import EnvironmentDetailDialog from '@/components/business/EnvironmentDetailDialog.vue'
 import EnvironmentDialog from '@/components/business/EnvironmentDialog.vue'
 import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
@@ -17,6 +18,7 @@ import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
 import { useToast } from '@/composables/useToast'
 import { useTaskStore } from '@/stores/useTaskStore'
 import type { EnvironmentEntry } from '@/types/api'
+import { nextEnvironmentCopyKey } from '@/utils/environmentCopy'
 
 const store = useTaskStore()
 const toast = useToast()
@@ -27,7 +29,7 @@ const columns: TableColumn[] = [
   { key: 'value', label: '环境信息', width: '260px' },
   { key: 'tags', label: '标签', width: '180px' },
   { key: 'description', label: '描述' },
-  { key: 'actions', label: '', width: '96px' },
+  { key: 'actions', label: '', width: '132px' },
 ]
 
 const entries = ref<EnvironmentEntry[]>([])
@@ -37,6 +39,13 @@ const revealed = ref(new Set<number>())
 
 const dialogOpen = ref(false)
 const editing = ref<EnvironmentEntry | null>(null)
+const copying = ref<EnvironmentEntry | null>(null)
+const copyKey = computed(() =>
+  copying.value ? nextEnvironmentCopyKey(copying.value, entries.value) : '',
+)
+
+const detailOpen = ref(false)
+const detailEntry = ref<EnvironmentEntry | null>(null)
 
 const deleteOpen = ref(false)
 const deleteTarget = ref<EnvironmentEntry | null>(null)
@@ -69,12 +78,35 @@ onMounted(load)
 
 const openCreate = () => {
   editing.value = null
+  copying.value = null
   dialogOpen.value = true
 }
 
 const openEdit = (entry: EnvironmentEntry) => {
   editing.value = entry
+  copying.value = null
   dialogOpen.value = true
+}
+
+const openCopy = (entry: EnvironmentEntry) => {
+  editing.value = null
+  copying.value = entry
+  dialogOpen.value = true
+}
+
+const openDetail = (entry: EnvironmentEntry) => {
+  detailEntry.value = entry
+  detailOpen.value = true
+}
+
+const editFromDetail = (entry: EnvironmentEntry) => {
+  detailOpen.value = false
+  openEdit(entry)
+}
+
+const copyFromDetail = (entry: EnvironmentEntry) => {
+  detailOpen.value = false
+  openCopy(entry)
 }
 
 const saved = async () => {
@@ -135,6 +167,7 @@ const scopeLabel = (entry: EnvironmentEntry) =>
         :columns="columns"
         :rows="entries"
         :show-empty="false"
+        @select="openDetail($event as EnvironmentEntry)"
       >
         <template #cell="{ row, column }">
           <Badge
@@ -185,6 +218,11 @@ const scopeLabel = (entry: EnvironmentEntry) =>
           </span>
 
           <div v-else-if="column.key === 'actions'" class="flex justify-end gap-1">
+            <Tooltip content="拷贝">
+              <IconButton label="拷贝环境信息" size="sm" @click.stop="openCopy(row as EnvironmentEntry)">
+                <Icon :as="Copy" size="inline" />
+              </IconButton>
+            </Tooltip>
             <Tooltip content="编辑">
               <IconButton label="编辑环境信息" size="sm" @click.stop="openEdit(row as EnvironmentEntry)">
                 <Icon :as="Pencil" size="inline" />
@@ -216,7 +254,25 @@ const scopeLabel = (entry: EnvironmentEntry) =>
       </EmptyState>
     </div>
 
-    <EnvironmentDialog v-model:open="dialogOpen" :entry="editing" @saved="saved" />
+    <EnvironmentDetailDialog
+      v-model:open="detailOpen"
+      :entry="detailEntry"
+      :project-name="
+        detailEntry?.scope === 'PROJECT'
+          ? projectNames[detailEntry.projectId ?? -1] ?? `项目 #${detailEntry.projectId}`
+          : ''
+      "
+      @edit="editFromDetail"
+      @copy="copyFromDetail"
+    />
+
+    <EnvironmentDialog
+      v-model:open="dialogOpen"
+      :entry="editing"
+      :copy-source="copying"
+      :copy-key="copyKey"
+      @saved="saved"
+    />
 
     <Dialog
       v-model:open="deleteOpen"

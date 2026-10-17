@@ -2,6 +2,7 @@ package com.pydlove.regent.execution.application.command;
 
 import com.pydlove.regent.bug.domain.model.Bug;
 import com.pydlove.regent.bug.domain.model.BugSeverity;
+import com.pydlove.regent.bug.domain.model.BugStatus;
 import com.pydlove.regent.bug.domain.repository.BugRepository;
 import com.pydlove.regent.execution.domain.model.ExecResult;
 import com.pydlove.regent.execution.domain.model.ReportedBug;
@@ -10,6 +11,7 @@ import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
+import com.pydlove.regent.execution.domain.model.TaskSource;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
 import com.pydlove.regent.governance.application.command.DecisionRaiseService;
 import com.pydlove.regent.governance.application.command.RaiseDecisionCommand;
@@ -131,10 +133,27 @@ public class RunSettlementService {
         }
         if (outcome == RunStatus.SUCCESS) {
             fresh.complete();
+            taskRepository.save(fresh);
+            markBugFixed(fresh);
+            return;
         } else {
             fresh.fail();
         }
         taskRepository.save(fresh);
+    }
+
+    /** 修复任务成功只把缺陷推进到待验证，是否真正关闭仍由人决定。 */
+    private void markBugFixed(Task task) {
+        if (task.getSource() != TaskSource.BUG_FIX) {
+            return;
+        }
+        task.getBugId()
+                .flatMap(bugRepository::findById)
+                .filter(bug -> bug.getStatus() == BugStatus.FIXING)
+                .ifPresent(bug -> {
+                    bug.markFixed();
+                    bugRepository.save(bug);
+                });
     }
 
     /** 任务是否仍处在「执行中」—— 只有它才允许被阻塞或收场。 */

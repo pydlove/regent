@@ -9,6 +9,7 @@ import BugSeverityBadge from '@/components/business/BugSeverityBadge.vue'
 import BugStatusBadge from '@/components/business/BugStatusBadge.vue'
 import ImageAttachmentGrid from '@/components/business/ImageAttachmentGrid.vue'
 import ImageAttachmentsDialog from '@/components/business/ImageAttachmentsDialog.vue'
+import WorkItemSwitcher from '@/components/business/WorkItemSwitcher.vue'
 import Button from '@/components/ui/button/Button.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
@@ -64,6 +65,7 @@ const attachments = ref<BugAttachment[]>([])
 const attachmentError = ref<string | null>(null)
 const attaching = ref(false)
 const requestingFix = ref(false)
+const changingStatus = ref(false)
 const attachInput = ref<HTMLInputElement | null>(null)
 const viewerOpen = ref(false)
 const viewerId = ref<number | null>(null)
@@ -141,16 +143,34 @@ const requestFix = async () => {
   }
 }
 
-const markFixed = () => {
+const markFixed = async () => {
   const bug = selected.value
-  if (!bug) return
-  toast.warning('缺陷状态流转尚未接入', '后端接口就绪后才会改变状态，当前不伪造成功')
+  if (!bug || changingStatus.value) return
+
+  changingStatus.value = true
+  try {
+    await bugStore.markFixed(bug.id)
+    toast.success(`Bug #${bug.id} 已标记修复`, '还需要人工验证，验证通过后再关闭')
+  } catch (error) {
+    toast.warning(`Bug #${bug.id} 无法标记为已修复`, messageOf(error))
+  } finally {
+    changingStatus.value = false
+  }
 }
 
-const verify = () => {
+const verify = async () => {
   const bug = selected.value
-  if (!bug) return
-  toast.warning('缺陷状态流转尚未接入', '后端接口就绪后才会改变状态，当前不伪造成功')
+  if (!bug || changingStatus.value) return
+
+  changingStatus.value = true
+  try {
+    await bugStore.verify(bug.id)
+    toast.success(`Bug #${bug.id} 已验证关闭`)
+  } catch (error) {
+    toast.warning(`Bug #${bug.id} 无法验证关闭`, messageOf(error))
+  } finally {
+    changingStatus.value = false
+  }
 }
 
 const wontFixOpen = ref(false)
@@ -163,11 +183,20 @@ const openWontFix = () => {
   wontFixOpen.value = true
 }
 
-const confirmWontFix = () => {
+const confirmWontFix = async () => {
   const bug = selected.value
-  if (!bug || !canWontFixConfirm.value) return
-  wontFixOpen.value = false
-  toast.warning('缺陷状态流转尚未接入', '理由没有保存，刷新后会回到库里的真实状态')
+  if (!bug || !canWontFixConfirm.value || changingStatus.value) return
+
+  changingStatus.value = true
+  try {
+    await bugStore.wontFix(bug.id, wontFixReason.value.trim())
+    wontFixOpen.value = false
+    toast.success(`Bug #${bug.id} 已标记为不修复`, '理由已经保留在缺陷单里')
+  } catch (error) {
+    toast.warning(`Bug #${bug.id} 无法标记为不修复`, messageOf(error))
+  } finally {
+    changingStatus.value = false
+  }
 }
 
 // 列表里已经有严重级和状态两列，详情面板不再重复一遍大标题，只补上下文
@@ -191,9 +220,10 @@ onMounted(() => {
   <div class="flex h-full min-h-0">
     <div class="flex min-w-0 flex-1 flex-col">
       <div
-        class="flex min-h-toolbar shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-separator px-3 py-1.5 lg:h-toolbar lg:flex-nowrap lg:px-5 lg:py-0"
+        class="flex min-h-toolbar shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-separator px-3 py-1.5 xl:h-toolbar xl:flex-nowrap xl:px-5 xl:py-0"
       >
         <h1 class="text-body font-emphasis text-label">Bug 单</h1>
+        <WorkItemSwitcher value="BUGS" />
         <span class="tnum text-body text-label-tertiary">
           {{ bugStore.openTotal }} 条未解决
         </span>
@@ -388,13 +418,29 @@ onMounted(() => {
           >
             <Icon :as="Wrench" size="inline" />派发修复任务
           </Button>
-          <Button v-if="canMarkFixed(selected.status)" size="sm" @click="markFixed">
+          <Button
+            v-if="canMarkFixed(selected.status)"
+            size="sm"
+            :disabled="changingStatus"
+            @click="markFixed"
+          >
             标记已修复
           </Button>
-          <Button v-if="canVerify(selected.status)" variant="primary" size="sm" @click="verify">
+          <Button
+            v-if="canVerify(selected.status)"
+            variant="primary"
+            size="sm"
+            :disabled="changingStatus"
+            @click="verify"
+          >
             <Icon :as="ShieldCheck" size="inline" />验证关闭
           </Button>
-          <Button v-if="canWontFix(selected.status)" size="sm" @click="openWontFix">
+          <Button
+            v-if="canWontFix(selected.status)"
+            size="sm"
+            :disabled="changingStatus"
+            @click="openWontFix"
+          >
             不修复
           </Button>
         </div>
@@ -427,7 +473,9 @@ onMounted(() => {
 
       <template #footer>
         <Button @click="wontFixOpen = false">取消</Button>
-        <Button :disabled="!canWontFixConfirm" @click="confirmWontFix">确认不修复</Button>
+        <Button :disabled="!canWontFixConfirm || changingStatus" @click="confirmWontFix">
+          {{ changingStatus ? '保存中…' : '确认不修复' }}
+        </Button>
       </template>
     </Dialog>
 

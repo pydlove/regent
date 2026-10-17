@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 异常到 HTTP 的映射。全项目只有这一处做这件事 —— 散在各控制器里的 try/catch
@@ -18,6 +19,7 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
  * <p>状态码的选择：
  * <ul>
  *   <li>{@code EntityNotFoundException} → 404：东西不存在，重试同一请求也没用；</li>
+ *   <li>{@code NoResourceFoundException} → 404：请求了不存在的接口，不是服务端故障；</li>
  *   <li>{@link DomainException} → 400：请求本身合法，但违反了业务规则（比如对已完成的任务重试），
  *       属于调用时机不对，调用方该读 message 而不是重试；</li>
  *   <li>其它 → 500：真出了没预料到的问题，日志里留全栈，响应里不带内部细节。</li>
@@ -32,6 +34,12 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiError> notFound(EntityNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(ApiError.of("NOT_FOUND", e.getMessage()));
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiError> endpointNotFound(NoResourceFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiError.of("NOT_FOUND", "请求的接口不存在"));
     }
 
     @ExceptionHandler(DomainException.class)

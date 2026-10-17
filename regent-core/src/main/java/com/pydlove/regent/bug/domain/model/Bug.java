@@ -19,6 +19,7 @@ public class Bug {
 
     private static final int TITLE_MAX = 256;
     private static final int FILE_PATH_MAX = 512;
+    private static final int WONT_FIX_REASON_MIN = 6;
 
     private BugId id;
     private final ProjectId projectId;
@@ -137,6 +138,31 @@ public class Bug {
         touch();
     }
 
+    /** 修复任务成功只代表代码已改完，缺陷仍需人工验证。 */
+    public void markFixed() {
+        requireStatus(BugStatus.FIXING, "只有修复中的缺陷可以标记为已修复");
+        this.status = BugStatus.FIXED;
+        this.fixedAt = now();
+        touch();
+    }
+
+    /** 人工验证通过后关闭缺陷。 */
+    public void verify() {
+        requireStatus(BugStatus.FIXED, "只有待验证的缺陷可以验证关闭");
+        this.status = BugStatus.CLOSED;
+        touch();
+    }
+
+    /** 尚未解决的缺陷都可以判定不修复；终态不能再改，避免覆盖已经留下的结论。 */
+    public void wontFix(String reason) {
+        if (status.isResolved()) {
+            throw new DomainException("缺陷已处于终态，不能标记为不修复：" + status);
+        }
+        this.wontFixReason = requireWontFixReason(reason);
+        this.status = BugStatus.WONTFIX;
+        touch();
+    }
+
     private static String requireTitle(String title) {
         String value = requireText(title, "缺陷标题");
         if (value.length() > TITLE_MAX) {
@@ -149,6 +175,14 @@ public class Bug {
         String value = blankToNull(filePath);
         if (value != null && value.length() > FILE_PATH_MAX) {
             throw new DomainException("缺陷文件路径超长（上限 " + FILE_PATH_MAX + " 字符）：" + value.length());
+        }
+        return value;
+    }
+
+    private static String requireWontFixReason(String reason) {
+        String value = requireText(reason, "不修复理由");
+        if (value.length() < WONT_FIX_REASON_MIN) {
+            throw new DomainException("不修复理由至少需要 " + WONT_FIX_REASON_MIN + " 个字符");
         }
         return value;
     }
@@ -173,6 +207,12 @@ public class Bug {
 
     private static Instant now() {
         return Instant.now().truncatedTo(ChronoUnit.MILLIS);
+    }
+
+    private void requireStatus(BugStatus expected, String message) {
+        if (status != expected) {
+            throw new DomainException(message + "，当前状态：" + status);
+        }
     }
 
     private void touch() {

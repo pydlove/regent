@@ -6,6 +6,7 @@ import com.pydlove.regent.execution.domain.repository.TaskListItemPage;
 import com.pydlove.regent.execution.domain.repository.TaskQuery;
 import com.pydlove.regent.execution.domain.repository.TaskQueryRepository;
 import com.pydlove.regent.support.ExecutionFakes;
+import com.pydlove.regent.shared.kernel.TokenUsage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -69,13 +70,25 @@ class TaskQueryServiceTest {
         assertEquals(null, repository.from);
     }
 
-    /** 只实现趋势查询，其它方法一律当测试写错处理。 */
+    @Test
+    @DisplayName("Token 汇总直接采用查询仓储的全平台口径")
+    void returnsTokenUsageFromRepository() {
+        TokenUsage usage = TokenUsage.of(1200, 300, 500);
+        Recording repository = new Recording(List.of());
+        repository.usage = usage;
+        TaskQueryService service = new TaskQueryService(new ExecutionFakes.Tasks(), repository, ZONE);
+
+        assertEquals(usage, service.tokenUsage());
+    }
+
+    /** 只实现趋势与 token 查询，其它方法一律当测试写错处理。 */
     private static final class Recording implements TaskQueryRepository {
 
         private final List<DailyCompletionCount> rows;
         private LocalDate from;
         private LocalDate to;
         private ZoneOffset offset;
+        private TokenUsage usage = TokenUsage.ZERO;
 
         private Recording(List<DailyCompletionCount> rows) {
             this.rows = rows;
@@ -89,6 +102,11 @@ class TaskQueryServiceTest {
         @Override
         public Map<TaskStatus, Long> countGroupByStatus() {
             throw new UnsupportedOperationException("本测试不涉及状态分布");
+        }
+
+        @Override
+        public TokenUsage summarizeTokens() {
+            return usage;
         }
 
         @Override

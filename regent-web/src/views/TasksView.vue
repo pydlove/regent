@@ -14,6 +14,7 @@ import {
   XCircle,
 } from '@lucide/vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
 import { ACCEPTED_IMAGE_TYPES, listTaskAttachments, uploadTaskAttachment } from '@/api/attachments'
 import { getDecision } from '@/api/decisions'
@@ -27,6 +28,8 @@ import RunDetailDialog from '@/components/business/RunDetailDialog.vue'
 import RunStatusBadge from '@/components/business/RunStatusBadge.vue'
 import TaskEditDialog from '@/components/business/TaskEditDialog.vue'
 import TaskStatusBadge from '@/components/business/TaskStatusBadge.vue'
+import WorkItemSwitcher from '@/components/business/WorkItemSwitcher.vue'
+import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
 import Checkbox from '@/components/ui/checkbox/Checkbox.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
@@ -60,9 +63,11 @@ import {
   canRetry,
   retryActionLabel,
   type DecisionLevel,
+  type TaskSource,
   type TaskStatus,
 } from '@/types/task'
 import { formatDateTime, formatDuration, formatDurationMillis, formatTokens } from '@/utils/format'
+import BugView from '@/views/BugsView.vue'
 
 /*
  * 视图不判断状态。按钮能不能点一律问 types/task.ts 里的守卫，
@@ -73,11 +78,23 @@ const store = useTaskStore()
 const decisionStore = useDecisionStore()
 const runStore = useRunStore()
 const toast = useToast()
+const route = useRoute()
+const bugView = computed(() => route.query.view === 'bugs')
+
+const sourceMeta: Record<
+  TaskSource,
+  { label: string; tone: 'neutral' | 'accent' | 'warning' }
+> = {
+  MANUAL: { label: '人工', tone: 'neutral' },
+  REQUIREMENT: { label: '需求', tone: 'accent' },
+  BUG_FIX: { label: 'Bug 修复', tone: 'warning' },
+}
 
 const columns = computed<TableColumn[]>(() => [
   { key: 'selection', label: '', width: '36px' },
   { key: 'id', label: '#', width: '56px', numeric: true },
   { key: 'title', label: '任务' },
+  { key: 'source', label: '类型', width: '88px' },
   // 选定具体项目后，项目名对每一行都一样，不再占列表宽度
   ...(store.projectId === null
     ? [{ key: 'projectName', label: '项目', width: '144px', hideBelow: 'md' as const }]
@@ -239,12 +256,17 @@ const onReviewed = async (payload: { mode: 'approve' | 'reject'; note: string })
   const fresh = store.items.find((row) => row.id === task.id)
   if (fresh) await store.select(fresh)
   decision.value = await getDecision(current.id).catch(() => null)
+  await loadAttachments(task.id)
 
   if (payload.mode === 'approve') {
     toast.success(`#${task.id} 已批准`, '执行器从断点续跑，上下文里带着你的决定')
   } else {
     toast.show(`#${task.id} 已驳回，任务终止`, { description: '理由已写入决策留痕' })
   }
+}
+
+const onApprovalUploaded = async (payload: { taskId: number }) => {
+  if (store.selected?.id === payload.taskId) await loadAttachments(payload.taskId)
 }
 
 const retry = async () => {
@@ -390,15 +412,34 @@ const confirmDelete = async () => {
   }
 }
 
-const cancel = async () => {
+const cancelOpen = ref(false)
+const canceling = ref(false)
+const cancelTargetId = ref<number | null>(null)
+
+const cancelDialogTitle = computed(() =>
+  cancelTargetId.value === null ? '终止任务？' : `终止任务 #${cancelTargetId.value}？`,
+)
+
+const requestCancel = () => {
   const task = selected.value
-  if (!task) return
-  const failure = await store.cancel(task.id)
+  if (!task || !canCancel(task.status)) return
+  cancelTargetId.value = task.id
+  cancelOpen.value = true
+}
+
+const confirmCancel = async () => {
+  const id = cancelTargetId.value
+  if (id === null || canceling.value) return
+
+  canceling.value = true
+  const failure = await store.cancel(id)
+  canceling.value = false
   if (failure) {
-    toast.warning(`#${task.id} 终止被拒绝`, failure)
+    toast.warning(`#${id} 终止被拒绝`, failure)
     return
   }
-  toast.show(`#${task.id} 已终止`, { description: '任务不会再有后续动作' })
+  cancelOpen.value = false
+  toast.show(`#${id} 已终止`, { description: '任务不会再有后续动作' })
 }
 
 /*
@@ -559,9 +600,10 @@ watch(
  */
 const hasActiveTasks = computed(
   () =>
-    selected.value?.status === 'QUEUED' ||
-    selected.value?.status === 'RUNNING' ||
-    store.items.some((row) => row.status === 'QUEUED' || row.status === 'RUNNING'),
+    !bugView.value &&
+    (selected.value?.status === 'QUEUED' ||
+      selected.value?.status === 'RUNNING' ||
+      store.items.some((row) => row.status === 'QUEUED' || row.status === 'RUNNING')),
 )
 let tasksTimer: number | undefined
 const stopTasksTimer = () => {
@@ -584,16 +626,18 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0">
+  <BugView v-if="bugView" />
+  <div v-else class="flex h-full min-h-0">
     <div class="flex min-w-0 flex-1 flex-col">
       <!--
         手机端筛选行折成两行：标题/计数/筛选一行，操作区（搜索、刷新、新建）占满一行。
-        桌面（lg）恢复 52px 单行，与其它页面顶栏对齐。
+        较宽桌面（xl）恢复 52px 单行；lg 仍保留折行，避免新增页签挤掉操作区。
       -->
       <div
-        class="flex min-h-toolbar shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-separator px-3 py-1.5 lg:h-toolbar lg:flex-nowrap lg:px-5 lg:py-0"
+        class="flex min-h-toolbar shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-separator px-3 py-1.5 xl:h-toolbar xl:flex-nowrap xl:px-5 xl:py-0"
       >
         <h1 class="text-body font-emphasis text-label">任务</h1>
+        <WorkItemSwitcher value="TASKS" />
         <span class="tnum text-body text-label-tertiary">
           {{ store.total }} / {{ store.taskTotal }}
         </span>
@@ -688,6 +732,12 @@ onUnmounted(() => {
             >
               {{ row.title }}
             </span>
+            <Badge
+              v-else-if="column.key === 'source'"
+              :tone="sourceMeta[row.source as TaskSource].tone"
+            >
+              {{ sourceMeta[row.source as TaskSource].label }}
+            </Badge>
             <span
               v-else-if="column.key === 'projectName'"
               class="text-label-secondary group-data-[selected=true]:text-white"
@@ -754,6 +804,9 @@ onUnmounted(() => {
         <div class="flex items-center gap-2">
           <span class="tnum text-caption text-label-tertiary">#{{ selected.id }}</span>
           <DecisionLevelBadge :level="selected.level" />
+          <Badge :tone="sourceMeta[selected.source].tone">
+            {{ sourceMeta[selected.source].label }}
+          </Badge>
           <TaskStatusBadge :status="selected.status" class="ml-auto" />
         </div>
         <h2 class="mt-2 text-body font-emphasis text-label">{{ selected.title }}</h2>
@@ -981,7 +1034,7 @@ onUnmounted(() => {
           <Button v-if="canRetry(selected.status)" size="sm" @click="retry">
             <Icon :as="RotateCcw" size="inline" />{{ retryActionLabel(selected.status) }}
           </Button>
-          <Button v-if="canCancel(selected.status)" size="sm" @click="cancel">终止</Button>
+          <Button v-if="canCancel(selected.status)" size="sm" @click="requestCancel">终止</Button>
           <Button
             v-if="canDelete(selected.status)"
             variant="danger"
@@ -1001,7 +1054,13 @@ onUnmounted(() => {
 
     <NewTaskDialog v-model:open="createOpen" @created="onTaskCreated" @uploaded="onUploaded" />
 
-    <TaskEditDialog v-model:open="editOpen" :task="store.detail" />
+    <TaskEditDialog
+      v-model:open="editOpen"
+      :task="store.detail"
+      :attachments="attachments"
+      @uploaded="onUploaded({ id: selected?.id ?? 0 })"
+      @preview="openViewer"
+    />
 
     <ImageAttachmentsDialog
       v-model:open="viewerOpen"
@@ -1043,11 +1102,28 @@ onUnmounted(() => {
       </template>
     </Dialog>
 
+    <Dialog
+      v-model:open="cancelOpen"
+      :title="cancelDialogTitle"
+      description="任务会进入已终止状态，平台不再推进后续动作；运行记录和会话会保留，之后仍可重新执行。"
+      :icon="AlertTriangle"
+      icon-tone="danger"
+    >
+      <template #footer>
+        <Button size="sm" :disabled="canceling" @click="cancelOpen = false">取消</Button>
+        <Button variant="danger" size="sm" :disabled="canceling" @click="confirmCancel">
+          {{ canceling ? '终止中…' : '确认终止' }}
+        </Button>
+      </template>
+    </Dialog>
+
     <DecisionReviewDialog
       v-model:open="reviewOpen"
       :decision="decision"
       :mode="reviewMode"
       @done="onReviewed"
+      @uploaded="onApprovalUploaded"
+      @preview="openViewer"
     />
     <RunDetailDialog
       v-model:open="runDialogOpen"

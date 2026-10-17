@@ -1,23 +1,22 @@
 <script setup lang="ts">
 import {
-  Bug,
   FolderKanban,
   KeyRound,
   LayoutDashboard,
   LayoutPanelLeft,
   ListChecks,
-  PanelLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Settings,
   Workflow,
 } from '@lucide/vue'
 import { TooltipProvider } from 'reka-ui'
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
-import ExecutionSettingsDialog from '@/components/business/ExecutionSettingsDialog.vue'
 import FailedTaskNotifications from '@/components/business/FailedTaskNotifications.vue'
 import ProjectFormDialog from '@/components/business/ProjectFormDialog.vue'
 import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
@@ -29,12 +28,12 @@ import Toolbar from '@/components/ui/toolbar/Toolbar.vue'
 import { useOverlayScrollbar } from '@/composables/useOverlayScrollbar'
 import { useProjectDialog } from '@/composables/useProjectDialog'
 import { useTheme, type ThemePreference } from '@/composables/useTheme'
-import { useBugStore } from '@/stores/useBugStore'
 import { useDecisionStore } from '@/stores/useDecisionStore'
 import { useTaskStore } from '@/stores/useTaskStore'
 
 const { preference, setTheme } = useTheme()
 const route = useRoute()
+const router = useRouter()
 const routeTitle = computed(() => (route.meta.title as string | undefined) ?? '')
 
 // 标签页标题统一带上产品名：切页是「任务 · Regent AI 任务执行平台」，而不是永远一个笼统的 Regent
@@ -63,7 +62,6 @@ const themeOptions = [
  */
 const store = useTaskStore()
 const decisionStore = useDecisionStore()
-const bugStore = useBugStore()
 
 const project = computed({
   get: () => (store.projectId === null ? 'all' : String(store.projectId)),
@@ -94,22 +92,18 @@ const navItems = computed(() => [
     icon: Workflow,
     badge: decisionStore.pendingTotal ? String(decisionStore.pendingTotal) : undefined,
   },
-  {
-    label: 'Bug 单',
-    to: '/bugs',
-    icon: Bug,
-    badge: bugStore.openTotal ? String(bugStore.openTotal) : undefined,
-  },
   // 项目不放角标：它是配置，不是「等你处理」的事 —— 角标一旦不表示待办，就没人再看它了
   { label: '项目', to: '/projects', icon: FolderKanban },
   { label: '环境', to: '/environments', icon: KeyRound },
 ])
 
 /*
- * 展示类入口固定在侧边栏最底部：样式基准页是给人查组件的参考页，不参与业务流程，
- * 也不该占着首屏 —— 默认落地在任务页。
+ * 设置与样式基准页固定在侧边栏最底部：它们都不参与业务流转，也不该占着首屏。
  */
-const footerNavItems = [{ label: '样式基准页', to: '/baseline', icon: LayoutPanelLeft }]
+const footerNavItems = [
+  { label: '设置', to: '/settings', icon: Settings },
+  { label: '样式基准页', to: '/baseline', icon: LayoutPanelLeft },
+]
 
 // 角标与项目下拉都挂在侧边栏/工具栏上，与具体页面无关，所以在应用启动时拉一次。
 // 项目列表取不到就算了：下拉里只剩「全部项目」，比让整个应用起不来强
@@ -117,12 +111,13 @@ onMounted(() => {
   void store.loadStats()
   void store.loadProjects().catch(() => undefined)
   void decisionStore.loadPendingCount()
-  void bugStore.loadOpenCount()
 })
 
 const compactViewport = ref(window.matchMedia('(max-width: 1023px)').matches)
 const sidebarCollapsed = ref(compactViewport.value)
-const executionSettingsOpen = ref(false)
+const sidebarToggleLabel = computed(() =>
+  sidebarCollapsed.value ? '展开侧边栏' : '收起侧边栏',
+)
 const scroller = ref<HTMLElement | null>(null)
 useOverlayScrollbar(scroller)
 
@@ -156,17 +151,20 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
     <div class="flex h-screen flex-col overflow-hidden bg-window">
       <Toolbar>
         <template #leading>
-          <Tooltip content="收起侧边栏">
-            <IconButton
-              label="收起侧边栏"
-              size="lg"
-              @click="sidebarCollapsed = !sidebarCollapsed"
-            >
-              <Icon :as="PanelLeft" size="large" />
-            </IconButton>
-          </Tooltip>
+          <div class="lg:hidden">
+            <Tooltip content="展开侧边栏">
+              <IconButton
+                label="展开侧边栏"
+                size="lg"
+                :aria-expanded="!sidebarCollapsed"
+                @click="sidebarCollapsed = !sidebarCollapsed"
+              >
+                <Icon :as="PanelLeftOpen" size="large" />
+              </IconButton>
+            </Tooltip>
+          </div>
           <!-- 产品名唯一常驻位：品牌在工具栏最左、页面名在中间，两者不互相抢 -->
-          <span class="flex shrink-0 items-center gap-2 pl-1.5">
+          <span class="flex shrink-0 items-center gap-2">
             <span class="sr-only">Regent AI 任务执行平台</span>
             <span
               aria-hidden="true"
@@ -191,6 +189,22 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
               </span>
             </span>
           </span>
+          <!-- 桌面端把折叠开关贴在品牌右侧；手机端抽屉入口仍留在左上角 -->
+          <div class="hidden lg:block">
+            <Tooltip :content="sidebarToggleLabel">
+              <IconButton
+                :label="sidebarToggleLabel"
+                size="lg"
+                :aria-expanded="!sidebarCollapsed"
+                @click="sidebarCollapsed = !sidebarCollapsed"
+              >
+                <Icon
+                  :as="sidebarCollapsed ? PanelLeftOpen : PanelLeftClose"
+                  size="large"
+                />
+              </IconButton>
+            </Tooltip>
+          </div>
           <div class="hidden sm:block">
             <SearchableSelect
               v-model="project"
@@ -217,8 +231,8 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
             <SegmentedControl v-model="themeModel" :items="themeOptions" size="lg" />
           </div>
           <FailedTaskNotifications />
-          <Tooltip content="执行设置">
-            <IconButton label="执行设置" size="lg" @click="executionSettingsOpen = true">
+          <Tooltip content="设置">
+            <IconButton label="设置" size="lg" @click="router.push('/settings')">
               <Icon :as="Settings" size="large" />
             </IconButton>
           </Tooltip>
@@ -240,7 +254,6 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
       </div>
     </div>
     <ProjectFormDialog v-model:open="projectDialogOpen" />
-    <ExecutionSettingsDialog v-model:open="executionSettingsOpen" />
     <ToastHost />
   </TooltipProvider>
 </template>

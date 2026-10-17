@@ -9,6 +9,7 @@ import com.pydlove.regent.execution.domain.repository.TaskQuery;
 import com.pydlove.regent.execution.domain.repository.TaskQueryRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
+import com.pydlove.regent.shared.kernel.TokenUsage;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -59,6 +60,11 @@ public class TaskQueryService {
         }
         counts.putAll(taskQueryRepository.countGroupByStatus());
         return counts;
+    }
+
+    /** 看板用的全平台 token 汇总，只统计未逻辑删除任务下的执行记录。 */
+    public TokenUsage tokenUsage() {
+        return taskQueryRepository.summarizeTokens();
     }
 
     /**

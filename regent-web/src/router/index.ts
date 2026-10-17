@@ -46,9 +46,13 @@ const router = createRouter({
     },
     {
       path: '/bugs',
-      name: 'bugs',
-      component: () => import('@/views/BugsView.vue'),
-      meta: { title: 'Bug 单' },
+      redirect: (to) => ({ name: 'tasks', query: { ...to.query, view: 'bugs' } }),
+    },
+    {
+      path: '/settings/:section?',
+      name: 'settings',
+      component: () => import('@/views/SettingsView.vue'),
+      meta: { title: '设置' },
     },
   ],
 })

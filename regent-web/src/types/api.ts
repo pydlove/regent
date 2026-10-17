@@ -58,6 +58,14 @@ export type TaskTrendPoint = {
   failed: number
 }
 
+/** 全平台已结算 token；总量与任务列表使用同一口径。 */
+export type TaskTokenUsage = {
+  input: number
+  cachedInput: number
+  output: number
+  total: number
+}
+
 /** 后端的时间一律是 ISO-8601 的 UTC 串（如 2026-10-16T04:41:10.573Z），可空字段用 null。 */
 export type TaskSummary = {
   id: number
@@ -209,6 +217,25 @@ export type EnvironmentEntry = {
 export type ExecutionSettings = {
   maxConcurrentTasks: number
   runningTaskCount: number
+}
+
+export type RelayState = 'UNCONFIGURED' | 'DISABLED' | 'ONLINE' | 'DEGRADED' | 'OFFLINE'
+
+/** 中继服务器与本地连接器的实时状态。 */
+export type RelayStatus = {
+  state: RelayState
+  connectorOnline: boolean | null
+  queueDepth: number | null
+  latencyMillis: number | null
+  checkedAt: string | null
+  message: string
+}
+
+/** 中继状态监听设置；共享密钥不经过浏览器接口。 */
+export type RelaySettings = {
+  serverUrl: string
+  monitoringEnabled: boolean
+  status: RelayStatus
 }
 
 /**

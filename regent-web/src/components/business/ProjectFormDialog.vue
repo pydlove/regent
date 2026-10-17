@@ -132,11 +132,11 @@ const save = async () => {
   >
     <div class="flex flex-col gap-3">
       <DialogField label="标识" hint="小写字母开头，字母数字下划线，建后不改">
-        <Input v-model="code" placeholder="app_audit" :invalid="code.length > 0 && !codeValid" />
+        <Input v-model="code" placeholder="例如：regent" :invalid="code.length > 0 && !codeValid" />
       </DialogField>
 
       <DialogField label="名称">
-        <Input v-model="name" placeholder="审计平台" />
+        <Input v-model="name" placeholder="例如：需求执行平台" />
       </DialogField>
 
       <DialogField label="路径" hint="codex 的工作目录，必须在本机已存在">
@@ -146,7 +146,7 @@ const save = async () => {
           <div class="min-w-0 flex-1">
             <Input
               v-model="path"
-              placeholder="/Users/you/workspace/app-audit"
+              placeholder="/Users/you/workspace/my-project"
               :invalid="pathError !== null"
               @blur="checkPath"
             />

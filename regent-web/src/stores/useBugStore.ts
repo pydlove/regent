@@ -4,7 +4,10 @@ import { ref, watch } from 'vue'
 import {
   createBug,
   listBugs,
+  markBugFixed,
   requestBugFix,
+  verifyBug,
+  wontFixBug,
   type BugScope,
   type CreateBugInput,
 } from '@/api/bugs'
@@ -87,6 +90,24 @@ export const useBugStore = defineStore('bugs', () => {
     return updated
   }
 
+  const markFixed = async (id: number) => {
+    const updated = await markBugFixed(id)
+    await Promise.all([load(), loadOpenCount()])
+    return updated
+  }
+
+  const verify = async (id: number) => {
+    const updated = await verifyBug(id)
+    await Promise.all([load(), loadOpenCount()])
+    return updated
+  }
+
+  const wontFix = async (id: number, reason: string) => {
+    const updated = await wontFixBug(id, reason)
+    await Promise.all([load(), loadOpenCount()])
+    return updated
+  }
+
   watch(scope, () => {
     page.value = 1
     void load()
@@ -114,5 +135,8 @@ export const useBugStore = defineStore('bugs', () => {
     loadOpenCount,
     createManual,
     requestFix,
+    markFixed,
+    verify,
+    wontFix,
   }
 })

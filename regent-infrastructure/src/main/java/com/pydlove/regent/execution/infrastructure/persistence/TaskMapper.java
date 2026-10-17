@@ -30,6 +30,9 @@ public interface TaskMapper {
     /** 返回 {@code status -> count}，缺失的状态不会出现在结果里。 */
     List<Map<String, Object>> countGroupByStatus();
 
+    /** 汇总全部有效任务已结算的 token。 */
+    TokenUsageRow summarizeTokens();
+
     /**
      * 按天统计收场任务。{@code from} / {@code to} 是 UTC 字面量边界（左闭右开），
      * {@code offsetMinutes} 只用于把 UTC 字面量平移回调用方时区再取日期。

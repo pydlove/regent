@@ -33,3 +33,10 @@ export type CreateBugInput = {
 export const createBug = (input: CreateBugInput) => postJson<Bug>('/bugs', input)
 
 export const requestBugFix = (bugId: number) => post<Bug>(`/bugs/${bugId}/fix-task`)
+
+export const markBugFixed = (bugId: number) => post<Bug>(`/bugs/${bugId}/mark-fixed`)
+
+export const verifyBug = (bugId: number) => post<Bug>(`/bugs/${bugId}/verify`)
+
+export const wontFixBug = (bugId: number, reason: string) =>
+  postJson<Bug>(`/bugs/${bugId}/wont-fix`, { reason })

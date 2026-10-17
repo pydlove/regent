@@ -5,6 +5,7 @@ import {
   Bot,
   Bug,
   Clock3,
+  Coins,
   Gauge,
   ListChecks,
   RefreshCw,
@@ -28,7 +29,7 @@ import IconButton from '@/components/ui/icon-button/IconButton.vue'
 import Skeleton from '@/components/ui/skeleton/Skeleton.vue'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
 import type { TaskStatus } from '@/types/task'
-import { formatRelative } from '@/utils/format'
+import { formatRelative, formatTokens } from '@/utils/format'
 
 const snapshot = ref<DashboardSnapshot | null>(null)
 const loading = ref(false)
@@ -37,6 +38,7 @@ const lastUpdated = ref<Date | null>(null)
 
 const integerFormatter = new Intl.NumberFormat('zh-CN')
 const formatInteger = (value: number) => integerFormatter.format(value)
+const formatTokenCount = (value: number) => (value === 0 ? '0' : formatTokens(value))
 const weekdayFormatter = new Intl.DateTimeFormat('zh-CN', { weekday: 'short' })
 
 function messageOf(value: unknown): string {
@@ -150,18 +152,20 @@ type Tile = {
   icon: Component
   chipClass: ToneChip
   label: string
-  value: number
+  valueText: string
+  unit: string
   valueClass: string
   caption: string
 }
 
 /*
  * 磁贴只在「这个数字需要你动」时才上色：常态是黑字灰底，有活干、有决策、有缺陷才染色。
- * 四个磁贴全部彩色会互相抵消，等于没有重点。
+ * 彩色磁贴互相抵消会失去重点，因此 token 这类资源指标保持中性色。
  */
 const tiles = computed<Tile[]>(() => {
   const current = snapshot.value
   if (!current) return []
+  const usage = current.tokenUsage
   return [
     {
       key: 'total',
@@ -169,7 +173,8 @@ const tiles = computed<Tile[]>(() => {
       icon: ListChecks,
       chipClass: chipAccent,
       label: '任务总数',
-      value: totalTasks.value,
+      valueText: formatInteger(totalTasks.value),
+      unit: '项',
       valueClass: 'text-label',
       caption: `已完成 ${formatInteger(current.tasks.DONE)} 项`,
     },
@@ -179,7 +184,8 @@ const tiles = computed<Tile[]>(() => {
       icon: Bot,
       chipClass: activeTasks.value > 0 ? chipSuccess : chipNeutral,
       label: '正在处理',
-      value: activeTasks.value,
+      valueText: formatInteger(activeTasks.value),
+      unit: '项',
       valueClass: activeTasks.value > 0 ? 'text-label' : 'text-label-tertiary',
       caption: `${formatInteger(current.tasks.RUNNING)} 运行 · ${formatInteger(current.tasks.QUEUED)} 排队`,
     },
@@ -189,7 +195,8 @@ const tiles = computed<Tile[]>(() => {
       icon: Workflow,
       chipClass: current.pendingDecisions > 0 ? chipWarning : chipNeutral,
       label: '待批决策',
-      value: current.pendingDecisions,
+      valueText: formatInteger(current.pendingDecisions),
+      unit: '项',
       valueClass: current.pendingDecisions > 0 ? 'text-warning' : 'text-label',
       caption:
         current.pendingDecisions > 0
@@ -202,9 +209,24 @@ const tiles = computed<Tile[]>(() => {
       icon: Bug,
       chipClass: current.openBugs > 0 ? chipDanger : chipNeutral,
       label: '开放缺陷',
-      value: current.openBugs,
+      valueText: formatInteger(current.openBugs),
+      unit: '项',
       valueClass: current.openBugs > 0 ? 'text-danger' : 'text-label',
       caption: current.openBugs > 0 ? '等待修复或验证' : '当前无需处理',
+    },
+    {
+      key: 'tokens',
+      to: '/tasks',
+      icon: Coins,
+      chipClass: chipNeutral,
+      label: 'Token 消耗',
+      valueText: formatTokenCount(usage.total),
+      unit: 'tokens',
+      valueClass: 'text-label',
+      caption:
+        usage.total === 0
+          ? '尚未产生已结算消耗'
+          : `输入 ${formatTokenCount(usage.input)} · 缓存 ${formatTokenCount(usage.cachedInput)} · 输出 ${formatTokenCount(usage.output)}`,
     },
   ]
 })
@@ -251,13 +273,14 @@ onMounted(() => void load())
     </p>
 
     <div v-if="snapshot" class="flex-1 space-y-3 px-5 py-4">
-      <!-- 手机上两列：四个指标各占一行会把图表推到两屏之外 -->
-      <section class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <!-- 手机上两列：指标各占一行会把图表推到两屏之外；第五项独占末行，避免半张空卡。 -->
+      <section class="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <RouterLink
           v-for="tile in tiles"
           :key="tile.key"
           :to="tile.to"
           class="group flex min-w-0 flex-col gap-2.5 rounded-panel bg-content p-3.5 shadow-panel transition-colors duration-[120ms] ease-apple hover:bg-hover"
+          :class="{ 'col-span-2 lg:col-span-1': tile.key === 'tokens' }"
         >
           <div class="flex items-center gap-2">
             <span class="grid size-6 shrink-0 place-items-center rounded-[6px]" :class="tile.chipClass">
@@ -272,9 +295,9 @@ onMounted(() => void load())
           </div>
           <div class="flex items-end gap-1.5">
             <span class="tnum text-metric font-bold" :class="tile.valueClass">
-              {{ formatInteger(tile.value) }}
+              {{ tile.valueText }}
             </span>
-            <span class="pb-0.5 text-caption text-label-tertiary">项</span>
+            <span class="pb-0.5 text-caption text-label-tertiary">{{ tile.unit }}</span>
           </div>
           <p class="truncate text-caption text-label-tertiary">{{ tile.caption }}</p>
         </RouterLink>
@@ -608,8 +631,13 @@ onMounted(() => void load())
     </div>
 
     <div v-else-if="loading" class="flex-1 space-y-3 px-5 py-4">
-      <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Skeleton v-for="index in 4" :key="index" class="h-28 rounded-panel" />
+      <div class="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <Skeleton
+          v-for="index in 5"
+          :key="index"
+          class="h-28 rounded-panel"
+          :class="{ 'col-span-2 lg:col-span-1': index === 5 }"
+        />
       </div>
       <div class="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.65fr)_minmax(300px,1fr)]">
         <div class="flex flex-col gap-3">

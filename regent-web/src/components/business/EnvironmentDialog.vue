@@ -15,6 +15,8 @@ import type { EnvironmentEntry, EnvironmentScope } from '@/types/api'
 
 const props = defineProps<{
   entry: EnvironmentEntry | null
+  copySource: EnvironmentEntry | null
+  copyKey: string
 }>()
 
 const emit = defineEmits<{ saved: [entry: EnvironmentEntry] }>()
@@ -56,14 +58,15 @@ watch(open, async (opened) => {
   if (!opened) return
   error.value = null
   saving.value = false
-  scope.value = props.entry?.scope ?? 'GLOBAL'
-  projectId.value = props.entry?.projectId === null || props.entry?.projectId === undefined
+  const source = props.entry ?? props.copySource
+  scope.value = source?.scope ?? 'GLOBAL'
+  projectId.value = source?.projectId === null || source?.projectId === undefined
     ? undefined
-    : String(props.entry.projectId)
-  key.value = props.entry?.key ?? ''
-  value.value = props.entry?.value ?? ''
-  tagsText.value = props.entry?.tags.join(', ') ?? ''
-  description.value = props.entry?.description ?? ''
+    : String(source.projectId)
+  key.value = props.copySource ? props.copyKey : source?.key ?? ''
+  value.value = source?.value ?? ''
+  tagsText.value = source?.tags.join(', ') ?? ''
+  description.value = source?.description ?? ''
   try {
     await store.loadProjects()
     if (
@@ -129,7 +132,7 @@ const save = async () => {
     v-model:open="open"
     layout="form"
     size="large"
-    :title="props.entry ? '编辑环境信息' : '新增环境信息'"
+    :title="props.entry ? '编辑环境信息' : props.copySource ? '拷贝环境信息' : '新增环境信息'"
     description="执行任务时可用。项目配置与全局配置同名时，项目值优先。"
   >
     <div class="flex flex-col gap-3">

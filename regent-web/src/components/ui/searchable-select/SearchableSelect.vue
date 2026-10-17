@@ -47,6 +47,15 @@ const open = ref(false)
 const { zIndex } = useOverlayLayer(open)
 
 /*
+ * ComboboxInput 只在 root model 变化时重新计算展示文本。页面刷新时选中值可能先于异步
+ * 选项列表恢复，此时仅改变 items 不会刷新输入框；用稳定签名重建 Combobox，避免出现
+ * 「值还在但显示为空」。
+ */
+const itemsKey = computed(() =>
+  JSON.stringify(props.items.map(({ value, label }) => [value, label])),
+)
+
+/*
  * Combobox 的输入框同时承担“显示当前值”和“输入搜索词”两个职责。
  * 复用按钮变体保留工具栏下拉的外观，再覆盖文字选择和激活缩放，避免输入框像按钮一样不可选文字。
  */
@@ -76,6 +85,7 @@ const selectInputText = (event: FocusEvent) => {
 
 <template>
   <ComboboxRoot
+    :key="itemsKey"
     v-model="model"
     v-model:open="open"
     :disabled="disabled"

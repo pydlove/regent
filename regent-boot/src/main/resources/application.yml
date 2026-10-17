@@ -92,6 +92,13 @@ regent:
       enabled: ${REGENT_AGENT_LEASE_SWEEP_ENABLED:true}
       interval-ms: 60000
       initial-delay-ms: 45000
+  relay:
+    monitor:
+      # 默认地址只用于首次启动；界面保存后以 relay_setting 表为准。
+      # 这里不读取共享密钥，密钥仍由 ~/.regent/relay-connector.env 独占。
+      server-url: ${REGENT_RELAY_SERVER_URL:}
+      enabled: ${REGENT_RELAY_MONITOR_ENABLED:true}
+      request-timeout: ${REGENT_RELAY_MONITOR_TIMEOUT:PT3S}
 
 mybatis-plus:
   mapper-locations: classpath*:mapper/**/*.xml
