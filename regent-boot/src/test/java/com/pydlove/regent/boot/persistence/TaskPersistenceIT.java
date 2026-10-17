@@ -112,6 +112,22 @@ class TaskPersistenceIT {
     }
 
     @Test
+    @DisplayName("已终止任务逻辑删除后查不到，数据库标记仍保留")
+    void 逻辑删除已终止任务() {
+        Task task = Task.manual(ProjectId.of(PROBE_PROJECT_ID), "IT 删除终止任务", "验证删除", 0);
+        taskRepository.save(task);
+        task.cancel();
+        taskRepository.save(task);
+
+        taskRepository.delete(task.getId());
+
+        assertTrue(taskRepository.findById(task.getId()).isEmpty());
+        Integer deleted = jdbcTemplate.queryForObject(
+                "SELECT deleted FROM task WHERE id = ?", Integer.class, task.getId().value());
+        assertEquals(1, deleted);
+    }
+
+    @Test
     @DisplayName("仓储删除再次挡住了并发派发后的任务")
     void 不删除已派发任务() {
         Task task = Task.manual(ProjectId.of(PROBE_PROJECT_ID), "IT 并发派发任务", "验证删除守卫", 0);

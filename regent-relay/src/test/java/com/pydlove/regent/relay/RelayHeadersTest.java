@@ -30,8 +30,8 @@ class RelayHeadersTest {
         Map<String, String> filtered = RelayHeaders.filterRequest(headers);
 
         assertEquals("application/json", filtered.get("accept"));
+        assertEquals("session=secret", filtered.get("cookie"));
         assertTrue(!filtered.containsKey("authorization"));
-        assertTrue(!filtered.containsKey("cookie"));
     }
 
     @Test
@@ -45,7 +45,22 @@ class RelayHeadersTest {
 
         assertEquals("image/png", filtered.get("content-type"));
         assertEquals("inline", filtered.get("content-disposition"));
-        assertTrue(!filtered.containsKey("set-cookie"));
+        assertEquals("secret=1", filtered.get("set-cookie"));
         assertTrue(!filtered.containsKey("transfer-encoding"));
+    }
+
+    @Test
+    void 多个响应头值不会被逗号错误拆分() {
+        Map<String, String> filtered = RelayHeaders.filterResponse(Map.of(
+            "Set-Cookie", List.of(
+                "regent_session=abc; Path=/; Expires=Sat, 17 Oct 2026 08:00:00 GMT",
+                "theme=light; Path=/"
+            )
+        ));
+
+        assertEquals(List.of(
+            "regent_session=abc; Path=/; Expires=Sat, 17 Oct 2026 08:00:00 GMT",
+            "theme=light; Path=/"
+        ), RelayHeaders.splitValues(filtered.get("set-cookie")));
     }
 }

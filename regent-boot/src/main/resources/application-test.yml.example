@@ -10,6 +10,10 @@ spring:
     # 仅测试 profile 允许 clean，用于重建干净的测试库
     clean-disabled: false
 regent:
+  plan:
+    scheduler:
+      # 集成测试自己控制计划启动与收敛，避免后台定时器干扰事务回滚。
+      enabled: false
   execution:
     # 集成测试自己会调派发用例；心跳开着会让测试期间冒出真实的执行进程
     dispatch:

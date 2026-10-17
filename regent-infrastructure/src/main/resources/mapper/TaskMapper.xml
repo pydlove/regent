@@ -46,6 +46,13 @@
         WHERE t.id = #{id} AND t.deleted = 0
     </select>
 
+    <select id="selectByIdForUpdate" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskData">
+        SELECT <include refid="columns"/>
+        FROM task t
+        WHERE t.id = #{id} AND t.deleted = 0
+        FOR UPDATE
+    </select>
+
     <!--
       列表查询：两条标量子查询补的是「读模型才需要」的字段。
 
@@ -229,7 +236,7 @@
     </update>
 
     <!--
-      逻辑删除只覆盖待执行或排队中的任务，并在 SQL 里再次检查 status：
+      逻辑删除覆盖待执行、排队中或已终止的任务，并在 SQL 里再次检查 status：
       SELECT 之后、UPDATE 之前，调度器可能已经并发把任务派发成 RUNNING。
     -->
     <update id="softDelete">
@@ -238,7 +245,7 @@
             updated_at = #{updatedAt}
         WHERE id = #{id}
           AND deleted = 0
-          AND status IN ('PENDING', 'QUEUED')
+          AND status IN ('PENDING', 'QUEUED', 'CANCELLED')
     </update>
 
 </mapper>

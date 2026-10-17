@@ -59,5 +59,7 @@ export const canReject = (s: TaskStatus) => s === 'BLOCKED'
 export const canCancel = (s: TaskStatus) => !TERMINAL_STATUSES.includes(s)
 export const canRetry = (s: TaskStatus) => s === 'FAILED' || s === 'CANCELLED'
 export const retryActionLabel = (s: TaskStatus) => (s === 'CANCELLED' ? '重新执行' : '重试')
-export const canDelete = (s: TaskStatus) => s === 'PENDING' || s === 'QUEUED'
+export const canDelete = (s: TaskStatus) =>
+  s === 'PENDING' || s === 'QUEUED' || s === 'CANCELLED'
+export const canBatchDispatch = (s: TaskStatus) => s === 'PENDING' || s === 'QUEUED'
 export const canEdit = (s: TaskStatus) => s !== 'DONE'

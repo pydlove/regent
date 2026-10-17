@@ -57,4 +57,17 @@ public class LocalAttachmentStorage implements AttachmentStorage {
             throw new IllegalStateException("附件读取失败：" + storagePath, e);
         }
     }
+
+    @Override
+    public void delete(String storagePath) {
+        Path path = Path.of(storagePath).toAbsolutePath().normalize();
+        if (!path.startsWith(root)) {
+            throw new DomainException("附件路径不在存储目录内，拒绝删除：" + storagePath);
+        }
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException e) {
+            throw new IllegalStateException("附件删除失败：" + storagePath, e);
+        }
+    }
 }

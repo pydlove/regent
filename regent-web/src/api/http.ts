@@ -122,6 +122,20 @@ export async function postJsonNoContent(path: string, body: unknown): Promise<vo
   if (!response.ok) await throwApiError(path, response)
 }
 
+/** Multipart 上传。Content-Type 必须交给浏览器生成，才能带上 boundary。 */
+export async function postForm<T>(path: string, body: FormData): Promise<T> {
+  const response = await fetch(`/api${path}`, {
+    method: 'POST',
+    headers: {
+      ...RELAY_REQUEST_HEADER,
+      Accept: 'application/json',
+    },
+    body,
+  })
+  if (!response.ok) await throwApiError(path, response)
+  return (await response.json()) as T
+}
+
 /** 带 JSON 请求体的 PUT：用于整体替换一组可编辑字段。 */
 export async function putJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`/api${path}`, {

@@ -4,6 +4,7 @@ import com.pydlove.regent.execution.domain.model.ExecReport;
 import com.pydlove.regent.execution.domain.model.ReportedBug;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.model.Task;
+import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.execution.domain.port.ExecutorContract;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
@@ -52,6 +53,7 @@ class AgentRunServiceTest {
     private final ExecutionFakes.Projects projects = new ExecutionFakes.Projects();
     private final ExecutionFakes.Attachments attachments = new ExecutionFakes.Attachments();
     private final ExecutionFakes.Environments environments = new ExecutionFakes.Environments();
+    private final ExecutionFakes.TaskPlugins plugins = new ExecutionFakes.TaskPlugins();
     private final ExecutionFakes.Branches branches = new ExecutionFakes.Branches();
     private final ExecutionConcurrencyGate concurrencyGate = new ExecutionConcurrencyGate(64);
 
@@ -67,7 +69,8 @@ class AgentRunServiceTest {
     }
 
     private AgentRunService serviceWithLease(Duration lease) {
-        return new AgentRunService(tasks, runs, events, attachments, projects, environments, decisions, branches,
+        return new AgentRunService(tasks, runs, events, attachments, projects, environments, plugins,
+                decisions, branches,
                 new RunSettlementService(tasks, decisions, new DecisionRaiseService(rules, decisions), bugs),
                 contract(), concurrencyGate, lease, "http://127.0.0.1:8787/api/agent/contract");
     }
@@ -111,6 +114,7 @@ class AgentRunServiceTest {
         assertEquals(RunStatus.RUNNING.name(), runs.get(work.runId()).getStatus().name());
         assertEquals(AGENT, runs.get(work.runId()).getAgentName());
         assertFalse(work.images().stream().findAny().isPresent());
+        assertTrue(work.plugins().isEmpty());
     }
 
     @Test
@@ -135,6 +139,23 @@ class AgentRunServiceTest {
         assertEquals("PROJECT", db.scope());
         assertFalse(work.instruction().contains("project-db"), work.instruction());
         assertFalse(work.instruction().contains("secret"), work.instruction());
+    }
+
+    @Test
+    @DisplayName("外部执行者工作包同时拿到插件元数据和内容")
+    void 认领拿到插件() {
+        tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
+        plugins.add(TaskId.of(7L), ExecutionFakes.TaskPlugins.plugin(
+                9L, "Kafka 读取组件", 2, "class KafkaReader { void read() {} }"));
+
+        AgentWorkPackage work = service.claim(AGENT, "sess-1", "p1", null).orElseThrow();
+
+        assertEquals(1, work.plugins().size());
+        AgentWorkPackage.Plugin plugin = work.plugins().get(0);
+        assertEquals(9L, plugin.id());
+        assertEquals(2, plugin.revision());
+        assertTrue(plugin.content().contains("KafkaReader"));
+        assertTrue(work.instruction().contains("不要重新生成已有实现"));
     }
 
     @Test

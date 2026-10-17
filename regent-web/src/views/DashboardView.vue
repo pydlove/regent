@@ -418,7 +418,8 @@ onMounted(() => void load())
         <section
           class="mt-5 grid items-start gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(380px,1fr)]"
         >
-          <section class="flex min-w-0 flex-col overflow-hidden rounded-card border border-separator-soft bg-content shadow-panel">
+          <div class="contents xl:order-1 xl:flex xl:min-w-0 xl:flex-col xl:gap-4">
+          <section class="order-1 flex min-w-0 flex-col overflow-hidden rounded-card border border-separator-soft bg-content shadow-panel">
             <div class="flex flex-wrap items-start gap-x-6 gap-y-3 px-6 pt-6">
               <div class="flex min-w-0 items-center gap-3">
                 <span class="grid size-9 shrink-0 place-items-center rounded-panel bg-accent/12 text-accent">
@@ -515,7 +516,67 @@ onMounted(() => void load())
             </div>
           </section>
 
-          <aside class="flex min-w-0 flex-col overflow-hidden rounded-card border border-separator-soft bg-content shadow-panel">
+          <article class="order-3 overflow-hidden rounded-card border border-separator-soft bg-content shadow-panel">
+            <div class="flex items-center gap-3 px-6 pt-6">
+              <span class="grid size-9 shrink-0 place-items-center rounded-panel bg-accent/12 text-accent">
+                <Icon :as="ListChecks" size="large" />
+              </span>
+              <div class="min-w-0">
+                <h2 class="text-title font-emphasis text-label">任务构成</h2>
+                <p class="mt-0.5 text-subhead text-label-tertiary">任务在各阶段的状态分布</p>
+              </div>
+              <span class="tnum ml-auto shrink-0 text-subhead text-label-tertiary">
+                {{ formatInteger(totalTasks) }} 项
+              </span>
+            </div>
+
+            <div class="grid items-center gap-6 px-6 pb-6 pt-5 md:grid-cols-[156px_minmax(0,1fr)]">
+              <div class="flex flex-col items-center justify-center">
+                <DonutChart
+                  :segments="donutSegments"
+                  :size="148"
+                  :thickness="12"
+                  :center-value="formatInteger(totalTasks)"
+                  center-label="任务"
+                />
+                <p class="mt-2.5 text-subhead text-label-tertiary">
+                  已完成 <span class="tnum font-emphasis text-label-secondary">{{ formatInteger(snapshot.tasks.DONE) }}</span>
+                </p>
+              </div>
+
+              <dl class="grid min-w-0 content-center gap-3">
+                <div
+                  v-for="row in statusRows"
+                  :key="row.status"
+                  class="grid grid-cols-[64px_minmax(0,1fr)_76px] items-center gap-3"
+                >
+                  <dt
+                    class="truncate text-subhead"
+                    :class="row.count > 0 ? 'text-label-secondary' : 'text-label-tertiary'"
+                  >
+                    {{ row.label }}
+                  </dt>
+                  <div class="h-1.5 overflow-hidden rounded-full bg-neutral/10">
+                    <div
+                      class="h-full rounded-full transition-[width] duration-500 ease-apple"
+                      :class="row.barClass"
+                      :style="{ width: `${row.percentage}%` }"
+                    />
+                  </div>
+                  <dd class="tnum text-right text-subhead">
+                    <span :class="row.count > 0 ? 'font-emphasis text-label' : 'text-label-tertiary'">
+                      {{ formatInteger(row.count) }}
+                    </span>
+                    <span class="ml-1 text-label-tertiary">{{ row.percentage }}%</span>
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          </article>
+          </div>
+
+          <div class="contents xl:order-2 xl:flex xl:min-w-0 xl:flex-col xl:gap-4">
+          <aside class="order-2 flex min-w-0 flex-col overflow-hidden rounded-card border border-separator-soft bg-content shadow-panel">
             <div class="flex items-center gap-3 border-b border-separator-soft px-6 py-5">
               <span
                 class="grid size-10 shrink-0 place-items-center rounded-panel"
@@ -673,68 +734,7 @@ onMounted(() => void load())
               <p class="mt-1.5 text-subhead text-label-tertiary">新的决策、缺陷和失败任务会在这里进入视线</p>
             </div>
           </aside>
-        </section>
-
-        <section class="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(330px,1fr)]">
-          <article class="overflow-hidden rounded-card border border-separator-soft bg-content shadow-panel">
-            <div class="flex items-center gap-3 px-6 pt-6">
-              <span class="grid size-9 shrink-0 place-items-center rounded-panel bg-accent/12 text-accent">
-                <Icon :as="ListChecks" size="large" />
-              </span>
-              <div class="min-w-0">
-                <h2 class="text-title font-emphasis text-label">任务构成</h2>
-                <p class="mt-0.5 text-subhead text-label-tertiary">任务在各阶段的状态分布</p>
-              </div>
-              <span class="tnum ml-auto shrink-0 text-subhead text-label-tertiary">
-                {{ formatInteger(totalTasks) }} 项
-              </span>
-            </div>
-
-            <div class="grid items-center gap-6 px-6 pb-6 pt-5 md:grid-cols-[156px_minmax(0,1fr)]">
-              <div class="flex flex-col items-center justify-center">
-                <DonutChart
-                  :segments="donutSegments"
-                  :size="148"
-                  :thickness="12"
-                  :center-value="formatInteger(totalTasks)"
-                  center-label="任务"
-                />
-                <p class="mt-2.5 text-subhead text-label-tertiary">
-                  已完成 <span class="tnum font-emphasis text-label-secondary">{{ formatInteger(snapshot.tasks.DONE) }}</span>
-                </p>
-              </div>
-
-              <dl class="grid min-w-0 content-center gap-3">
-                <div
-                  v-for="row in statusRows"
-                  :key="row.status"
-                  class="grid grid-cols-[64px_minmax(0,1fr)_76px] items-center gap-3"
-                >
-                  <dt
-                    class="truncate text-subhead"
-                    :class="row.count > 0 ? 'text-label-secondary' : 'text-label-tertiary'"
-                  >
-                    {{ row.label }}
-                  </dt>
-                  <div class="h-1.5 overflow-hidden rounded-full bg-neutral/10">
-                    <div
-                      class="h-full rounded-full transition-[width] duration-500 ease-apple"
-                      :class="row.barClass"
-                      :style="{ width: `${row.percentage}%` }"
-                    />
-                  </div>
-                  <dd class="tnum text-right text-subhead">
-                    <span :class="row.count > 0 ? 'font-emphasis text-label' : 'text-label-tertiary'">
-                      {{ formatInteger(row.count) }}
-                    </span>
-                    <span class="ml-1 text-label-tertiary">{{ row.percentage }}%</span>
-                  </dd>
-                </div>
-              </dl>
-            </div>
-          </article>
-
-          <article class="overflow-hidden rounded-card border border-separator-soft bg-content shadow-panel">
+          <article class="order-4 overflow-hidden rounded-card border border-separator-soft bg-content shadow-panel">
             <div class="flex items-center gap-3 px-6 pt-6">
               <span class="grid size-9 shrink-0 place-items-center rounded-panel bg-success/12 text-success">
                 <Icon :as="Gauge" size="large" />
@@ -805,6 +805,7 @@ onMounted(() => void load())
               </p>
             </div>
           </article>
+          </div>
         </section>
       </template>
 
@@ -818,12 +819,14 @@ onMounted(() => void load())
           />
         </div>
         <div class="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(380px,1fr)]">
-          <Skeleton class="h-[430px] rounded-card" />
-          <Skeleton class="h-[430px] rounded-card" />
-        </div>
-        <div class="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(330px,1fr)]">
-          <Skeleton class="h-48 rounded-card" />
-          <Skeleton class="h-48 rounded-card" />
+          <div class="contents xl:flex xl:flex-col xl:gap-4">
+            <Skeleton class="order-1 h-[430px] rounded-card" />
+            <Skeleton class="order-3 h-48 rounded-card" />
+          </div>
+          <div class="contents xl:flex xl:flex-col xl:gap-4">
+            <Skeleton class="order-2 h-[430px] rounded-card" />
+            <Skeleton class="order-4 h-48 rounded-card" />
+          </div>
         </div>
       </div>
 

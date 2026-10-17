@@ -74,8 +74,10 @@ regent:
   # 约定见 TECH_STACK.md 六：运行时产物一律不写仓库。
   home: ${REGENT_HOME:${user.home}/.regent}
   auth:
-    # 浏览器会话默认七天；数据库只保存令牌摘要，不保存 Cookie 明文。
+    # 不勾选保持登录时，浏览器关闭即失效，服务端最多保留七天。
     session-ttl: ${REGENT_AUTH_SESSION_TTL:PT168H}
+    # 勾选保持登录后使用 180 天持久会话，剩余一半时自动顺延。
+    remembered-session-ttl: ${REGENT_AUTH_REMEMBERED_SESSION_TTL:PT4320H}
     # 本地 HTTP 开发默认 false；生产由反向代理提供 HTTPS 时必须设成 true。
     cookie-secure: ${REGENT_AUTH_COOKIE_SECURE:false}
     email-code:
@@ -104,6 +106,13 @@ regent:
       interval-ms: 15000
       initial-delay-ms: 20000
       batch-size: 3
+  plan:
+    scheduler:
+      # 到点启动计划并刷新运行中计划；关闭后仍可人工触发，但执行结果不会自动收敛。
+      enabled: ${REGENT_PLAN_SCHEDULER_ENABLED:true}
+      interval-ms: 15000
+      initial-delay-ms: 20000
+      batch-size: 10
   agent:
     # 外部执行者（codex 桌面版、别的 CLI、别的模型工具）走 /api/agent/* 认领任务。
     # 契约全文：GET /api/agent/contract.md。要让它独占派发，把上面 dispatch.enabled 关掉 ——

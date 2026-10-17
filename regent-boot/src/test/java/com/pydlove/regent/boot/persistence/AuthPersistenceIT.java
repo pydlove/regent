@@ -69,7 +69,7 @@ class AuthPersistenceIT {
 
         seedEmailCode(email);
         var registered = authService.register(new RegisterEmailCommand(email, EMAIL_CODE, password, password));
-        AuthSessionGrant grant = authService.login(new LoginCommand(email, password));
+        AuthSessionGrant grant = authService.login(new LoginCommand(email, password, false));
 
         String passwordHash = jdbcTemplate.queryForObject(
                 "SELECT password_hash FROM app_user WHERE email = ?", String.class, email);
@@ -85,6 +85,26 @@ class AuthPersistenceIT {
         assertNotEquals(grant.rawToken(), tokenHash);
         assertEquals(email, registered.email());
         assertEquals(email, authService.currentUser(grant.rawToken()).email());
+    }
+
+    @Test
+    @DisplayName("保持登录标记与会话有效期正确落库")
+    void persistsRememberedSession() {
+        String email = email("remembered");
+        String password = "safe-pass-123";
+        seedEmailCode(email);
+        authService.register(new RegisterEmailCommand(email, EMAIL_CODE, password, password));
+
+        AuthSessionGrant grant = authService.login(new LoginCommand(email, password, true));
+
+        Boolean remembered = jdbcTemplate.queryForObject(
+                "SELECT remembered FROM auth_session WHERE user_id = "
+                        + "(SELECT id FROM app_user WHERE email = ?)",
+                Boolean.class,
+                email);
+        assertEquals(Boolean.TRUE, remembered);
+        assertTrue(grant.remembered());
+        assertTrue(grant.expiresAt().isAfter(Instant.now().plus(Duration.ofDays(179))));
     }
 
     @Test

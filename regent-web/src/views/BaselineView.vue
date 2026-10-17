@@ -203,7 +203,7 @@ const colorTokens = [
   <!-- 基准页自己铺灰底：白色面板要落在灰底上才读得出「面板」，这是系统设置的做法 -->
   <div class="min-h-full bg-window py-6">
    <div class="mx-auto max-w-4xl px-5">
-    <h1 class="text-body font-emphasis text-label">样式基准页</h1>
+    <h1 class="text-metric font-emphasis text-label">样式基准页</h1>
     <p class="mt-1 text-caption text-label-secondary">
       这一页的唯一目的：让你肉眼确认「像不像 macOS」。深浅两套并存，不靠描述、不靠截图。
     </p>

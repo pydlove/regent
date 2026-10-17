@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import {
+  Blocks,
+  CalendarClock,
+  ChevronLeft,
+  ChevronRight,
   FolderKanban,
   KeyRound,
   LayoutDashboard,
-  LayoutPanelLeft,
   ListChecks,
-  LogOut,
-  PanelLeftClose,
   PanelLeftOpen,
   Plus,
   Settings,
@@ -20,6 +21,8 @@ import IconButton from '@/components/ui/icon-button/IconButton.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import FailedTaskNotifications from '@/components/business/FailedTaskNotifications.vue'
 import ProjectFormDialog from '@/components/business/ProjectFormDialog.vue'
+import UserProfileCard from '@/components/business/UserProfileCard.vue'
+import UserProfileDialog from '@/components/business/UserProfileDialog.vue'
 import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
 import SearchableSelect from '@/components/ui/searchable-select/SearchableSelect.vue'
 import Sidebar from '@/components/ui/sidebar/Sidebar.vue'
@@ -90,6 +93,7 @@ const projects = computed(() => [
 const navItems = computed(() => [
   { label: '工作台', to: '/dashboard', icon: LayoutDashboard },
   { label: '任务', to: '/tasks', icon: ListChecks, badge: String(store.taskTotal) },
+  { label: '计划', to: '/plans', icon: CalendarClock },
   {
     label: '决策',
     to: '/decisions',
@@ -99,15 +103,10 @@ const navItems = computed(() => [
   // 项目不放角标：它是配置，不是「等你处理」的事 —— 角标一旦不表示待办，就没人再看它了
   { label: '项目', to: '/projects', icon: FolderKanban },
   { label: '环境', to: '/environments', icon: KeyRound },
+  { label: '插件', to: '/plugins', icon: Blocks },
 ])
 
-/*
- * 设置与样式基准页固定在侧边栏最底部：它们都不参与业务流转，也不该占着首屏。
- */
-const footerNavItems = [
-  { label: '设置', to: '/settings', icon: Settings },
-  { label: '样式基准页', to: '/baseline', icon: LayoutPanelLeft },
-]
+const profileDialogOpen = ref(false)
 
 // 登录页不请求业务数据；登录成功并切换到管理界面后再拉角标与项目下拉。
 watch(
@@ -120,11 +119,6 @@ watch(
   },
   { immediate: true },
 )
-
-const logout = async () => {
-  await auth.logout()
-  await router.push({ name: 'login' })
-}
 
 const handleUnauthorized = () => {
   auth.clear()
@@ -201,35 +195,12 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
               />
             </span>
             <span aria-hidden="true" class="hidden flex-col lg:flex">
-              <span class="flex items-center gap-1">
-                <span class="text-[14px] font-emphasis leading-[15px] text-label">Regent</span>
-                <span
-                  class="rounded-[3px] bg-accent px-1.5 text-[10px] font-emphasis leading-[12px] text-white"
-                >
-                  AI
-                </span>
-              </span>
+              <span class="text-[14px] font-emphasis leading-[15px] text-label">Regent AI</span>
               <span class="mt-0.5 text-[10px] font-medium leading-[12px] text-label-secondary">
                 任务执行平台
               </span>
             </span>
           </span>
-          <!-- 桌面端把折叠开关贴在品牌右侧；手机端抽屉入口仍留在左上角 -->
-          <div class="hidden lg:block">
-            <Tooltip :content="sidebarToggleLabel">
-              <IconButton
-                :label="sidebarToggleLabel"
-                size="lg"
-                :aria-expanded="!sidebarCollapsed"
-                @click="sidebarCollapsed = !sidebarCollapsed"
-              >
-                <Icon
-                  :as="sidebarCollapsed ? PanelLeftOpen : PanelLeftClose"
-                  size="large"
-                />
-              </IconButton>
-            </Tooltip>
-          </div>
           <div class="hidden sm:block">
             <SearchableSelect
               v-model="project"
@@ -256,11 +227,6 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
             <SegmentedControl v-model="themeModel" :items="themeOptions" size="lg" />
           </div>
           <FailedTaskNotifications />
-          <Tooltip :content="auth.user ? `退出登录（${auth.user.email ?? auth.user.username}）` : '退出登录'">
-            <IconButton label="退出登录" size="lg" @click="logout">
-              <Icon :as="LogOut" size="large" />
-            </IconButton>
-          </Tooltip>
           <Tooltip content="设置">
             <IconButton label="设置" size="lg" @click="router.push('/settings')">
               <Icon :as="Settings" size="large" />
@@ -276,7 +242,42 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
           class="fixed inset-0 z-20 bg-black/25 lg:hidden"
           @click="sidebarCollapsed = true"
         />
-        <Sidebar :items="navItems" :footer-items="footerNavItems" :collapsed="sidebarCollapsed" />
+        <div class="relative flex shrink-0">
+          <Sidebar
+            id="app-sidebar"
+            :items="navItems"
+            :collapsed="sidebarCollapsed"
+          >
+            <div class="mt-auto">
+              <UserProfileCard
+                v-if="auth.user"
+                :user="auth.user"
+                @edit="profileDialogOpen = true"
+              />
+            </div>
+          </Sidebar>
+          <!-- 折叠开关骑在侧边栏右边框的垂直中心；收起后停在内容区左缘，保证还能展开 -->
+          <div
+            class="absolute top-1/2 z-20 hidden -translate-y-1/2 transition-[left,transform] duration-200 ease-apple lg:block"
+            :class="sidebarCollapsed ? 'left-0 translate-x-0' : 'left-sidebar -translate-x-1/2'"
+          >
+            <Tooltip :content="sidebarToggleLabel" side="right">
+              <IconButton
+                :label="sidebarToggleLabel"
+                size="sm"
+                variant="default"
+                aria-controls="app-sidebar"
+                :aria-expanded="!sidebarCollapsed"
+                @click="sidebarCollapsed = !sidebarCollapsed"
+              >
+                <Icon
+                  :as="sidebarCollapsed ? ChevronRight : ChevronLeft"
+                  size="inline"
+                />
+              </IconButton>
+            </Tooltip>
+          </div>
+        </div>
 
         <main ref="scroller" class="scroll-area min-w-0 flex-1 overflow-y-auto bg-content">
           <RouterView />
@@ -285,6 +286,7 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
     </div>
     <RouterView v-else />
     <ProjectFormDialog v-if="!authPage" v-model:open="projectDialogOpen" />
+    <UserProfileDialog v-if="!authPage" v-model:open="profileDialogOpen" />
     <ToastHost />
   </TooltipProvider>
 </template>

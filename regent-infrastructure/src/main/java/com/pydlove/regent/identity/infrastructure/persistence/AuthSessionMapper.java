@@ -11,5 +11,8 @@ public interface AuthSessionMapper {
     AuthPrincipalRow findActivePrincipal(@Param("tokenHash") String tokenHash,
                                          @Param("now") LocalDateTime now);
 
+    int updateExpiresAt(@Param("id") Long id,
+                        @Param("expiresAt") LocalDateTime expiresAt);
+
     int deleteByTokenHash(@Param("tokenHash") String tokenHash);
 }

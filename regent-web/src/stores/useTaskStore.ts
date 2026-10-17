@@ -24,6 +24,10 @@ import type {
   TaskSummary,
 } from '@/types/api'
 import type { DecisionLevel, TaskStatus } from '@/types/task'
+import {
+  readProjectSelection,
+  writeProjectSelection,
+} from '@/utils/projectSelectionStorage'
 
 /*
  * 任务列表的数据源。真实数据来自后端 /api/tasks，分页、筛选、搜索全部下推到 SQL ——
@@ -45,23 +49,6 @@ const EMPTY_COUNTS: Record<TaskStatus, number> = {
   DONE: 0,
   FAILED: 0,
   CANCELLED: 0,
-}
-
-const PROJECT_STORAGE_KEY = 'regent-project-id'
-
-function readStoredProjectId(): number | null {
-  try {
-    const raw = localStorage.getItem(PROJECT_STORAGE_KEY)
-    if (raw === null) return null
-
-    const parsed = Number(raw)
-    if (Number.isSafeInteger(parsed) && parsed > 0) return parsed
-
-    localStorage.removeItem(PROJECT_STORAGE_KEY)
-  } catch {
-    // 禁用本地存储时仍允许使用筛选，只是本次会话不会跨刷新保留
-  }
-  return null
 }
 
 function messageOf(error: unknown): string {
@@ -87,7 +74,7 @@ export const useTaskStore = defineStore('tasks', () => {
   const statusFilter = ref<TaskStatus | 'ALL'>('ALL')
   const levelFilter = ref<DecisionLevel | 'ALL'>('ALL')
   /** null 表示全部项目。工具栏的筛选与新建任务弹框共用 projects 这一份列表 */
-  const projectId = ref<number | null>(readStoredProjectId())
+  const projectId = ref<number | null>(readProjectSelection())
   const projects = ref<Project[]>([])
   const keyword = ref('')
 
@@ -284,14 +271,7 @@ export const useTaskStore = defineStore('tasks', () => {
     page.value = 1
     void load()
   })
-  watch(projectId, (value) => {
-    try {
-      if (value === null) localStorage.removeItem(PROJECT_STORAGE_KEY)
-      else localStorage.setItem(PROJECT_STORAGE_KEY, String(value))
-    } catch {
-      // 本地存储不可用不影响当前筛选，刷新后回退即可
-    }
-  })
+  watch(projectId, (value) => writeProjectSelection(value), { flush: 'sync' })
   watch([page, pageSize], () => {
     void load()
   })

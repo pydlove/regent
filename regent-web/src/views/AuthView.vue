@@ -5,6 +5,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/http'
 import Button from '@/components/ui/button/Button.vue'
+import Checkbox from '@/components/ui/checkbox/Checkbox.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import Input from '@/components/ui/input/Input.vue'
 import { useAuthStore } from '@/stores/useAuthStore'
@@ -20,6 +21,7 @@ const email = ref('')
 const emailCode = ref('')
 const password = ref('')
 const confirmPassword = ref('')
+const rememberMe = ref(true)
 const error = ref<string | null>(null)
 const notice = ref<string | null>(null)
 const resendSeconds = ref(0)
@@ -124,7 +126,7 @@ async function submit(): Promise<void> {
       return
     }
 
-    await auth.login(identifier.value.trim(), password.value)
+    await auth.login(identifier.value.trim(), password.value, rememberMe.value)
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
     await router.push(redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/tasks')
   } catch (value) {
@@ -145,7 +147,7 @@ async function submit(): Promise<void> {
           <span class="absolute bottom-1 right-1 size-1.5 rounded-full bg-accent ring-2 ring-label" />
         </span>
         <div>
-          <p class="text-title font-emphasis leading-none text-label">Regent</p>
+          <p class="text-title font-emphasis leading-none text-label">Regent AI</p>
           <p class="mt-1 text-caption text-label-secondary">任务执行平台</p>
         </div>
       </div>
@@ -238,6 +240,15 @@ async function submit(): Promise<void> {
               至少 8 个字符
             </span>
           </label>
+
+          <div v-if="!isRegister" class="flex items-start justify-between gap-4">
+            <div>
+              <Checkbox v-model="rememberMe" label="在此设备保持登录" />
+              <p class="mt-1 pl-5 text-caption text-label-tertiary">
+                正常使用期间长期有效，无需反复输入密码。
+              </p>
+            </div>
+          </div>
 
           <label v-if="isRegister" class="block">
             <span class="mb-1.5 block text-caption font-emphasis text-label-secondary">

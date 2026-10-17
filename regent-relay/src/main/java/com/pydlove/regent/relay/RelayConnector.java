@@ -122,7 +122,8 @@ public final class RelayConnector implements AutoCloseable {
         }
 
         HttpRequest.Builder builder = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(60));
-        headers.forEach(builder::header);
+        headers.forEach((name, values) ->
+            RelayHeaders.splitValues(values).forEach(value -> builder.header(name, value)));
         if (body.length == 0 || "GET".equals(method) || "HEAD".equals(method)) {
             builder.method(method, HttpRequest.BodyPublishers.noBody());
         } else {

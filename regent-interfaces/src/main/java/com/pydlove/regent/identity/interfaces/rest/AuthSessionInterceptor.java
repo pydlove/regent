@@ -2,6 +2,7 @@ package com.pydlove.regent.identity.interfaces.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pydlove.regent.identity.application.command.AuthService;
+import com.pydlove.regent.identity.application.query.AuthenticatedUser;
 import com.pydlove.regent.interfaces.dto.ApiError;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,6 +19,8 @@ import java.nio.charset.StandardCharsets;
 public class AuthSessionInterceptor implements HandlerInterceptor {
 
     static final String COOKIE_NAME = "regent_session";
+    static final String CURRENT_USER_ATTRIBUTE =
+            AuthSessionInterceptor.class.getName() + ".currentUser";
 
     private final AuthService authService;
     private final ObjectMapper objectMapper;
@@ -31,7 +34,9 @@ public class AuthSessionInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request,
                              HttpServletResponse response,
                              Object handler) throws IOException {
-        if (authService.authenticate(readToken(request)).isPresent()) {
+        AuthenticatedUser user = authService.authenticate(readToken(request)).orElse(null);
+        if (user != null) {
+            request.setAttribute(CURRENT_USER_ATTRIBUTE, user);
             return true;
         }
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
@@ -52,5 +57,13 @@ public class AuthSessionInterceptor implements HandlerInterceptor {
             }
         }
         return null;
+    }
+
+    static AuthenticatedUser currentUser(HttpServletRequest request) {
+        Object value = request.getAttribute(CURRENT_USER_ATTRIBUTE);
+        if (value instanceof AuthenticatedUser user) {
+            return user;
+        }
+        throw new IllegalStateException("登录守卫没有提供当前用户");
     }
 }

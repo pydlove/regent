@@ -160,6 +160,18 @@ class TaskCommandServiceTest {
     }
 
     @Test
+    @DisplayName("已终止任务可以删除并从仓储移除")
+    void deletesCancelledTask() {
+        Task task = create("删除已经终止的任务");
+        task.cancel();
+
+        service.delete(task.getId());
+
+        assertNull(tasks.get(task.getId().value()));
+        assertEquals(List.of(task.getId()), tasks.deleted);
+    }
+
+    @Test
     @DisplayName("执行中任务不能删除")
     void rejectsDeletingStartedTask() {
         Task task = create("已经派发的任务");

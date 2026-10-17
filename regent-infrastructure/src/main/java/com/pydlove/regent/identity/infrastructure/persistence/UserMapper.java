@@ -12,5 +12,9 @@ public interface UserMapper {
 
     UserData findByEmail(@Param("email") String email);
 
+    UserData findById(@Param("id") long id);
+
     int insert(UserData data);
+
+    int update(UserData data);
 }

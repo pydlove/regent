@@ -25,6 +25,7 @@ Regent 换个做法：需求一次性录进平台，平台逐个调起 Codex 执
 | 决策留痕 | 每条决策记录「谁做的决定」与依据规则，可事后追溯 |
 | 断点续跑 | 依赖 `codex exec` 的 `thread_id`，人工批准后从断点接着执行，上下文不丢 |
 | 缺陷闭环 | 执行中发现的问题进 Bug 单，派生修复任务，按等级决定自动修还是等批 |
+| 插件能力库 | 把 Kafka 读取、数据库工具等组件存成固定版本能力包，执行时直接交给 AI 复用 |
 | 双通道通知 | 邮件为基座，微信/飞书推送为增强，通道失败逐级降级 |
 
 ## 决策分级
@@ -59,6 +60,9 @@ Regent 换个做法：需求一次性录进平台，平台逐个调起 Codex 执
 
 需要 JDK 17、Maven 3.9+、Node 20+、本机 MySQL（`regent` / `regent_test` 两个 schema，
 凭据写在已被 gitignore 的 `regent-boot/src/main/resources/application-local.yml`）。
+邮箱注册还需要在同一个文件里配置 `spring.mail.*` 的 SMTP 发件账号和授权码；也可以用
+`SPRING_MAIL_HOST`、`SPRING_MAIL_PORT`、`SPRING_MAIL_USERNAME`、`SPRING_MAIL_PASSWORD`
+环境变量覆盖。验证码 5 分钟有效、60 秒内不可重发、同一邮箱每天最多 10 次。
 演示数据**默认不加载**（2026-10-16 起）：本地库是干净的，界面上出现的都是真实录入的数据。
 想灌回那套演示数据（45 条任务、10 张决策单，分页开箱三页可翻），按 `application-local.yml`
 注释里的说明把 `flyway.locations` 加回 `classpath:db/seed` 再重启即可；脚本是幂等的，
@@ -140,7 +144,12 @@ deploy/                 本地启停脚本 + 远程发布脚本
   `GET /api/projects`、`POST /api/projects`（注册项目）、
   `GET /api/projects/directories`（列本机目录，给注册表单的路径选择器用）、
   `GET|PUT /api/execution/settings`（读取 / 修改最大同时运行任务数）、
+  `POST /api/auth/email-codes`（发送邮箱注册验证码）、`POST /api/auth/register`（邮箱验证码注册）、
+  `POST /api/auth/login|logout`、`GET /api/auth/me`（会话认证，登录支持邮箱或旧用户名；
+  `rememberMe` 开启 180 天持久登录，剩余有效期过半后自动顺延）、
   `GET /api/decisions`、`POST /api/decisions/{id}/approve|reject`、
+  `GET|POST /api/plugins`、`PUT /api/plugins/{id}`、`PUT /api/plugins/{id}/enabled`（插件库与版本）、
+  `GET|PUT /api/tasks/{id}/plugins`（任务固定版本绑定）、
   `GET /api/bugs`（支持范围 / 严重级 / 关键词 / 分页）、`POST /api/bugs`（人工录入）、
   `POST /api/bugs/{id}/fix-task`（创建并派发修复任务、回填修复任务号）、
   **外部执行者**：`GET /api/agent/contract(.md)`（协议全文 + 出参 schema）、
@@ -149,11 +158,12 @@ deploy/                 本地启停脚本 + 远程发布脚本
 - 前端：任务列表 / 分页 / 筛选 / 搜索 / 检查器、**新建任务弹框（贴图 + 拖放）与任务编辑弹框**、
   **项目管理页**（项目画像 + 最近任务）与「注册项目」（入口在工具栏项目下拉右边、项目页、
   以及一个项目都没有时的新建任务弹框里；路径能手打、也能从本机目录树里选）、按项目筛选、决策审批闭环、
-  **运行记录面板与事件流弹框**、**详情里的附件缩略图与看图弹框**、**执行设置弹框**
+  **运行记录面板与事件流弹框**、**详情里的附件缩略图与看图弹框**、**执行设置弹框**、
+  **插件库与任务插件绑定**
 - 测试：`regent-core` 单测（毫秒级反馈回路）+ 适配器 11 个 + 26 条集成测试
   （真 MySQL、真 Git、假 codex 脚本回放 JSONL）+ 7 条 ArchUnit 架构守卫
 
-**还没做**：邮件/推送通道与邮件里的「一键批准」入口、需求单本身与「需求 → 任务」的拆解链路、
+**还没做**：决策通知的邮件/推送通道与邮件里的「一键批准」入口、需求单本身与「需求 → 任务」的拆解链路、
 Bug 单的标记已修复 / 验证关闭 / 不修复状态流转、决策规则的维护界面、
 定时心跳的运维开关（当前只有配置文件一个入口）。
 待办见 `ARCHITECTURE.md` 第十一节。

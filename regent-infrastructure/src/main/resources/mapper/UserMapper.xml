@@ -15,20 +15,50 @@
     </select>
 
     <select id="findByUsername" resultType="com.pydlove.regent.identity.infrastructure.persistence.UserData">
-        SELECT id, username, email, password_hash, created_at
+        SELECT id, username, display_name, email, password_hash,
+               avatar_filename, avatar_content_type, avatar_storage_path, avatar_updated_at,
+               created_at
         FROM app_user
         WHERE username = #{username}
     </select>
 
     <select id="findByEmail" resultType="com.pydlove.regent.identity.infrastructure.persistence.UserData">
-        SELECT id, username, email, password_hash, created_at
+        SELECT id, username, display_name, email, password_hash,
+               avatar_filename, avatar_content_type, avatar_storage_path, avatar_updated_at,
+               created_at
         FROM app_user
         WHERE email = #{email}
     </select>
 
+    <select id="findById" resultType="com.pydlove.regent.identity.infrastructure.persistence.UserData">
+        SELECT id, username, display_name, email, password_hash,
+               avatar_filename, avatar_content_type, avatar_storage_path, avatar_updated_at,
+               created_at
+        FROM app_user
+        WHERE id = #{id}
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO app_user (username, email, password_hash, created_at)
-        VALUES (#{username}, #{email}, #{passwordHash}, #{createdAt})
+        INSERT INTO app_user (
+            username, display_name, email, password_hash,
+            avatar_filename, avatar_content_type, avatar_storage_path, avatar_updated_at,
+            created_at
+        )
+        VALUES (
+            #{username}, #{displayName}, #{email}, #{passwordHash},
+            #{avatarFilename}, #{avatarContentType}, #{avatarStoragePath}, #{avatarUpdatedAt},
+            #{createdAt}
+        )
     </insert>
+
+    <update id="update">
+        UPDATE app_user
+        SET display_name = #{displayName},
+            avatar_filename = #{avatarFilename},
+            avatar_content_type = #{avatarContentType},
+            avatar_storage_path = #{avatarStoragePath},
+            avatar_updated_at = #{avatarUpdatedAt}
+        WHERE id = #{id}
+    </update>
 
 </mapper>

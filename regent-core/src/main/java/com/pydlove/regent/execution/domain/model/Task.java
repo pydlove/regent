@@ -243,11 +243,13 @@ public class Task {
     /**
      * 删除守卫。
      *
-     * <p>只有尚未执行过的待执行或排队任务允许删除；删除本身由仓储做逻辑删除，聚合不需要
-     * 知道 {@code deleted} 列。执行中、阻塞、失败或已结束的任务必须留在平台上供审计与追溯。
+     * <p>尚未执行过的待执行、排队任务，以及已经人工终止的任务允许删除；删除本身由仓储做
+     * 逻辑删除，聚合不需要知道 {@code deleted} 列。执行中、阻塞、失败或已完成的任务必须留在
+     * 平台上供审计与追溯。
      */
     public void requireDeletable() {
-        requireStateIn("只有待执行或排队中的任务可以删除", TaskStatus.PENDING, TaskStatus.QUEUED);
+        requireStateIn("只有待执行、排队中或已终止的任务可以删除",
+                TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.CANCELLED);
     }
 
     /** 执行器回报断点续跑的钥匙，取自 {@code codex exec --json} 的 thread_id。 */

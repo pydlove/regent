@@ -7,6 +7,8 @@ import {
   logout as logoutRequest,
   register as registerRequest,
   sendRegistrationCode as sendRegistrationCodeRequest,
+  updateProfile as updateProfileRequest,
+  uploadProfileAvatar,
   type RegisterInput,
 } from '@/api/auth'
 import type { AuthUser } from '@/types/api'
@@ -30,10 +32,14 @@ export const useAuthStore = defineStore('auth', () => {
     return user.value !== null
   }
 
-  const login = async (identifier: string, password: string): Promise<void> => {
+  const login = async (
+    identifier: string,
+    password: string,
+    rememberMe = true,
+  ): Promise<void> => {
     submitting.value = true
     try {
-      user.value = await loginRequest({ username: identifier, password })
+      user.value = await loginRequest({ username: identifier, password, rememberMe })
       initialized.value = true
     } finally {
       submitting.value = false
@@ -55,6 +61,15 @@ export const useAuthStore = defineStore('auth', () => {
       return await registerRequest(input)
     } finally {
       submitting.value = false
+    }
+  }
+
+  const saveProfile = async (displayName: string, avatar: File | null): Promise<void> => {
+    let updated = await updateProfileRequest(displayName)
+    user.value = updated
+    if (avatar) {
+      updated = await uploadProfileAvatar(avatar)
+      user.value = updated
     }
   }
 
@@ -81,6 +96,7 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     sendRegistrationCode,
     register,
+    saveProfile,
     logout,
     clear,
   }

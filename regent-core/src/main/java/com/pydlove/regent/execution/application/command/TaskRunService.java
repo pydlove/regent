@@ -17,6 +17,8 @@ import com.pydlove.regent.execution.domain.repository.TaskRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
 import com.pydlove.regent.governance.application.command.RaisedDecision;
 import com.pydlove.regent.governance.domain.model.DecisionId;
+import com.pydlove.regent.plugin.application.query.PluginContext;
+import com.pydlove.regent.plugin.domain.repository.TaskPluginRepository;
 import com.pydlove.regent.project.application.query.EnvironmentContext;
 import com.pydlove.regent.project.domain.repository.EnvironmentEntryRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
@@ -72,6 +74,7 @@ public class TaskRunService {
     private final TaskAttachmentRepository attachmentRepository;
     private final ProjectProfileRepository projectProfileRepository;
     private final EnvironmentEntryRepository environmentEntryRepository;
+    private final TaskPluginRepository taskPluginRepository;
     private final RunSettlementService settlement;
     private final AgentExecutor agentExecutor;
     private final Duration timeout;
@@ -82,6 +85,7 @@ public class TaskRunService {
                           TaskAttachmentRepository attachmentRepository,
                           ProjectProfileRepository projectProfileRepository,
                           EnvironmentEntryRepository environmentEntryRepository,
+                          TaskPluginRepository taskPluginRepository,
                           RunSettlementService settlement,
                           AgentExecutor agentExecutor,
                           Duration timeout) {
@@ -91,6 +95,7 @@ public class TaskRunService {
         this.attachmentRepository = attachmentRepository;
         this.projectProfileRepository = projectProfileRepository;
         this.environmentEntryRepository = environmentEntryRepository;
+        this.taskPluginRepository = taskPluginRepository;
         this.settlement = settlement;
         this.agentExecutor = agentExecutor;
         this.timeout = timeout;
@@ -124,6 +129,10 @@ public class TaskRunService {
         TaskRun run = TaskRun.start(taskId, task.getAttemptCount(), branch);
         taskRunRepository.save(run);
         EventRecorder recorder = new EventRecorder(runEventRepository, run.getId());
+        PluginContext plugins = PluginContext.from(taskPluginRepository.findByTask(taskId));
+        if (!plugins.isEmpty()) {
+            recorder.record("platform.plugins", plugins.auditPayload());
+        }
 
         String threadId = task.getCodexThreadId().orElse(null);
         String prompt = settlement.instructionFor(task, previous);
@@ -132,7 +141,7 @@ public class TaskRunService {
                 .toList();
         EnvironmentContext environment = EnvironmentContext.resolve(
                 environmentEntryRepository.findApplicableTo(project.id()));
-        return new Execution(task, project, run, recorder, threadId, prompt, images, environment);
+        return new Execution(task, project, run, recorder, threadId, prompt, images, plugins, environment);
     }
 
     private TaskRun executeRounds(Execution execution) {
@@ -151,7 +160,7 @@ public class TaskRunService {
                 new ExecRequest(
                         execution.task.getProjectId(),
                         execution.project.path(),
-                        execution.prompt + execution.environment.promptSection(),
+                        execution.prompt + execution.plugins.promptSection() + execution.environment.promptSection(),
                         execution.threadId,
                         timeout,
                         execution.images,
@@ -252,6 +261,7 @@ public class TaskRunService {
         private final EventRecorder recorder;
         /** 任务附件。每次尝试开局读一次就固定下来：跑的过程中没人能再往这个任务上贴图。 */
         private final List<String> images;
+        private final PluginContext plugins;
         private final EnvironmentContext environment;
         private String threadId;
         private String prompt;
@@ -263,6 +273,7 @@ public class TaskRunService {
                           String threadId,
                           String prompt,
                           List<String> images,
+                          PluginContext plugins,
                           EnvironmentContext environment) {
             this.task = task;
             this.project = project;
@@ -271,6 +282,7 @@ public class TaskRunService {
             this.threadId = threadId;
             this.prompt = prompt;
             this.images = images;
+            this.plugins = plugins;
             this.environment = environment;
         }
     }

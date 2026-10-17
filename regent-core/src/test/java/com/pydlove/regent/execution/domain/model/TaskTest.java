@@ -360,11 +360,14 @@ class TaskTest {
     class Deletion {
 
         @Test
-        void 只有待执行或排队中的任务可以删除() {
+        void 待执行排队中或已终止的任务可以删除() {
             assertDoesNotThrow(() -> pendingTask().requireDeletable());
             Task queued = pendingTask();
             queued.queue();
             assertDoesNotThrow(queued::requireDeletable);
+            Task cancelled = pendingTask();
+            cancelled.cancel();
+            assertDoesNotThrow(cancelled::requireDeletable);
 
             Task running = runningTask();
             Task blocked = blockedTask();
@@ -372,14 +375,11 @@ class TaskTest {
             failed.fail();
             Task done = runningTask();
             done.complete();
-            Task cancelled = pendingTask();
-            cancelled.cancel();
 
             assertThrows(DomainException.class, running::requireDeletable);
             assertThrows(DomainException.class, blocked::requireDeletable);
             assertThrows(DomainException.class, failed::requireDeletable);
             assertThrows(DomainException.class, done::requireDeletable);
-            assertThrows(DomainException.class, cancelled::requireDeletable);
         }
     }
 

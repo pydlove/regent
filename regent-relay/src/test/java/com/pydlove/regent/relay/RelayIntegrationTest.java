@@ -34,10 +34,13 @@ class RelayIntegrationTest {
             localRequest.set(exchange.getRequestMethod() + " "
                 + exchange.getRequestURI()
                 + " " + exchange.getRequestHeaders().getFirst("Content-Type")
+                + " " + exchange.getRequestHeaders().getFirst("Cookie")
                 + " " + body);
             byte[] response = "本地响应".getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
             exchange.getResponseHeaders().set("Cache-Control", "no-store");
+            exchange.getResponseHeaders().add("Set-Cookie", "regent_session=from-local; Path=/; HttpOnly");
+            exchange.getResponseHeaders().add("Set-Cookie", "theme=light; Path=/");
             exchange.sendResponseHeaders(201, response.length);
             exchange.getResponseBody().write(response);
             exchange.close();
@@ -63,6 +66,7 @@ class RelayIntegrationTest {
                     URI.create("http://127.0.0.1:" + relay.port() + "/api/echo?source=phone"))
                 .header(RelayHeaders.REQUEST_MARKER_NAME, "1")
                 .header("Content-Type", "text/plain; charset=UTF-8")
+                .header("Cookie", "regent_session=from-browser; theme=dark")
                 .POST(HttpRequest.BodyPublishers.ofString("手机请求"))
                 .build();
             HttpResponse<String> response = HttpClient.newHttpClient().send(
@@ -73,7 +77,12 @@ class RelayIntegrationTest {
             assertEquals(201, response.statusCode());
             assertEquals("本地响应", response.body());
             assertEquals("no-store", response.headers().firstValue("cache-control").orElseThrow());
+            assertEquals(java.util.List.of(
+                "regent_session=from-local; Path=/; HttpOnly",
+                "theme=light; Path=/"
+            ), response.headers().allValues("set-cookie"));
             assertTrue(localRequest.get().contains("POST /api/echo?source=phone"));
+            assertTrue(localRequest.get().contains("regent_session=from-browser; theme=dark"));
             assertTrue(localRequest.get().contains("手机请求"));
         } finally {
             local.stop(0);

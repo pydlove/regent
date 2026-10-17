@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { computed } from 'vue'
 
 import Badge from '@/components/ui/badge/Badge.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
@@ -10,20 +9,10 @@ type SidebarItem = { label: string; to: string; icon?: Component; badge?: string
 const props = withDefaults(
   defineProps<{
     items: SidebarItem[]
-    /**
-     * 底部展示类入口（样式基准页这类）。用 mt-auto 压到侧边栏最底部、与业务项隔一条
-     * 发丝线：它不参与业务流程，位置就不该和业务项混在一起。
-     */
-    footerItems?: SidebarItem[]
     collapsed?: boolean
   }>(),
-  { footerItems: () => [], collapsed: false },
+  { collapsed: false },
 )
-
-const entries = computed(() => [
-  ...props.items.map((item) => ({ ...item, spacerBefore: false })),
-  ...props.footerItems.map((item, index) => ({ ...item, spacerBefore: index === 0 })),
-])
 </script>
 
 <template>
@@ -41,11 +30,7 @@ const entries = computed(() => [
     ]"
   >
     <nav class="scroll-area flex h-full flex-col gap-px overflow-y-auto p-2">
-      <template v-for="item in entries" :key="item.to">
-        <!-- 先撑开剩余空间把展示类入口压到底，再用一条发丝线与业务项分开 -->
-        <div v-if="item.spacerBefore" class="mt-auto pt-3">
-          <div class="h-px bg-separator-soft" />
-        </div>
+      <template v-for="item in props.items" :key="item.to">
         <RouterLink
           :to="item.to"
           class="group flex h-row items-center gap-2 rounded-[6px] px-2 text-body text-label transition-colors duration-[120ms] ease-apple hover:bg-hover aria-[current=page]:bg-accent aria-[current=page]:text-white"

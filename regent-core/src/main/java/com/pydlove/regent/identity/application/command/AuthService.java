@@ -2,7 +2,8 @@ package com.pydlove.regent.identity.application.command;
 
 import com.pydlove.regent.identity.application.query.AuthSessionGrant;
 import com.pydlove.regent.identity.application.query.AuthenticatedUser;
-import com.pydlove.regent.identity.domain.model.AuthPrincipal;
+import com.pydlove.regent.identity.application.query.CurrentAuthSession;
+import com.pydlove.regent.identity.domain.model.ActiveAuthSession;
 import com.pydlove.regent.identity.domain.model.AuthSession;
 import com.pydlove.regent.identity.domain.model.Email;
 import com.pydlove.regent.identity.domain.model.PasswordHash;
@@ -37,6 +38,7 @@ public class AuthService {
     private final EmailVerificationService emailVerificationService;
     private final Clock clock;
     private final Duration sessionTtl;
+    private final Duration rememberedSessionTtl;
 
     public AuthService(UserRepository userRepository,
                        AuthSessionRepository sessionRepository,
@@ -44,7 +46,8 @@ public class AuthService {
                        SessionTokenCodec tokenCodec,
                        EmailVerificationService emailVerificationService,
                        Clock clock,
-                       Duration sessionTtl) {
+                       Duration sessionTtl,
+                       Duration rememberedSessionTtl) {
         this.userRepository = Objects.requireNonNull(userRepository, "用户仓储");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "会话仓储");
         this.passwordHasher = Objects.requireNonNull(passwordHasher, "密码编码器");
@@ -53,8 +56,15 @@ public class AuthService {
                 emailVerificationService, "邮箱验证码服务");
         this.clock = Objects.requireNonNull(clock, "时钟");
         this.sessionTtl = Objects.requireNonNull(sessionTtl, "会话有效期");
+        this.rememberedSessionTtl = Objects.requireNonNull(rememberedSessionTtl, "保持登录有效期");
         if (sessionTtl.isZero() || sessionTtl.isNegative()) {
             throw new DomainException("会话有效期必须大于零");
+        }
+        if (rememberedSessionTtl.isZero() || rememberedSessionTtl.isNegative()) {
+            throw new DomainException("保持登录有效期必须大于零");
+        }
+        if (rememberedSessionTtl.compareTo(sessionTtl) < 0) {
+            throw new DomainException("保持登录有效期不能短于普通会话有效期");
         }
     }
 
@@ -103,20 +113,44 @@ public class AuthService {
         }
 
         Instant now = clock.instant();
-        Instant expiresAt = now.plus(sessionTtl);
+        Duration ttl = command.rememberMe() ? rememberedSessionTtl : sessionTtl;
+        Instant expiresAt = now.plus(ttl);
         String rawToken = tokenCodec.generateRawToken();
         AuthSession session = AuthSession.open(
-                user.getId(), tokenCodec.hash(rawToken), now, expiresAt);
+                user.getId(), tokenCodec.hash(rawToken), now, expiresAt, command.rememberMe());
         sessionRepository.save(session);
-        return new AuthSessionGrant(view(user), rawToken, expiresAt);
+        return new AuthSessionGrant(view(user), rawToken, expiresAt, command.rememberMe());
     }
 
     public AuthenticatedUser currentUser(String rawToken) {
-        return authenticate(rawToken)
+        ActiveAuthSession active = findActiveSession(rawToken, clock.instant())
                 .orElseThrow(() -> new AuthenticationException("登录已失效，请重新登录"));
+        User user = userRepository.findById(active.principal().userId())
+                .orElseThrow(() -> new AuthenticationException("登录已失效，请重新登录"));
+        return view(user);
+    }
+
+    public CurrentAuthSession currentSession(String rawToken) {
+        Instant now = clock.instant();
+        ActiveAuthSession active = findActiveSession(rawToken, now)
+                .orElseThrow(() -> new AuthenticationException("登录已失效，请重新登录"));
+        AuthSession session = active.session();
+        if (session.renewIfNeeded(now, rememberedSessionTtl)) {
+            sessionRepository.update(session);
+        }
+        User user = userRepository.findById(active.principal().userId())
+                .orElseThrow(() -> new AuthenticationException("登录已失效，请重新登录"));
+        return new CurrentAuthSession(
+                view(user), session.getExpiresAt(), session.isRemembered());
     }
 
     public Optional<AuthenticatedUser> authenticate(String rawToken) {
+        return findActiveSession(rawToken, clock.instant())
+                .flatMap(active -> userRepository.findById(active.principal().userId())
+                        .map(AuthenticatedUser::from));
+    }
+
+    private Optional<ActiveAuthSession> findActiveSession(String rawToken, Instant now) {
         if (rawToken == null || rawToken.isBlank() || rawToken.length() > MAX_SESSION_TOKEN_LENGTH) {
             return Optional.empty();
         }
@@ -126,8 +160,7 @@ public class AuthService {
         } catch (DomainException ignored) {
             return Optional.empty();
         }
-        return sessionRepository.findActivePrincipal(tokenHash, clock.instant())
-                .map(AuthService::view);
+        return sessionRepository.findActive(tokenHash, now);
     }
 
     public void logout(String rawToken) {
@@ -142,17 +175,7 @@ public class AuthService {
     }
 
     private static AuthenticatedUser view(User user) {
-        return new AuthenticatedUser(
-                user.getId().value(),
-                user.getUsername().value(),
-                user.getEmail() == null ? null : user.getEmail().value());
-    }
-
-    private static AuthenticatedUser view(AuthPrincipal principal) {
-        return new AuthenticatedUser(
-                principal.userId().value(),
-                principal.username().value(),
-                principal.email() == null ? null : principal.email().value());
+        return AuthenticatedUser.from(user);
     }
 
     private static AuthenticationException invalidCredentials() {

@@ -103,6 +103,10 @@ curl -s -X POST $BASE/api/agent/runs/12/report -H 'Content-Type: application/jso
   "instruction": "……（这就是你要做的事，末尾已经带上平台的上报约定）",
   "sessionId": "my-session-1",
   "images": [{ "id": 3, "filename": "shot.png", "path": "/Users/panyong/.regent/attachments/….png" }],
+  "plugins": [
+    { "id": 8, "name": "Kafka 读取组件", "revision": 3,
+      "filename": "KafkaReader.java", "contentHash": "…", "content": "class KafkaReader { … }" }
+  ],
   "environment": [
     { "key": "DB_HOST", "value": "db.internal", "scope": "PROJECT",
       "tags": ["数据库"], "description": "项目测试库" },
@@ -117,6 +121,8 @@ curl -s -X POST $BASE/api/agent/runs/12/report -H 'Content-Type: application/jso
 ```
 
 拿到之后：**在 `workdir` 里、`branch` 这条分支上**干活；`images` 是用户贴的图，按路径看。
+`plugins` 是任务绑定的固定版本能力包，完整内容只在 `plugins[].content` 出现一次。优先复用，
+不要重新生成已有实现；`revision` 与 `contentHash` 用于说明你实际使用了哪一版。
 `environment` 是平台按项目合并后的有效环境字段：同名键由项目级覆盖全局级。先把它注入你的执行进程，
 再运行构建、测试或数据库访问；不要把值回显到日志、`summary` 或上报正文里。
 `decisionThreshold` 是项目级阈值 —— 生效等级高于它就必须挂起等人。

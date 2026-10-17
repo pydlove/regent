@@ -28,7 +28,7 @@ src/
 ├── composables/          # useTheme（三态主题）、useOverlayScrollbar、useToast、usePagination
 ├── stores/               # useTaskStore / useBugStore：状态迁移的唯一发生地
 ├── types/                # 领域词汇（与 ARCHITECTURE.md 逐字一致）+ can* 守卫
-├── views/                # BaselineView 是样式基准页；任务 / 决策 / Bug 单三个真实页面
+├── views/                # BaselineView 供设置页的样式基准分区复用；其余为业务页面
 └── router/
 ```
 
@@ -91,7 +91,8 @@ src/
   或右对齐，走等宽数字。
 
 字体栈与图标尺寸都是 CDP 实测后定下来的，改之前先看 `FRONTEND.md` 3.1 与 3.3.1；
-基准页 `/` 上有「字体探针」「图标尺寸」「图标描边」「字重与数字」四个区块可以当场比对。
+设置页 `/settings/baseline` 上有「字体探针」「图标尺寸」「图标描边」「字重与数字」
+四个区块可以当场比对；旧地址 `/baseline` 会重定向到该分区。
 
 ## 环境备注
 

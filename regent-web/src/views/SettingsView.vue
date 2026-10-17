@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { Download, Gauge, Palette, RadioTower, RefreshCw } from '@lucide/vue'
+import {
+  CircleUserRound,
+  Download,
+  Gauge,
+  LayoutPanelLeft,
+  LogOut,
+  Palette,
+  RadioTower,
+  RefreshCw,
+} from '@lucide/vue'
 import type { Component } from 'vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -12,6 +21,7 @@ import {
   updateExecutionSettings,
   updateRelaySettings,
 } from '@/api/settings'
+import Avatar from '@/components/ui/avatar/Avatar.vue'
 import Button from '@/components/ui/button/Button.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
@@ -22,9 +32,11 @@ import Switch from '@/components/ui/switch/Switch.vue'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
 import { useTheme, type ThemePreference } from '@/composables/useTheme'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/useAuthStore'
 import type { RelayInstallResult, RelaySettings, RelayState, RelayStatus } from '@/types/api'
+import BaselineView from '@/views/BaselineView.vue'
 
-type SettingsSection = 'appearance' | 'execution' | 'relay'
+type SettingsSection = 'appearance' | 'baseline' | 'execution' | 'relay' | 'account'
 type SectionItem = {
   id: SettingsSection
   label: string
@@ -34,13 +46,16 @@ type SectionItem = {
 
 const sections: SectionItem[] = [
   { id: 'appearance', label: '外观', icon: Palette, tone: 'bg-accent' },
+  { id: 'baseline', label: '样式基准', icon: LayoutPanelLeft, tone: 'bg-accent' },
   { id: 'execution', label: '执行', icon: Gauge, tone: 'bg-warning' },
   { id: 'relay', label: '中继', icon: RadioTower, tone: 'bg-success' },
+  { id: 'account', label: '账户', icon: CircleUserRound, tone: 'bg-neutral' },
 ]
 
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const auth = useAuthStore()
 const { preference, setTheme } = useTheme()
 
 const sectionParam = computed(() => {
@@ -66,6 +81,19 @@ const themeOptions = [
   { value: 'dark', label: '深色' },
   { value: 'system', label: '跟随系统' },
 ]
+
+const loggingOut = ref(false)
+
+async function logout() {
+  if (loggingOut.value) return
+  loggingOut.value = true
+  try {
+    await auth.logout()
+    await router.push({ name: 'login' })
+  } finally {
+    loggingOut.value = false
+  }
+}
 
 const executionLimit = ref('1')
 const savedExecutionLimit = ref('1')
@@ -145,7 +173,6 @@ const relayError = ref<string | null>(null)
 const relayInstallResult = ref<RelayInstallResult | null>(null)
 
 const relayPagePaths = new Set([
-  '/baseline',
   '/dashboard',
   '/tasks',
   '/decisions',
@@ -488,7 +515,8 @@ onBeforeUnmount(() => {
     </aside>
 
     <section class="scroll-area min-w-0 flex-1 overflow-y-auto">
-      <div class="mx-auto w-full max-w-[720px] px-8 py-7 max-sm:px-5 max-sm:py-6">
+      <BaselineView v-if="activeSection === 'baseline'" />
+      <div v-else class="mx-auto w-full max-w-[720px] px-8 py-7 max-sm:px-5 max-sm:py-6">
         <template v-if="activeSection === 'appearance'">
           <header class="mb-6">
             <h1 class="text-metric font-emphasis text-label">外观</h1>
@@ -532,16 +560,19 @@ onBeforeUnmount(() => {
                 <div class="mt-0.5 text-caption text-label-secondary">范围 1–64</div>
               </div>
               <div class="flex items-center gap-2">
-                <Input
-                  v-model="executionLimit"
-                  type="number"
-                  size="lg"
-                  placeholder="1"
-                  :disabled="executionLoading || executionSaving"
-                  :invalid="!executionValid"
-                  class="w-24"
-                />
-                <span class="text-caption text-label-secondary">个任务</span>
+                <div class="w-24 shrink-0">
+                  <Input
+                    v-model="executionLimit"
+                    type="number"
+                    size="lg"
+                    placeholder="1"
+                    :disabled="executionLoading || executionSaving"
+                    :invalid="!executionValid"
+                  />
+                </div>
+                <span class="shrink-0 whitespace-nowrap text-caption text-label-secondary">
+                  个任务
+                </span>
               </div>
             </div>
             <div class="h-px bg-separator-soft" />
@@ -572,7 +603,7 @@ onBeforeUnmount(() => {
           </div>
         </template>
 
-        <template v-else>
+        <template v-else-if="activeSection === 'relay'">
           <header class="mb-6">
             <h1 class="text-metric font-emphasis text-label">中继</h1>
             <p class="mt-1 text-body text-label-secondary">
@@ -814,6 +845,51 @@ onBeforeUnmount(() => {
             >
               {{ relaySaving ? '保存中…' : '保存并检测' }}
             </Button>
+          </div>
+        </template>
+
+        <template v-else>
+          <header class="mb-6">
+            <h1 class="text-metric font-emphasis text-label">账户</h1>
+            <p class="mt-1 text-body text-label-secondary">查看当前登录账户并管理会话。</p>
+          </header>
+
+          <div class="overflow-hidden rounded-panel bg-content shadow-panel">
+            <div class="flex items-center gap-3 px-4 py-3">
+              <Avatar
+                :src="auth.user?.avatarUrl ?? ''"
+                :name="auth.user?.displayName || auth.user?.username || 'U'"
+                size="profile"
+              />
+              <div class="min-w-0">
+                <div class="truncate text-body font-emphasis text-label">
+                  {{ auth.user?.displayName || auth.user?.username }}
+                </div>
+                <div class="mt-0.5 truncate text-caption text-label-secondary">
+                  {{ auth.user?.email ?? (auth.user ? `@${auth.user.username}` : '') }}
+                </div>
+              </div>
+            </div>
+            <div class="h-px bg-separator-soft" />
+            <div
+              class="flex items-center gap-6 px-4 py-3 max-sm:flex-col max-sm:items-start max-sm:gap-3"
+            >
+              <div class="min-w-0">
+                <div class="text-body font-emphasis text-label">退出登录</div>
+                <div class="mt-0.5 text-caption text-label-secondary">
+                  退出当前账户，再次访问时需要重新登录。
+                </div>
+              </div>
+              <Button
+                size="lg"
+                class="ml-auto max-sm:ml-0"
+                :disabled="loggingOut"
+                @click="logout"
+              >
+                <Icon :as="LogOut" size="inline" />
+                {{ loggingOut ? '正在退出…' : '退出登录' }}
+              </Button>
+            </div>
           </div>
         </template>
       </div>

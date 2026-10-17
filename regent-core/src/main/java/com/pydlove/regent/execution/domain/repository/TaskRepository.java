@@ -18,6 +18,14 @@ public interface TaskRepository {
 
     Optional<Task> findById(TaskId id);
 
+    /**
+     * 在事务内锁住任务行再判断状态。
+     *
+     * <p>跨聚合编排（例如改插件绑定）不能只相信事务外的状态快照：调度器可能在这两步之间
+     * 把任务改成 RUNNING。锁住同一行后，绑定与派发只能有一个先完成，后到者读到确定的新状态。
+     */
+    Optional<Task> findByIdForUpdate(TaskId id);
+
     /** 新增或整体更新。新增时由实现回填数据库生成的主键（{@code Task.assignIdentity}）。 */
     void save(Task task);
 
@@ -30,9 +38,10 @@ public interface TaskRepository {
     void updateEditable(Task task);
 
     /**
-     * 逻辑删除待执行任务。
+     * 逻辑删除待执行、排队中或已终止的任务。
      *
-     * <p>实现必须在 SQL 条件里再次约束 {@code deleted = 0 AND status IN ('PENDING', 'QUEUED')}：
+     * <p>实现必须在 SQL 条件里再次约束
+     * {@code deleted = 0 AND status IN ('PENDING', 'QUEUED', 'CANCELLED')}：
      * 应用层完成守卫后，任务仍可能被调度器并发派发，不能把已经起跑的任务误删。
      */
     void delete(TaskId id);

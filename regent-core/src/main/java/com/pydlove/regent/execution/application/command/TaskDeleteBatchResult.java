@@ -8,7 +8,7 @@ import java.util.List;
  * 批量删除结果。
  *
  * <p>允许部分成功：某个任务在确认期间已被派发或状态已经变化时，只报告该项失败，
- * 不撤销同一批里已经删除成功的待执行任务。
+ * 不撤销同一批里已经删除成功的任务。
  */
 public record TaskDeleteBatchResult(
         List<TaskId> deletedTaskIds,

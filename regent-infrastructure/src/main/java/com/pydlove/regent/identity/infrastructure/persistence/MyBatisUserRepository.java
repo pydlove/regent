@@ -43,6 +43,12 @@ public class MyBatisUserRepository implements UserRepository {
     }
 
     @Override
+    public Optional<User> findById(UserId id) {
+        return Optional.ofNullable(mapper.findById(id.value()))
+                .map(UserDataMapper::toDomain);
+    }
+
+    @Override
     public void save(User user) {
         UserData data = UserDataMapper.toData(user);
         try {
@@ -53,5 +59,15 @@ public class MyBatisUserRepository implements UserRepository {
                     exception);
         }
         user.assignIdentity(UserId.of(data.getId()));
+    }
+
+    @Override
+    public void update(User user) {
+        if (user.getId() == null) {
+            throw new DomainException("未持久化的用户不能更新");
+        }
+        if (mapper.update(UserDataMapper.toData(user)) != 1) {
+            throw new DomainException("用户不存在或已被删除：" + user.getId().value());
+        }
     }
 }

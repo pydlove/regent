@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   AlertTriangle,
+  Blocks,
   Bot,
   ChevronLeft,
   ImagePlus,
@@ -19,6 +20,7 @@ import { useRoute } from 'vue-router'
 import { ACCEPTED_IMAGE_TYPES, listTaskAttachments, uploadTaskAttachment } from '@/api/attachments'
 import { getDecision } from '@/api/decisions'
 import { ApiError } from '@/api/http'
+import { listTaskPlugins } from '@/api/plugins'
 import DecisionLevelBadge from '@/components/business/DecisionLevelBadge.vue'
 import DecisionReviewDialog from '@/components/business/DecisionReviewDialog.vue'
 import ImageAttachmentGrid from '@/components/business/ImageAttachmentGrid.vue'
@@ -27,6 +29,7 @@ import NewTaskDialog from '@/components/business/NewTaskDialog.vue'
 import RunDetailDialog from '@/components/business/RunDetailDialog.vue'
 import RunStatusBadge from '@/components/business/RunStatusBadge.vue'
 import TaskEditDialog from '@/components/business/TaskEditDialog.vue'
+import TaskPluginDialog from '@/components/business/TaskPluginDialog.vue'
 import TaskStatusBadge from '@/components/business/TaskStatusBadge.vue'
 import WorkItemSwitcher from '@/components/business/WorkItemSwitcher.vue'
 import Badge from '@/components/ui/badge/Badge.vue'
@@ -52,8 +55,10 @@ import type {
   TaskAttachment,
   TaskBatchDeleteFailure,
   TaskBatchDispatchFailure,
+  TaskPluginBinding,
 } from '@/types/api'
 import {
+  canBatchDispatch,
   canCancel,
   canDelete,
   canDispatch,
@@ -162,12 +167,17 @@ const openEdit = () => {
 }
 
 /*
- * 批量选择只覆盖当前页允许删除的待执行或排队任务。翻页或筛选后清空，避免用户看不到的行仍被选中；
+ * 批量选择只覆盖当前页允许删除的待执行、排队中或已终止任务。翻页或筛选后清空，避免用户看不到的行仍被选中；
  * 派发或删除结束后成功项移除，失败项保留，下一次点击可以直接重试同一批失败任务。
  */
 const selectedIds = ref<Set<number>>(new Set())
 const selectableRows = computed(() => store.items.filter((row) => canDelete(row.status)))
 const selectedCount = computed(() => selectedIds.value.size)
+const dispatchableSelectedIds = computed(() =>
+  store.items
+    .filter((row) => selectedIds.value.has(row.id) && canBatchDispatch(row.status))
+    .map((row) => row.id),
+)
 const selectionState = computed<boolean | 'indeterminate'>(() => {
   if (selectedCount.value === 0 || selectableRows.value.length === 0) return false
   return selectableRows.value.every((row) => selectedIds.value.has(row.id))
@@ -314,7 +324,7 @@ const batchFailureDescription = (
 }
 
 const dispatchSelected = async () => {
-  const ids = [...selectedIds.value]
+  const ids = dispatchableSelectedIds.value
   if (ids.length === 0 || dispatchingSelected.value) return
 
   const selectedTaskId = selected.value?.id ?? null
@@ -359,7 +369,7 @@ const deleteDialogTitle = computed(() =>
 const deleteDialogDescription = computed(() =>
   deleteTargetIds.value.length === 1
     ? '任务会从平台列表中移除，无法在平台上恢复。'
-    : '选中的待执行或排队任务会从平台列表中移除，无法在平台上恢复。',
+    : '选中的待执行、排队中或已终止任务会从平台列表中移除，无法在平台上恢复。',
 )
 
 const requestDelete = (ids: number[]) => {
@@ -475,6 +485,8 @@ const onTaskCreated = async (payload: { id: number; title: string }) => {
  * 筛选一起失效重算，而那几处跟附件没关系。
  */
 const attachments = ref<TaskAttachment[]>([])
+const taskPlugins = ref<TaskPluginBinding[]>([])
+const pluginDialogOpen = ref(false)
 const viewerOpen = ref(false)
 const viewerId = ref<number | null>(null)
 
@@ -485,6 +497,27 @@ const loadAttachments = async (id: number) => {
     // 附件是附加信息：取不到就当作没有，不拿一条红字把整个详情面板顶掉
     attachments.value = []
   }
+}
+
+const loadTaskPlugins = async (id: number) => {
+  try {
+    taskPlugins.value = await listTaskPlugins(id)
+  } catch {
+    taskPlugins.value = []
+  }
+}
+
+const canEditPlugins = computed(
+  () =>
+    selected.value !== null &&
+    (selected.value.status === 'PENDING' ||
+      selected.value.status === 'QUEUED' ||
+      selected.value.status === 'FAILED' ||
+      selected.value.status === 'CANCELLED'),
+)
+
+const onPluginsSaved = (bindings: TaskPluginBinding[]) => {
+  taskPlugins.value = bindings
 }
 
 const openViewer = (attachment: ImageAttachment) => {
@@ -577,9 +610,12 @@ watch(
     viewerOpen.value = false
     viewerId.value = null
     attachments.value = []
+    taskPlugins.value = []
+    pluginDialogOpen.value = false
     if (id !== undefined) {
       void runStore.load(id)
       void loadAttachments(id)
+      void loadTaskPlugins(id)
     }
   },
   { immediate: true },
@@ -644,7 +680,7 @@ onUnmounted(() => {
         <Select v-model="statusFilter" :items="statusOptions" size="lg" class="w-32 lg:ml-2" />
         <Select v-model="levelFilter" :items="levelOptions" size="lg" class="w-36" />
         <div class="ml-auto flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto">
-          <Tooltip v-if="selectedCount > 0" :content="dispatchHint">
+          <Tooltip v-if="dispatchableSelectedIds.length > 0" :content="dispatchHint">
             <Button
               variant="primary"
               size="lg"
@@ -652,7 +688,11 @@ onUnmounted(() => {
               @click="dispatchSelected"
             >
               <Icon :as="Play" size="inline" />
-              {{ dispatchingSelected ? '派发中…' : `批量派发给 codex ${selectedCount} 个` }}
+              {{
+                dispatchingSelected
+                  ? '派发中…'
+                  : `批量派发给 codex ${dispatchableSelectedIds.length} 个`
+              }}
             </Button>
           </Tooltip>
           <Button
@@ -706,7 +746,7 @@ onUnmounted(() => {
               v-if="column.key === 'selection'"
               :model-value="selectionState"
               :disabled="selectableRows.length === 0"
-              aria-label="选择当前页全部待执行任务"
+              aria-label="选择当前页全部可删除任务"
               @update:model-value="toggleAllSelectable"
             />
             <span v-else>{{ column.label }}</span>
@@ -879,6 +919,38 @@ onUnmounted(() => {
             </dd>
           </div>
         </dl>
+
+        <div class="mt-4 border-t border-separator pt-3">
+          <div class="flex items-center gap-2">
+            <p class="text-caption font-emphasis text-label-secondary">插件</p>
+            <span v-if="taskPlugins.length > 0" class="tnum text-caption text-label-tertiary">
+              {{ taskPlugins.length }}
+            </span>
+            <Tooltip :content="canEditPlugins ? '选择可复用插件' : '执行开始后不能改绑'">
+              <IconButton
+                label="管理任务插件"
+                size="sm"
+                class="ml-auto"
+                @click="pluginDialogOpen = true"
+              >
+                <Icon :as="Blocks" size="regular" />
+              </IconButton>
+            </Tooltip>
+          </div>
+          <div v-if="taskPlugins.length > 0" class="mt-2 flex flex-wrap gap-1.5">
+            <Badge
+              v-for="plugin in taskPlugins"
+              :key="plugin.pluginId"
+              :tone="plugin.enabled ? 'accent' : 'warning'"
+              :title="plugin.filename"
+            >
+              {{ plugin.name }} · v{{ plugin.revision }}
+            </Badge>
+          </div>
+          <p v-else class="mt-2 text-caption text-label-tertiary">
+            没有绑定插件。已写好的组件可以固定版本复用，不必每次重新生成。
+          </p>
+        </div>
 
         <!-- 图片不只是留档：派发时它们会跟着指令一起交给 codex，所以放在详情里而不是另开一页 -->
         <div class="mt-4 border-t border-separator pt-3">
@@ -1060,6 +1132,14 @@ onUnmounted(() => {
       :attachments="attachments"
       @uploaded="onUploaded({ id: selected?.id ?? 0 })"
       @preview="openViewer"
+    />
+
+    <TaskPluginDialog
+      v-if="selected"
+      v-model:open="pluginDialogOpen"
+      :task-id="selected.id"
+      :editable="canEditPlugins"
+      @saved="onPluginsSaved"
     />
 
     <ImageAttachmentsDialog

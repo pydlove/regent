@@ -73,7 +73,7 @@ export const retryTask = (id: number) => post<TaskDetail>(`/tasks/${id}/retry`)
 
 export const cancelTask = (id: number) => post<TaskDetail>(`/tasks/${id}/cancel`)
 
-/** 删除待执行任务。其他状态由后端领域守卫拒绝。 */
+/** 删除待执行、排队中或已终止任务。其他状态由后端领域守卫拒绝。 */
 export const deleteTask = (id: number) => deleteRequest(`/tasks/${id}`)
 
 /** 批量删除。单个任务失败不会阻断其他任务，结果里逐项返回。 */

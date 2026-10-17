@@ -30,6 +30,9 @@ import com.pydlove.regent.governance.domain.model.DecisionId;
 import com.pydlove.regent.governance.domain.model.DecisionRule;
 import com.pydlove.regent.governance.domain.repository.DecisionRepository;
 import com.pydlove.regent.governance.domain.repository.DecisionRuleRepository;
+import com.pydlove.regent.plugin.domain.model.PluginBinding;
+import com.pydlove.regent.plugin.domain.model.PluginId;
+import com.pydlove.regent.plugin.domain.repository.TaskPluginRepository;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.model.EnvironmentEntry;
 import com.pydlove.regent.project.domain.model.EnvironmentId;
@@ -224,6 +227,11 @@ public final class ExecutionFakes {
         @Override
         public Optional<Task> findById(TaskId id) {
             return Optional.ofNullable(store.get(id.value()));
+        }
+
+        @Override
+        public Optional<Task> findByIdForUpdate(TaskId id) {
+            return findById(id);
         }
 
         @Override
@@ -519,6 +527,37 @@ public final class ExecutionFakes {
         }
     }
 
+    public static final class TaskPlugins implements TaskPluginRepository {
+
+        private final Map<Long, List<PluginBinding>> store = new HashMap<>();
+
+        public void add(TaskId taskId, PluginBinding... bindings) {
+            store.put(taskId.value(), List.of(bindings));
+        }
+
+        @Override
+        public List<PluginBinding> findByTask(TaskId taskId) {
+            return List.copyOf(store.getOrDefault(taskId.value(), List.of()));
+        }
+
+        @Override
+        public void replace(TaskId taskId, List<PluginBinding> bindings) {
+            store.put(taskId.value(), List.copyOf(bindings));
+        }
+
+        public static PluginBinding plugin(long id, String name, int revision, String content) {
+            return new PluginBinding(
+                    PluginId.of(id),
+                    name,
+                    revision,
+                    "capability.txt",
+                    "a".repeat(64),
+                    content,
+                    true,
+                    Instant.parse("2026-10-17T00:00:00Z"));
+        }
+    }
+
     /** 内存存储：不碰磁盘，字节留在 map 里。路径形状照抄本地实现（UUID + 扩展名）。 */
     public static final class AttachmentFiles implements AttachmentStorage {
 
@@ -541,6 +580,11 @@ public final class ExecutionFakes {
                 throw new EntityNotFoundException("附件文件不在了：" + storagePath);
             }
             return content;
+        }
+
+        @Override
+        public void delete(String storagePath) {
+            stored.remove(storagePath);
         }
     }
 

@@ -1,6 +1,8 @@
 package com.pydlove.regent.identity.application.command;
 
 import com.pydlove.regent.identity.application.query.AuthSessionGrant;
+import com.pydlove.regent.identity.application.query.CurrentAuthSession;
+import com.pydlove.regent.identity.domain.model.ActiveAuthSession;
 import com.pydlove.regent.identity.domain.model.AuthPrincipal;
 import com.pydlove.regent.identity.domain.model.AuthSession;
 import com.pydlove.regent.identity.domain.model.AuthSessionId;
@@ -78,7 +80,8 @@ class AuthServiceTest {
                 new FixedTokenCodec(),
                 verification,
                 clock,
-                Duration.ofDays(7));
+                Duration.ofDays(7),
+                Duration.ofDays(180));
     }
 
     @Test
@@ -88,6 +91,7 @@ class AuthServiceTest {
 
         assertEquals("alice_01@example.com", user.email());
         assertEquals("alice_01", user.username());
+        assertEquals("alice_01", user.displayName());
         assertTrue(codes.findActive(Email.of("alice_01@example.com"), NOW).isEmpty());
         assertEquals("encoded:safe-pass-123",
                 users.findByEmail(Email.of("alice_01@example.com")).orElseThrow().getPasswordHash().value());
@@ -168,7 +172,7 @@ class AuthServiceTest {
     void logsInByEmailOrUsernameAndAuthenticatesSession() {
         register("alice@example.com");
 
-        AuthSessionGrant byEmail = service.login(new LoginCommand("ALICE@example.com", "safe-pass-123"));
+        AuthSessionGrant byEmail = service.login(new LoginCommand("ALICE@example.com", "safe-pass-123", false));
         assertEquals("alice", byEmail.user().username());
         assertEquals("alice@example.com", byEmail.user().email());
         assertEquals(NOW.plus(Duration.ofDays(7)), byEmail.expiresAt());
@@ -176,7 +180,7 @@ class AuthServiceTest {
         assertFalse(sessions.saved.getTokenHash().value().contains("raw-token"));
         assertEquals("alice@example.com", service.currentUser("raw-token").email());
 
-        AuthSessionGrant byUsername = service.login(new LoginCommand("ALICE", "safe-pass-123"));
+        AuthSessionGrant byUsername = service.login(new LoginCommand("ALICE", "safe-pass-123", false));
         assertEquals("alice@example.com", byUsername.user().email());
     }
 
@@ -185,7 +189,7 @@ class AuthServiceTest {
     void keepsLegacyUsernameLoginWorking() {
         users.seedLegacy(Username.of("legacy-user"), new PasswordHash("encoded:safe-pass-123"));
 
-        AuthSessionGrant grant = service.login(new LoginCommand("legacy-user", "safe-pass-123"));
+        AuthSessionGrant grant = service.login(new LoginCommand("legacy-user", "safe-pass-123", false));
 
         assertEquals("legacy-user", grant.user().username());
         assertEquals(null, grant.user().email());
@@ -197,9 +201,9 @@ class AuthServiceTest {
         register("alice@example.com");
 
         AuthenticationException unknown = assertThrows(AuthenticationException.class,
-                () -> service.login(new LoginCommand("nobody@example.com", "safe-pass-123")));
+                () -> service.login(new LoginCommand("nobody@example.com", "safe-pass-123", false)));
         AuthenticationException wrong = assertThrows(AuthenticationException.class,
-                () -> service.login(new LoginCommand("alice@example.com", "wrong-pass")));
+                () -> service.login(new LoginCommand("alice@example.com", "wrong-pass", false)));
 
         assertEquals("账号或密码错误", unknown.getMessage());
         assertEquals(unknown.getMessage(), wrong.getMessage());
@@ -209,15 +213,43 @@ class AuthServiceTest {
     @DisplayName("会话到期后认证失败，登出会让令牌立即失效")
     void expiresAndDeletesSessions() {
         register("alice@example.com");
-        service.login(new LoginCommand("alice@example.com", "safe-pass-123"));
+        service.login(new LoginCommand("alice@example.com", "safe-pass-123", false));
 
         clock.instant = NOW.plus(Duration.ofDays(8));
         assertTrue(service.authenticate("raw-token").isEmpty());
 
         clock.instant = NOW.plus(Duration.ofDays(1));
-        service.login(new LoginCommand("alice@example.com", "safe-pass-123"));
+        service.login(new LoginCommand("alice@example.com", "safe-pass-123", false));
         service.logout("raw-token");
         assertTrue(service.authenticate("raw-token").isEmpty());
+    }
+
+    @Test
+    @DisplayName("保持登录会延长会话，并在剩余时间过半后自动顺延")
+    void remembersLoginAndRenewsLongLivedSession() {
+        register("alice@example.com");
+
+        AuthSessionGrant normal = service.login(
+                new LoginCommand("alice@example.com", "safe-pass-123", false));
+        assertFalse(normal.remembered());
+        assertEquals(NOW.plus(Duration.ofDays(7)), normal.expiresAt());
+
+        clock.instant = NOW.plus(Duration.ofDays(4));
+        CurrentAuthSession ordinary = service.currentSession("raw-token");
+        assertFalse(ordinary.remembered());
+        assertEquals(NOW.plus(Duration.ofDays(7)), ordinary.expiresAt());
+        assertEquals(0, sessions.updates);
+
+        AuthSessionGrant remembered = service.login(
+                new LoginCommand("alice@example.com", "safe-pass-123", true));
+        assertTrue(remembered.remembered());
+        assertEquals(clock.instant.plus(Duration.ofDays(180)), remembered.expiresAt());
+
+        clock.instant = NOW.plus(Duration.ofDays(94));
+        CurrentAuthSession renewed = service.currentSession("raw-token");
+        assertTrue(renewed.remembered());
+        assertEquals(clock.instant.plus(Duration.ofDays(180)), renewed.expiresAt());
+        assertEquals(1, sessions.updates);
     }
 
     @Test
@@ -312,6 +344,11 @@ class AuthServiceTest {
         }
 
         @Override
+        public Optional<User> findById(UserId id) {
+            return Optional.ofNullable(byId.get(id.value()));
+        }
+
+        @Override
         public void save(User user) {
             user.assignIdentity(UserId.of(nextId++));
             byUsername.put(user.getUsername().value(), user);
@@ -319,16 +356,29 @@ class AuthServiceTest {
             byId.put(user.getId().value(), user);
         }
 
+        @Override
+        public void update(User user) {
+            byUsername.put(user.getUsername().value(), user);
+            if (user.getEmail() != null) {
+                byEmail.put(user.getEmail().value(), user);
+            }
+            byId.put(user.getId().value(), user);
+        }
+
         private void seedLegacy(Username username, PasswordHash passwordHash) {
             long id = nextId++;
-            User user = User.restore(UserId.of(id), null, username, passwordHash, NOW);
+            User user = User.restore(
+                    UserId.of(id),
+                    null,
+                    username,
+                    com.pydlove.regent.identity.domain.model.DisplayName.of(username.value()),
+                    passwordHash,
+                    null,
+                    NOW);
             byUsername.put(username.value(), user);
             byId.put(id, user);
         }
 
-        private Optional<User> findById(long id) {
-            return Optional.ofNullable(byId.get(id));
-        }
     }
 
     private static final class InMemoryEmailCodeRepository implements EmailVerificationCodeRepository {
@@ -372,6 +422,7 @@ class AuthServiceTest {
 
         private final InMemoryUserRepository users;
         private AuthSession saved;
+        private int updates;
 
         private InMemorySessionRepository(InMemoryUserRepository users) {
             this.users = users;
@@ -384,15 +435,22 @@ class AuthServiceTest {
         }
 
         @Override
-        public Optional<AuthPrincipal> findActivePrincipal(SessionTokenHash tokenHash, Instant now) {
+        public void update(AuthSession session) {
+            saved = session;
+            updates++;
+        }
+
+        @Override
+        public Optional<ActiveAuthSession> findActive(SessionTokenHash tokenHash, Instant now) {
             if (saved == null
                     || !saved.getTokenHash().equals(tokenHash)
                     || !saved.getExpiresAt().isAfter(now)) {
                 return Optional.empty();
             }
-            return users.findById(saved.getUserId().value())
-                    .map(user -> new AuthPrincipal(
-                            user.getId(), user.getUsername(), user.getEmail()));
+            return users.findById(saved.getUserId())
+                    .map(user -> new ActiveAuthSession(
+                            saved,
+                            new AuthPrincipal(user.getId(), user.getUsername(), user.getEmail())));
         }
 
         @Override

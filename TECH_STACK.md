@@ -135,6 +135,7 @@ spring:
 | `environment_entry` | `V9__environment_entry.sql` | 任务环境信息：全局或项目归属、环境键、任意文本值、标签与描述；项目同键值覆盖全局 |
 | `relay_setting` | `V10__relay_settings.sql` | 中继服务器地址与状态监听开关；连接器共享密钥仍只保存在本机部署配置 |
 | `relay_install_settings` | `V11__relay_install_settings.sql` | 中继安装的服务器 IP、SSH 用户名与安装目录；SSH 密码只在安装请求中使用，不落库 |
+| `plugin` / `plugin_version` / `task_plugin` | `V17__plugin_library.sql` | 可复用能力包、不可变内容版本与任务固定版本绑定；插件正文不保存凭据 |
 
 全部用 `utf8mb4`，主键用 `BIGINT`，状态字段用 `VARCHAR` 存枚举名（不用 MySQL `ENUM`，避免改枚举要动表结构）。时间统一 `DATETIME(3)` 存 UTC。
 
@@ -340,8 +341,22 @@ regent:
       enabled: ${REGENT_DISPATCH_ENABLED:true}
       interval-ms: 15000
       batch-size: 3
+  auth:
+    session-ttl: PT168H              # 不保持登录时，服务端会话最多保留七天
+    remembered-session-ttl: PT4320H  # 保持登录 180 天；剩余一半时自动顺延
+    cookie-secure: false             # 生产 HTTPS 环境设为 true
+    email-code:
+      ttl: PT5M                    # 注册验证码有效期
+      resend-cooldown: PT60S       # 同一邮箱重发冷却
+      max-per-day: 10              # 同一邮箱每日发送上限
+      home-url: ${REGENT_PUBLIC_URL:http://127.0.0.1:12580}
 
-# 邮件与推送的配置项待通知通道落地后追加（见 ARCHITECTURE.md 第十一节待办 15）
+spring:
+  mail:                            # 注册验证码 SMTP；密码只放本地配置或环境变量
+    host: ${SPRING_MAIL_HOST:smtp.126.com}
+    port: ${SPRING_MAIL_PORT:465}
+    username: ${SPRING_MAIL_USERNAME:}
+    password: ${SPRING_MAIL_PASSWORD:}
 ```
 
 > **本地 profile 把 `regent.execution.dispatch.enabled` 覆写成 `false`**：一旦按需把演示数据

@@ -3,15 +3,20 @@ import { AvatarFallback, AvatarImage, AvatarRoot } from 'reka-ui'
 import { computed } from 'vue'
 
 const props = withDefaults(
-  defineProps<{ src?: string; name: string; size?: 'sm' | 'regular' | 'lg' }>(),
-  { src: '', size: 'regular' },
+  defineProps<{ src?: string; name?: string; size?: 'sm' | 'regular' | 'lg' | 'profile' }>(),
+  { src: '', name: '', size: 'regular' },
 )
 
 const sizeClass = computed(
-  () => ({ sm: 'size-4 text-[8px]', regular: 'size-5 text-caption', lg: 'size-7 text-body' })[props.size],
+  () => ({
+    sm: 'size-4 text-[8px]',
+    regular: 'size-5 text-caption',
+    lg: 'size-7 text-body',
+    profile: 'size-14 text-body',
+  })[props.size],
 )
 
-const initials = computed(() => props.name.trim().slice(0, 1).toUpperCase())
+const initials = computed(() => (props.name ?? '').trim().slice(0, 1).toUpperCase() || 'U')
 </script>
 
 <template>

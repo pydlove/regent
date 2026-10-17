@@ -4,6 +4,173 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Regent AI 任务执行平台</title>
+    <style>
+      #app-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background:
+          radial-gradient(ellipse 70% 52% at 50% 34%, rgba(0, 122, 255, 0.08), transparent 72%),
+          #f5f5f7;
+        color: rgba(0, 0, 0, 0.88);
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+          "Helvetica Neue", Arial, sans-serif;
+        opacity: 1;
+        animation: regent-loader-in 320ms ease-out both;
+      }
+
+      #app-loader.fade-out {
+        pointer-events: none;
+        animation: regent-loader-out 460ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+      }
+
+      .regent-loader-content {
+        display: flex;
+        width: min(360px, calc(100vw - 48px));
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+
+      .regent-loader-mark {
+        position: relative;
+        display: grid;
+        width: 58px;
+        height: 58px;
+        place-items: center;
+        border-radius: 14px;
+        background: #1d1d1f;
+        box-shadow:
+          0 0 0 0.5px rgba(0, 0, 0, 0.08),
+          0 12px 32px rgba(0, 0, 0, 0.14);
+        color: #fff;
+        animation: regent-loader-rise 640ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+      }
+
+      .regent-loader-mark::before {
+        content: "R";
+        font-size: 28px;
+        font-weight: 600;
+        line-height: 1;
+        transform: translateY(-1px);
+      }
+
+      .regent-loader-mark::after {
+        content: "";
+        position: absolute;
+        right: 8px;
+        bottom: 8px;
+        width: 7px;
+        height: 7px;
+        border-radius: 999px;
+        background: #007aff;
+        box-shadow: 0 0 0 2px #1d1d1f;
+      }
+
+      .regent-loader-name {
+        margin-top: 21px;
+        font-size: 21px;
+        font-weight: 600;
+        line-height: 1.1;
+        letter-spacing: -0.02em;
+        animation: regent-loader-rise 680ms 90ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+      }
+
+      .regent-loader-slogan {
+        margin-top: 13px;
+        min-height: 28px;
+        color: rgba(0, 0, 0, 0.52);
+        font-size: 15px;
+        font-weight: 500;
+        line-height: 1.75;
+        letter-spacing: 0.08em;
+        animation: regent-loader-rise 700ms 180ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+      }
+
+      .regent-loader-progress {
+        position: relative;
+        width: 82px;
+        height: 2px;
+        margin-top: 28px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.08);
+        animation: regent-loader-rise 700ms 260ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+      }
+
+      .regent-loader-progress::after {
+        content: "";
+        position: absolute;
+        inset-block: 0;
+        width: 34%;
+        border-radius: inherit;
+        background: #007aff;
+        animation: regent-loader-progress 1.25s ease-in-out infinite;
+      }
+
+      .dark #app-loader {
+        background:
+          radial-gradient(ellipse 70% 52% at 50% 34%, rgba(10, 132, 255, 0.12), transparent 72%),
+          #161617;
+        color: rgba(255, 255, 255, 0.92);
+      }
+
+      .dark .regent-loader-mark {
+        background: #f5f5f7;
+        box-shadow:
+          0 0 0 0.5px rgba(255, 255, 255, 0.12),
+          0 14px 36px rgba(0, 0, 0, 0.48);
+        color: #1d1d1f;
+      }
+
+      .dark .regent-loader-mark::after {
+        box-shadow: 0 0 0 2px #f5f5f7;
+      }
+
+      .dark .regent-loader-slogan {
+        color: rgba(255, 255, 255, 0.58);
+      }
+
+      .dark .regent-loader-progress {
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      @keyframes regent-loader-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      @keyframes regent-loader-out {
+        from { opacity: 1; transform: scale(1); }
+        to { opacity: 0; transform: scale(1.012); }
+      }
+
+      @keyframes regent-loader-rise {
+        from { opacity: 0; transform: translateY(9px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      @keyframes regent-loader-progress {
+        from { transform: translateX(-105%); }
+        to { transform: translateX(300%); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #app-loader,
+        #app-loader.fade-out,
+        .regent-loader-mark,
+        .regent-loader-name,
+        .regent-loader-slogan,
+        .regent-loader-progress,
+        .regent-loader-progress::after {
+          animation-duration: 1ms;
+          animation-iteration-count: 1;
+        }
+      }
+    </style>
     <script>
       // 必须在样式生效前同步执行，否则深色模式下会先闪一帧白
       ;(function () {
@@ -20,7 +187,85 @@
     </script>
   </head>
   <body>
+    <div id="app-loader" role="status" aria-label="Regent AI 正在启动">
+      <div class="regent-loader-content">
+        <div class="regent-loader-mark" aria-hidden="true"></div>
+        <div class="regent-loader-name">Regent AI</div>
+        <div id="app-loader-slogan" class="regent-loader-slogan"></div>
+        <div class="regent-loader-progress" aria-hidden="true"></div>
+      </div>
+    </div>
     <div id="app"></div>
+    <script>
+      // 启动层先于 Vue 出现，避免刷新时闪一下空白；随机标语让每次启动都有一点新鲜感。
+      ;(function () {
+        var slogans = [
+          '不止会回答，更能把事做完。',
+          '一句需求，一路执行到底。',
+          'AI 负责推进，你负责拍板。',
+          '把复杂任务，交给 AI 慢慢做好。',
+          '从想法到交付，少一点等待。',
+          '让每一次执行，都有迹可循。',
+          '任务自己向前，注意力留给关键决定。',
+          '不是更快的工具，是更可靠的队友。',
+          '人类定方向，AI 跑完全程。',
+          '你提需求，AI 接力。',
+        ]
+
+        var sloganNode = document.getElementById('app-loader-slogan')
+        var next = Math.floor(Math.random() * slogans.length)
+        try {
+          var previous = sessionStorage.getItem('regent-loader-slogan')
+          if (slogans[next] === previous) next = (next + 1) % slogans.length
+          sessionStorage.setItem('regent-loader-slogan', slogans[next])
+        } catch (error) {
+          // 隐私模式下 sessionStorage 可能不可用，随机标语本身不依赖持久化。
+        }
+        if (sloganNode) sloganNode.textContent = slogans[next]
+
+        var loader = document.getElementById('app-loader')
+        if (!loader) return
+
+        var startedAt = performance.now()
+        var minimumVisible = 1200
+        var pageLoaded = document.readyState === 'complete'
+        var appReady = false
+        var hiding = false
+
+        function hideLoader() {
+          if (hiding) return
+          hiding = true
+          loader.classList.add('fade-out')
+          window.setTimeout(function () {
+            loader.remove()
+          }, 500)
+        }
+
+        function hideWhenReady() {
+          if (!pageLoaded || !appReady || hiding) return
+          var remaining = Math.max(0, minimumVisible - (performance.now() - startedAt))
+          window.setTimeout(hideLoader, remaining)
+        }
+
+        window.addEventListener('load', function () {
+          pageLoaded = true
+          hideWhenReady()
+        })
+        window.addEventListener('regent:app-ready', function () {
+          appReady = true
+          hideWhenReady()
+        })
+
+        // 主模块异常时也不能把用户永久困在启动层。
+        window.setTimeout(function () {
+          pageLoaded = true
+          appReady = true
+          hideWhenReady()
+        }, 8000)
+
+        hideWhenReady()
+      })()
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

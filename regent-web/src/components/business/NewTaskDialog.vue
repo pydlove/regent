@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ImagePlus, Plus, TriangleAlert, X } from '@lucide/vue'
+import { Blocks, ImagePlus, Plus, TriangleAlert, X } from '@lucide/vue'
 import { computed, onUnmounted, ref, watch } from 'vue'
 
 import { ACCEPTED_IMAGE_TYPES, MAX_IMAGE_BYTES, uploadTaskAttachment } from '@/api/attachments'
 import { ApiError } from '@/api/http'
+import { bindTaskPlugins, listPlugins } from '@/api/plugins'
 import { createTask } from '@/api/tasks'
 import Button from '@/components/ui/button/Button.vue'
+import Checkbox from '@/components/ui/checkbox/Checkbox.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import DialogField from '@/components/ui/dialog/DialogField.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
@@ -16,6 +18,7 @@ import Select from '@/components/ui/select/Select.vue'
 import { useProjectDialog } from '@/composables/useProjectDialog'
 import { useToast } from '@/composables/useToast'
 import { useTaskStore } from '@/stores/useTaskStore'
+import type { PluginSummary } from '@/types/api'
 import { formatBytes } from '@/utils/format'
 
 /*
@@ -39,9 +42,9 @@ import { formatBytes } from '@/utils/format'
  *    项目比任务长命，把它挂在「新建任务 → 没有项目」这条一次性路径上是不合理的。
  *    只有「一个项目都没有」的死结状态才给一个直达按钮，否则人只能关掉弹框去找入口。
  *
- * 图片的时序：先建任务、再逐张上传。附件接口挂在任务下（`POST /api/tasks/{id}/attachments`），
- * 所以「贴了图但任务没建出来」这种半成品状态在库里不可能出现；代价是提交要多等一轮，
- * 这一轮用瓦片上的进度条表现出来。
+ * 图片的时序：先建任务、关闭弹框，再在后台逐张上传。附件接口挂在任务下
+ * （`POST /api/tasks/{id}/attachments`），所以「贴了图但任务没建出来」这种半成品状态
+ * 在库里不可能出现。上传结果通过 toast 汇报，不让人守着弹框等完整个队列。
  */
 const emit = defineEmits<{
   created: [{ id: number; title: string }]
@@ -107,11 +110,13 @@ const pickedProjectValue = computed({
 
 const prompt = ref('')
 const priority = ref('0')
+const plugins = ref<PluginSummary[]>([])
+const selectedPluginIds = ref(new Set<number>())
+const loadingPlugins = ref(false)
 
-/** editing 可以改；creating 已提交，正在建任务或传图；created 任务已建好、还有图没传上去 */
-type Phase = 'editing' | 'creating' | 'created'
+/** editing 可以改；creating 已提交，正在等创建接口返回 */
+type Phase = 'editing' | 'creating'
 const phase = ref<Phase>('editing')
-const createdTaskId = ref<number | null>(null)
 const error = ref<string | null>(null)
 
 // —— 待上传的图片 ——
@@ -130,21 +135,11 @@ let nextLocalId = 1
 const dragging = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
-const failed = computed(() => pending.value.filter((item) => item.status === 'failed'))
 const pendingBytes = computed(() => pending.value.reduce((sum, item) => sum + item.file.size, 0))
 
 const canSubmit = computed(
   () => phase.value === 'editing' && projectId.value !== null && prompt.value.trim().length > 0,
 )
-
-const uploadLabel = computed(() => {
-  const total = pending.value.length
-  if (createdTaskId.value === null) return '创建中…'
-  const finished = pending.value.filter(
-    (item) => item.status === 'done' || item.status === 'failed',
-  ).length
-  return `上传图片 ${Math.min(finished + 1, total)}/${total}…`
-})
 
 function messageOf(e: unknown): string {
   if (e instanceof ApiError) return e.message
@@ -177,6 +172,17 @@ const loadProjects = async () => {
   }
 }
 
+const loadPlugins = async () => {
+  loadingPlugins.value = true
+  try {
+    plugins.value = (await listPlugins()).filter((plugin) => plugin.enabled)
+  } catch (e) {
+    error.value = messageOf(e)
+  } finally {
+    loadingPlugins.value = false
+  }
+}
+
 // 每次打开都从头开始：上次填了一半的指令留在框里，下次打开容易被当成占位文字直接提交
 watch(open, (value) => {
   if (!value) return
@@ -184,12 +190,24 @@ watch(open, (value) => {
   priority.value = '0'
   error.value = null
   phase.value = 'editing'
-  createdTaskId.value = null
   pickedProjectId.value = null
   dragging.value = false
+  selectedPluginIds.value = new Set()
   releasePreviews()
   void loadProjects()
+  void loadPlugins()
 })
+
+const togglePlugin = (pluginId: number, checked: boolean) => {
+  const next = new Set(selectedPluginIds.value)
+  if (checked && next.size >= 8) {
+    toast.warning('最多绑定 8 个插件', '先移除一个再选择')
+    return
+  }
+  if (checked) next.add(pluginId)
+  else next.delete(pluginId)
+  selectedPluginIds.value = next
+}
 
 const addFiles = (files: File[]) => {
   for (const file of files) {
@@ -259,11 +277,9 @@ const removeImage = (item: PendingImage) => {
   pending.value = pending.value.filter((entry) => entry.localId !== item.localId)
 }
 
-/** 顺序上传，不并发：一并发上去进度条就会互相抢带宽，看起来像卡住了 */
-const uploadAll = async () => {
-  const taskId = createdTaskId.value
-  if (taskId === null) return
-  for (const item of pending.value) {
+/** 顺序上传，不并发：一张失败不会掩盖后续结果，也避免多张图同时占满有限带宽 */
+const uploadAll = async (taskId: number, images: PendingImage[]) => {
+  for (const item of images) {
     if (item.status === 'done') continue
     item.status = 'uploading'
     item.progress = 0
@@ -281,20 +297,27 @@ const uploadAll = async () => {
       item.error = messageOf(e)
     }
   }
-  if (pending.value.some((item) => item.status === 'done')) emit('uploaded', { id: taskId })
+  const attached = images.filter((item) => item.status === 'done').length
+  if (attached > 0) emit('uploaded', { id: taskId })
+  return { attached, failed: images.length - attached }
 }
 
 const close = () => {
   open.value = false
   phase.value = 'editing'
-  createdTaskId.value = null
   releasePreviews()
 }
 
-const announceAttached = (attached: number) => {
-  const id = createdTaskId.value
-  if (attached > 0 && id !== null) {
-    toast.success(`${attached} 张图已附上`, `#${id} 派发时会一并交给 codex`)
+const announceUploadResult = async (
+  taskId: number,
+  images: PendingImage[],
+) => {
+  const { attached, failed } = await uploadAll(taskId, images)
+  if (attached > 0) {
+    toast.success(`${attached} 张图已附上`, `#${taskId} 派发时会一并交给 codex`)
+  }
+  if (failed > 0) {
+    toast.warning(`${failed} 张图没传上去`, `任务已创建，图片可以在右侧详情里补`)
   }
 }
 
@@ -304,51 +327,28 @@ const submit = async () => {
   if (target === null) return
   error.value = null
   phase.value = 'creating'
+  const images = [...pending.value]
   try {
     const task = await createTask({
       projectId: target,
       prompt: prompt.value.trim(),
       priority: Number(priority.value) || 0,
     })
-    createdTaskId.value = task.id
-    // 任务先落库再传图：列表与侧栏立刻能看到它，图片是「给它补附件」，不是创建的一部分
+    if (selectedPluginIds.value.size > 0) {
+      try {
+        await bindTaskPlugins(task.id, [...selectedPluginIds.value])
+      } catch (e) {
+        toast.warning(`#${task.id} 插件绑定失败`, messageOf(e))
+      }
+    }
     emit('created', { id: task.id, title: task.title })
+    close()
+    // 弹框关闭后继续用提交时的文件快照上传，不能被下一次打开时的清空逻辑截断
+    if (images.length > 0) void announceUploadResult(task.id, images)
   } catch (e) {
     error.value = messageOf(e)
     phase.value = 'editing'
-    return
   }
-
-  await uploadAll()
-  if (failed.value.length === 0) {
-    const attached = pending.value.length
-    close()
-    announceAttached(attached)
-    return
-  }
-  // 任务已经建好了，只是图没传完 —— 留在弹框里，把重试放在眼前
-  phase.value = 'created'
-  toast.warning(`${failed.value.length} 张图没传上去`, '任务已创建，图片需要重新上传')
-}
-
-const retry = async () => {
-  if (phase.value !== 'created') return
-  phase.value = 'creating'
-  await uploadAll()
-  if (failed.value.length === 0) {
-    const attached = pending.value.length
-    close()
-    announceAttached(attached)
-    return
-  }
-  phase.value = 'created'
-}
-
-const dismiss = () => {
-  if (failed.value.length > 0 && createdTaskId.value !== null) {
-    toast.warning(`${failed.value.length} 张图没传上去`, '任务已经建好，图片可以在右侧详情里补')
-  }
-  close()
 }
 
 onUnmounted(releasePreviews)
@@ -478,6 +478,38 @@ onUnmounted(releasePreviews)
         </span>
       </DialogField>
 
+      <DialogField label="插件" hint="已写好的组件会随执行指令交给 AI，优先复用而不是重新生成">
+        <p v-if="loadingPlugins" class="text-caption text-label-tertiary">正在读取插件库…</p>
+        <p v-else-if="plugins.length === 0" class="text-caption text-label-tertiary">
+          还没有可用插件，可先到「插件」页添加。
+        </p>
+        <div v-else class="scroll-area max-h-40 space-y-1 overflow-y-auto">
+          <div
+            v-for="plugin in plugins"
+            :key="plugin.id"
+            class="flex items-start gap-2 rounded-panel border border-separator-soft bg-content px-2.5 py-1.5"
+          >
+            <Checkbox
+              :model-value="selectedPluginIds.has(plugin.id)"
+              :disabled="phase !== 'editing'"
+              :aria-label="`绑定插件 ${plugin.name}`"
+              class="mt-0.5"
+              @update:model-value="togglePlugin(plugin.id, $event === true)"
+            />
+            <span class="min-w-0 flex-1">
+              <span class="flex items-center gap-1.5">
+                <Icon :as="Blocks" size="inline" class="text-label-tertiary" />
+                <span class="truncate text-caption font-emphasis text-label">{{ plugin.name }}</span>
+                <span class="tnum text-caption text-label-tertiary">v{{ plugin.currentRevision }}</span>
+              </span>
+              <span class="mt-0.5 block truncate text-caption text-label-secondary">
+                {{ plugin.description || plugin.filename }}
+              </span>
+            </span>
+          </div>
+        </div>
+      </DialogField>
+
       <DialogField label="优先级" hint="数值越大越先派发，默认 0">
         <!-- 宽度包在外面：Input 的变体里有 w-full，直接给它挂 w-20 谁赢取决于 Tailwind
              产物里的顺序（实测 w-full 赢，于是优先级被拉成一整行） -->
@@ -486,26 +518,15 @@ onUnmounted(releasePreviews)
         </div>
       </DialogField>
 
-      <p
-        v-if="phase === 'created'"
-        class="rounded-panel bg-warning/10 px-3 py-2 text-caption text-label-secondary"
-      >
-        任务 #{{ createdTaskId }} 已经建好了，没传上去的图片可以点「重试」；
-        也可以先关掉，之后在右侧详情里补。
-      </p>
-
       <p v-if="error" class="text-caption text-danger">{{ error }}</p>
     </div>
 
     <template #footer>
       <Button v-if="phase === 'editing'" @click="close">取消</Button>
-      <Button v-else-if="phase === 'created'" @click="dismiss">关闭</Button>
-
       <Button v-if="phase === 'editing'" variant="primary" :disabled="!canSubmit" @click="submit">
         创建任务
       </Button>
-      <Button v-else-if="phase === 'creating'" variant="primary" disabled>{{ uploadLabel }}</Button>
-      <Button v-else variant="primary" @click="retry">重试失败的 {{ failed.length }} 张</Button>
+      <Button v-else variant="primary" disabled>创建中…</Button>
     </template>
   </Dialog>
 </template>

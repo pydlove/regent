@@ -18,6 +18,8 @@ final class RelayHeaders {
     static final String REQUEST_PATH = "X-Regent-Relay-Path";
     static final String RESPONSE_STATUS = "X-Regent-Relay-Response-Status";
     static final String FORWARDED_HEADER_PREFIX = "X-Regent-Relay-Header-";
+    // Set-Cookie 的 Expires 本身含逗号，不能像普通头一样用逗号拼接；NUL 不会出现在 HTTP 头值里。
+    private static final String VALUE_SEPARATOR = "\u0000";
 
     private static final Base64.Encoder ENCODER = Base64.getUrlEncoder().withoutPadding();
     private static final Base64.Decoder DECODER = Base64.getUrlDecoder();
@@ -25,6 +27,7 @@ final class RelayHeaders {
     private static final Set<String> REQUEST_HEADERS = Set.of(
         "accept",
         "content-type",
+        "cookie",
         "if-modified-since",
         "if-none-match",
         "range",
@@ -39,6 +42,7 @@ final class RelayHeaders {
         "content-type",
         "etag",
         "last-modified",
+        "set-cookie",
         "vary"
     );
 
@@ -65,7 +69,7 @@ final class RelayHeaders {
         for (String name : REQUEST_HEADERS) {
             List<String> values = headers.get(name);
             if (values != null && !values.isEmpty()) {
-                result.put(name, String.join(", ", values));
+                result.put(name, joinValues(values));
             }
         }
         return result;
@@ -76,10 +80,21 @@ final class RelayHeaders {
         headers.forEach((name, values) -> {
             String normalized = name.toLowerCase(Locale.ROOT);
             if (RESPONSE_HEADERS.contains(normalized) && values != null && !values.isEmpty()) {
-                result.put(normalized, String.join(", ", values));
+                result.put(normalized, joinValues(values));
             }
         });
         return result;
+    }
+
+    static List<String> splitValues(String joined) {
+        if (joined == null || joined.isEmpty()) {
+            return List.of();
+        }
+        return List.of(joined.split(VALUE_SEPARATOR, -1));
+    }
+
+    private static String joinValues(List<String> values) {
+        return String.join(VALUE_SEPARATOR, values);
     }
 
     static Map<String, String> readForwardedHeaders(Map<String, List<String>> headers) {

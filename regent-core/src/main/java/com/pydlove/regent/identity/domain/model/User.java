@@ -12,17 +12,23 @@ public class User {
     private final Email email;
     private final Username username;
     private final PasswordHash passwordHash;
+    private DisplayName displayName;
+    private UserAvatar avatar;
     private final Instant createdAt;
 
     private User(UserId id,
                  Email email,
                  Username username,
+                 DisplayName displayName,
                  PasswordHash passwordHash,
+                 UserAvatar avatar,
                  Instant createdAt) {
         this.id = id;
         this.email = email;
         this.username = Objects.requireNonNull(username, "用户名");
+        this.displayName = Objects.requireNonNull(displayName, "显示名称");
         this.passwordHash = Objects.requireNonNull(passwordHash, "密码哈希");
+        this.avatar = avatar;
         if (createdAt == null) {
             throw new DomainException("用户创建时间不能为空");
         }
@@ -33,18 +39,28 @@ public class User {
                                 Username username,
                                 PasswordHash passwordHash,
                                 Instant now) {
-        return new User(null, Objects.requireNonNull(email, "注册邮箱"), username, passwordHash, now);
+        Username checkedUsername = Objects.requireNonNull(username, "用户名");
+        return new User(
+                null,
+                Objects.requireNonNull(email, "注册邮箱"),
+                checkedUsername,
+                DisplayName.of(checkedUsername.value()),
+                passwordHash,
+                null,
+                now);
     }
 
     public static User restore(UserId id,
                                Email email,
                                Username username,
+                               DisplayName displayName,
                                PasswordHash passwordHash,
+                               UserAvatar avatar,
                                Instant createdAt) {
         if (id == null) {
             throw new DomainException("已持久化用户必须有 ID");
         }
-        return new User(id, email, username, passwordHash, createdAt);
+        return new User(id, email, username, displayName, passwordHash, avatar, createdAt);
     }
 
     public void assignIdentity(UserId assigned) {
@@ -66,11 +82,27 @@ public class User {
         return username;
     }
 
+    public DisplayName getDisplayName() {
+        return displayName;
+    }
+
     public PasswordHash getPasswordHash() {
         return passwordHash;
     }
 
+    public UserAvatar getAvatar() {
+        return avatar;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public void updateDisplayName(DisplayName displayName) {
+        this.displayName = Objects.requireNonNull(displayName, "显示名称");
+    }
+
+    public void changeAvatar(UserAvatar avatar) {
+        this.avatar = Objects.requireNonNull(avatar, "头像");
     }
 }

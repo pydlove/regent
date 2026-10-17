@@ -12,4 +12,5 @@ public class AuthSessionData {
     private String tokenHash;
     private LocalDateTime expiresAt;
     private LocalDateTime createdAt;
+    private boolean remembered;
 }

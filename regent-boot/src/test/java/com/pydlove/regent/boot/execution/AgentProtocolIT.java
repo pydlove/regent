@@ -13,6 +13,10 @@ import com.pydlove.regent.execution.domain.repository.TaskRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
 import com.pydlove.regent.governance.application.command.DecisionApprovalService;
 import com.pydlove.regent.governance.application.command.ReviewCommand;
+import com.pydlove.regent.plugin.application.command.PluginCommandService;
+import com.pydlove.regent.plugin.application.command.SavePluginCommand;
+import com.pydlove.regent.plugin.application.command.TaskPluginService;
+import com.pydlove.regent.plugin.domain.model.Plugin;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -87,6 +91,12 @@ class AgentProtocolIT {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private PluginCommandService pluginCommandService;
+
+    @Autowired
+    private TaskPluginService taskPluginService;
 
     private Path workspace;
 
@@ -180,6 +190,27 @@ class AgentProtocolIT {
         assertEquals(RunStatus.SUCCESS, run.getStatus());
         assertEquals(900L, run.getTokens().input(), "执行者自报的 token 要落库");
         assertEquals(AGENT, run.getAgentName());
+    }
+
+    @Test
+    @DisplayName("工作包携带任务绑定的固定版本插件")
+    void 工作包携带插件() throws Exception {
+        Task task = 新建任务("读取 Kafka", "复用 Kafka 组件读取消息");
+        Plugin plugin = pluginCommandService.create(new SavePluginCommand(
+                "Kafka 读取组件",
+                "已验证的消费者",
+                List.of("Kafka"),
+                "KafkaReader.java",
+                "class KafkaReader { void read() {} }",
+                true));
+        taskPluginService.bind(task.getId(), List.of(plugin.getId()));
+
+        JsonNode claimed = 认领(task.getId().value());
+
+        assertEquals(1, claimed.get("plugins").size());
+        assertEquals(1, claimed.get("plugins").get(0).get("revision").asInt());
+        assertTrue(claimed.get("plugins").get(0).get("content").asText().contains("KafkaReader"));
+        assertTrue(claimed.get("instruction").asText().contains("不要重新生成已有实现"));
     }
 
     @Test

@@ -51,6 +51,7 @@ class TaskRunServiceTest {
     private final ExecutionFakes.Projects projects = new ExecutionFakes.Projects();
     private final ExecutionFakes.Attachments attachments = new ExecutionFakes.Attachments();
     private final ExecutionFakes.Environments environments = new ExecutionFakes.Environments();
+    private final ExecutionFakes.TaskPlugins plugins = new ExecutionFakes.TaskPlugins();
     private final ExecutionFakes.Executor executor = new ExecutionFakes.Executor();
 
     private TaskRunService service;
@@ -60,7 +61,7 @@ class TaskRunServiceTest {
         tasks.wire(runs);
         events.wire(runs);
         projects.put(ExecutionFakes.Projects.profile(1L, DecisionLevel.L1, true));
-        service = new TaskRunService(tasks, runs, events, attachments, projects, environments,
+        service = new TaskRunService(tasks, runs, events, attachments, projects, environments, plugins,
                 new RunSettlementService(tasks, decisions, new DecisionRaiseService(rules, decisions), bugs),
                 executor, Duration.ofMinutes(30));
     }
@@ -219,6 +220,23 @@ class TaskRunServiceTest {
             assertTrue(request.prompt().contains("项目数据库"), request.prompt());
             assertFalse(request.prompt().contains("project-db"), request.prompt());
             assertFalse(request.prompt().contains("secret"), request.prompt());
+        }
+
+        @Test
+        @DisplayName("绑定插件内容进入指令，并记录版本审计事件")
+        void injectsBoundPluginContent() {
+            claimedTask();
+            plugins.add(TASK, ExecutionFakes.TaskPlugins.plugin(
+                    9L, "Kafka 读取组件", 3, "class KafkaReader { void read() {} }"));
+            executor.script(ExecutionFakes.Executor.success("复用了组件"));
+
+            service.execute(TASK);
+
+            ExecRequest request = executor.requests.get(0);
+            assertTrue(request.prompt().contains("Kafka 读取组件"), request.prompt());
+            assertTrue(request.prompt().contains("class KafkaReader"), request.prompt());
+            assertTrue(request.prompt().contains("不要重新生成已有实现"), request.prompt());
+            assertTrue(events.all().stream().anyMatch(event -> event.type().equals("platform.plugins")));
         }
 
         @Test

@@ -95,7 +95,7 @@ public class TaskCommandService {
         return task;
     }
 
-    /** 删除待执行或排队中的任务。状态守卫在聚合里，落库时仓储再做一次并发兜底。 */
+    /** 删除待执行、排队中或已终止的任务。状态守卫在聚合里，落库时仓储再做一次并发兜底。 */
     public void delete(TaskId id) {
         Task task = load(id);
         task.requireDeletable();

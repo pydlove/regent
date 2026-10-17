@@ -16,6 +16,8 @@ import org.springframework.context.annotation.Configuration;
         "com.pydlove.regent.execution.infrastructure.persistence",
         "com.pydlove.regent.governance.infrastructure.persistence",
         "com.pydlove.regent.identity.infrastructure.persistence",
+        "com.pydlove.regent.plan.infrastructure.persistence",
+        "com.pydlove.regent.plugin.infrastructure.persistence",
         "com.pydlove.regent.project.infrastructure.persistence",
         "com.pydlove.regent.settings.infrastructure.persistence"
 })

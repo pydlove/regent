@@ -20,4 +20,7 @@ public interface AttachmentStorage {
 
     /** 读回文件内容。文件不在了要抛 {@code EntityNotFoundException}。 */
     byte[] read(String storagePath);
+
+    /** 删除已被替换或补偿失败的文件。文件不存在时视为成功。 */
+    void delete(String storagePath);
 }

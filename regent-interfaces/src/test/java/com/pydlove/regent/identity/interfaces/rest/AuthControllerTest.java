@@ -7,6 +7,8 @@ import com.pydlove.regent.identity.application.command.LoginCommand;
 import com.pydlove.regent.identity.application.command.RegisterEmailCommand;
 import com.pydlove.regent.identity.application.query.AuthSessionGrant;
 import com.pydlove.regent.identity.application.query.AuthenticatedUser;
+import com.pydlove.regent.identity.application.query.CurrentAuthSession;
+import com.pydlove.regent.identity.domain.model.ActiveAuthSession;
 import com.pydlove.regent.identity.domain.model.AuthPrincipal;
 import com.pydlove.regent.identity.domain.model.AuthSession;
 import com.pydlove.regent.identity.domain.model.Email;
@@ -40,6 +42,11 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
+import jakarta.servlet.http.Cookie;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -64,7 +71,8 @@ class AuthControllerTest {
     @Test
     @DisplayName("邮箱注册只返回公开用户字段")
     void registerReturnsPublicUser() throws Exception {
-        authService.registeredUser = new AuthenticatedUser(7, "alice", "alice@example.com");
+        authService.registeredUser =
+                new AuthenticatedUser(7, "alice", "Alice", "alice@example.com", null);
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -74,6 +82,7 @@ class AuthControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(7))
                 .andExpect(jsonPath("$.username").value("alice"))
+                .andExpect(jsonPath("$.displayName").value("Alice"))
                 .andExpect(jsonPath("$.email").value("alice@example.com"))
                 .andExpect(jsonPath("$.password").doesNotExist());
     }
@@ -93,9 +102,10 @@ class AuthControllerTest {
     @DisplayName("登录把会话令牌写进 HttpOnly Cookie，不写进 JSON")
     void loginUsesHttpOnlyCookie() throws Exception {
         authService.grant = new AuthSessionGrant(
-                new AuthenticatedUser(7, "alice", "alice@example.com"),
+                new AuthenticatedUser(7, "alice", "Alice", "alice@example.com", null),
                 "raw-session-token",
-                Instant.now().plusSeconds(3600));
+                Instant.now().plusSeconds(3600),
+                false);
 
         mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -107,16 +117,65 @@ class AuthControllerTest {
                         org.hamcrest.Matchers.allOf(
                                 org.hamcrest.Matchers.containsString("regent_session=raw-session-token"),
                                 org.hamcrest.Matchers.containsString("HttpOnly"),
-                                org.hamcrest.Matchers.containsString("SameSite=Lax"))))
+                                org.hamcrest.Matchers.containsString("SameSite=Lax"),
+                                org.hamcrest.Matchers.not(
+                                        org.hamcrest.Matchers.containsString("Max-Age")))))
                 .andExpect(jsonPath("$.username").value("alice"))
                 .andExpect(jsonPath("$.email").value("alice@example.com"))
                 .andExpect(jsonPath("$.rawToken").doesNotExist());
+
+        assertFalse(authService.lastLogin.rememberMe());
+    }
+
+    @Test
+    @DisplayName("保持登录写入持久 Cookie，并保留用户选择")
+    void rememberMeWritesPersistentCookie() throws Exception {
+        authService.grant = new AuthSessionGrant(
+                new AuthenticatedUser(7, "alice", "Alice", "alice@example.com", null),
+                "raw-session-token",
+                Instant.now().plus(Duration.ofDays(180)),
+                true);
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"alice","password":"safe-pass-123","rememberMe":true}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Set-Cookie",
+                        org.hamcrest.Matchers.allOf(
+                                org.hamcrest.Matchers.containsString("regent_session=raw-session-token"),
+                                org.hamcrest.Matchers.containsString("Max-Age"),
+                                org.hamcrest.Matchers.containsString("HttpOnly"))));
+
+        assertEquals(true, authService.lastLogin.rememberMe());
+    }
+
+    @Test
+    @DisplayName("当前用户接口为保持登录的会话续写持久 Cookie")
+    void meRefreshesPersistentCookie() throws Exception {
+        authService.current = new CurrentAuthSession(
+                new AuthenticatedUser(7, "alice", "Alice", "alice@example.com", null),
+                Instant.now().plus(Duration.ofDays(180)),
+                true);
+
+        mockMvc.perform(get("/api/auth/me")
+                        .cookie(new Cookie("regent_session", "raw-session-token")))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Set-Cookie",
+                        org.hamcrest.Matchers.allOf(
+                                org.hamcrest.Matchers.containsString("regent_session=raw-session-token"),
+                                org.hamcrest.Matchers.containsString("Max-Age"),
+                                org.hamcrest.Matchers.containsString("HttpOnly"))))
+                .andExpect(jsonPath("$.email").value("alice@example.com"));
     }
 
     private static final class StubAuthService extends AuthService {
 
         private AuthenticatedUser registeredUser;
         private AuthSessionGrant grant;
+        private CurrentAuthSession current;
+        private LoginCommand lastLogin;
         private String sentEmail;
 
         private StubAuthService() {
@@ -127,7 +186,8 @@ class AuthControllerTest {
                     new NoopTokenCodec(),
                     noopVerificationService(),
                     Clock.systemUTC(),
-                    Duration.ofHours(1));
+                    Duration.ofHours(1),
+                    Duration.ofHours(2));
         }
 
         @Override
@@ -142,7 +202,13 @@ class AuthControllerTest {
 
         @Override
         public AuthSessionGrant login(LoginCommand command) {
+            lastLogin = command;
             return grant;
+        }
+
+        @Override
+        public CurrentAuthSession currentSession(String rawToken) {
+            return current;
         }
     }
 
@@ -169,7 +235,16 @@ class AuthControllerTest {
         }
 
         @Override
+        public Optional<User> findById(com.pydlove.regent.identity.domain.model.UserId id) {
+            return Optional.empty();
+        }
+
+        @Override
         public void save(User user) {
+        }
+
+        @Override
+        public void update(User user) {
         }
     }
 
@@ -180,7 +255,11 @@ class AuthControllerTest {
         }
 
         @Override
-        public Optional<AuthPrincipal> findActivePrincipal(SessionTokenHash tokenHash, Instant now) {
+        public void update(AuthSession session) {
+        }
+
+        @Override
+        public Optional<ActiveAuthSession> findActive(SessionTokenHash tokenHash, Instant now) {
             return Optional.empty();
         }
 

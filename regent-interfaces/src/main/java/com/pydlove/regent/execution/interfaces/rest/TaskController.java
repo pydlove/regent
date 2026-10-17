@@ -155,14 +155,14 @@ public class TaskController {
         return TaskDetailResponse.from(taskCommandService.cancel(TaskId.of(id)));
     }
 
-    /** 删除待执行或排队中的任务。其他状态会被聚合守卫拒绝。 */
+    /** 删除待执行、排队中或已终止的任务。其他状态会被聚合守卫拒绝。 */
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable long id) {
         taskCommandService.delete(TaskId.of(id));
     }
 
-    /** 批量删除待执行或排队中的任务。单项失败通过响应体返回，不影响同一批里的其他任务。 */
+    /** 批量删除待执行、排队中或已终止的任务。单项失败通过响应体返回，不影响同一批里的其他任务。 */
     @PostMapping("/batch-delete")
     public TaskBatchDeleteResponse deleteBatch(@RequestBody TaskBatchDeleteRequest request) {
         if (request.taskIds() == null) {

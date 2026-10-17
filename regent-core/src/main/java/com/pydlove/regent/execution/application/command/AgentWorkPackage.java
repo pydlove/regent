@@ -20,6 +20,7 @@ import java.util.List;
  * @param instruction       本次指令，末尾已经带上平台的上报约定
  * @param sessionId         平台记录的续跑钥匙（执行者报的会话 ID）；为空表示这次是新会话
  * @param images            任务附件的绝对路径，按顺序挂给模型
+ * @param plugins           任务绑定的固定版本插件；内容同时已写入 instruction
  * @param environment       本次执行生效的环境信息；项目级同键值已覆盖全局值
  * @param decisionThreshold 项目级自动决策阈值：生效等级高于它就必须挂起等人
  * @param leaseSeconds      多久不心跳就会被判为失联
@@ -38,6 +39,7 @@ public record AgentWorkPackage(
         String instruction,
         String sessionId,
         List<Image> images,
+        List<Plugin> plugins,
         List<EnvironmentVariable> environment,
         String decisionThreshold,
         int leaseSeconds,
@@ -46,11 +48,21 @@ public record AgentWorkPackage(
 
     public AgentWorkPackage {
         images = images == null ? List.of() : List.copyOf(images);
+        plugins = plugins == null ? List.of() : List.copyOf(plugins);
         environment = environment == null ? List.of() : List.copyOf(environment);
     }
 
     /** 一张任务附件。给路径不给人读的名字：执行器要的是能挂上去的绝对路径。 */
     public record Image(long id, String filename, String path) {
+    }
+
+    /** 插件版本快照。content 给外部执行器直接使用，revision 与 sha256 用于追溯。 */
+    public record Plugin(long id,
+                         String name,
+                         int revision,
+                         String filename,
+                         String contentHash,
+                         String content) {
     }
 
     /** 外部执行者需要注入自己的执行进程；值可以包含任意文本或敏感凭据。 */

@@ -26,6 +26,7 @@ import com.pydlove.regent.execution.infrastructure.codex.SchemaFileProvider;
 import com.pydlove.regent.execution.infrastructure.git.GitBranchManager;
 import com.pydlove.regent.governance.application.command.DecisionRaiseService;
 import com.pydlove.regent.governance.domain.repository.DecisionRepository;
+import com.pydlove.regent.plugin.domain.repository.TaskPluginRepository;
 import com.pydlove.regent.project.domain.repository.EnvironmentEntryRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.shared.domain.TransactionRunner;
@@ -157,11 +158,13 @@ public class ExecutionConfig {
                                          TaskAttachmentRepository attachmentRepository,
                                          ProjectProfileRepository projectProfileRepository,
                                          EnvironmentEntryRepository environmentEntryRepository,
+                                         TaskPluginRepository taskPluginRepository,
                                          RunSettlementService runSettlementService,
                                          AgentExecutor agentExecutor,
                                          @Value("${regent.execution.timeout:PT30M}") Duration timeout) {
         return new TaskRunService(taskRepository, taskRunRepository, runEventRepository, attachmentRepository,
-                projectProfileRepository, environmentEntryRepository, runSettlementService, agentExecutor, timeout);
+                projectProfileRepository, environmentEntryRepository, taskPluginRepository,
+                runSettlementService, agentExecutor, timeout);
     }
 
     /**
@@ -177,6 +180,7 @@ public class ExecutionConfig {
                                            TaskAttachmentRepository attachmentRepository,
                                            ProjectProfileRepository projectProfileRepository,
                                            EnvironmentEntryRepository environmentEntryRepository,
+                                           TaskPluginRepository taskPluginRepository,
                                            DecisionRepository decisionRepository,
                                            BranchManager branchManager,
                                            RunSettlementService runSettlementService,
@@ -186,7 +190,8 @@ public class ExecutionConfig {
                                            @Value("${regent.agent.contract-url:http://127.0.0.1:8787/api/agent/contract}")
                                            String contractUrl) {
         return new AgentRunService(taskRepository, taskRunRepository, runEventRepository, attachmentRepository,
-                projectProfileRepository, environmentEntryRepository, decisionRepository, branchManager, runSettlementService,
+                projectProfileRepository, environmentEntryRepository, taskPluginRepository,
+                decisionRepository, branchManager, runSettlementService,
                 executorContract, executionConcurrencyGate, Duration.ofSeconds(leaseSeconds), contractUrl);
     }
 

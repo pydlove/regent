@@ -4,6 +4,7 @@ import com.pydlove.regent.identity.application.command.AuthService;
 import com.pydlove.regent.identity.application.command.LoginCommand;
 import com.pydlove.regent.identity.application.command.RegisterEmailCommand;
 import com.pydlove.regent.identity.application.query.AuthSessionGrant;
+import com.pydlove.regent.identity.application.query.CurrentAuthSession;
 import com.pydlove.regent.identity.interfaces.dto.AuthUserResponse;
 import com.pydlove.regent.identity.interfaces.dto.LoginRequest;
 import com.pydlove.regent.identity.interfaces.dto.RegisterRequest;
@@ -58,32 +59,46 @@ public class AuthController {
     public AuthUserResponse login(@RequestBody LoginRequest request,
                                   HttpServletResponse response) {
         AuthSessionGrant grant = authService.login(
-                new LoginCommand(request.username(), request.password()));
-        long maxAge = Math.max(0, Duration.between(Instant.now(), grant.expiresAt()).toSeconds());
-        response.addHeader(HttpHeaders.SET_COOKIE, sessionCookie(grant.rawToken(), maxAge).toString());
+                new LoginCommand(request.username(), request.password(), request.rememberMe()));
+        ResponseCookie cookie = grant.remembered()
+                ? sessionCookie(grant.rawToken(), Duration.between(Instant.now(), grant.expiresAt()))
+                : sessionCookie(grant.rawToken());
+        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
         return AuthUserResponse.from(grant.user());
     }
 
     @GetMapping("/me")
-    public AuthUserResponse me(HttpServletRequest request) {
-        return AuthUserResponse.from(
-                authService.currentUser(AuthSessionInterceptor.readToken(request)));
+    public AuthUserResponse me(HttpServletRequest request, HttpServletResponse response) {
+        String rawToken = AuthSessionInterceptor.readToken(request);
+        CurrentAuthSession current = authService.currentSession(rawToken);
+        if (current.remembered()) {
+            response.addHeader(HttpHeaders.SET_COOKIE, sessionCookie(
+                    rawToken,
+                    Duration.between(Instant.now(), current.expiresAt())).toString());
+        }
+        return AuthUserResponse.from(current.user());
     }
 
     @PostMapping("/logout")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void logout(HttpServletRequest request, HttpServletResponse response) {
         authService.logout(AuthSessionInterceptor.readToken(request));
-        response.addHeader(HttpHeaders.SET_COOKIE, sessionCookie("", 0).toString());
+        response.addHeader(HttpHeaders.SET_COOKIE, sessionCookie("", Duration.ZERO).toString());
     }
 
-    private ResponseCookie sessionCookie(String value, long maxAgeSeconds) {
+    private ResponseCookie sessionCookie(String value) {
+        return sessionCookieBuilder(value).build();
+    }
+
+    private ResponseCookie sessionCookie(String value, Duration maxAge) {
+        return sessionCookieBuilder(value).maxAge(maxAge).build();
+    }
+
+    private ResponseCookie.ResponseCookieBuilder sessionCookieBuilder(String value) {
         return ResponseCookie.from(AuthSessionInterceptor.COOKIE_NAME, value)
                 .httpOnly(true)
                 .secure(secureCookie)
                 .sameSite("Lax")
-                .path("/")
-                .maxAge(maxAgeSeconds)
-                .build();
+                .path("/");
     }
 }

@@ -1,4 +1,4 @@
-import { get, postJson, postJsonNoContent, postNoContent } from '@/api/http'
+import { get, postForm, postJson, postJsonNoContent, postNoContent, putJson } from '@/api/http'
 import type { AuthUser } from '@/types/api'
 
 export type RegisterInput = {
@@ -11,9 +11,19 @@ export type RegisterInput = {
 export type LoginInput = {
   username: string
   password: string
+  rememberMe: boolean
 }
 
 export const getCurrentUser = () => get<AuthUser>('/auth/me')
+
+export const updateProfile = (displayName: string) =>
+  putJson<AuthUser>('/profile', { displayName })
+
+export const uploadProfileAvatar = (file: File) => {
+  const form = new FormData()
+  form.append('file', file)
+  return postForm<AuthUser>('/profile/avatar', form)
+}
 
 export const register = (input: RegisterInput) =>
   postJson<AuthUser>('/auth/register', input)

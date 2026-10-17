@@ -55,6 +55,7 @@ class TaskDispatchServiceTest {
         projects.put(ExecutionFakes.Projects.profile(1L, DecisionLevel.L1, true));
         TaskRunService runService = new TaskRunService(tasks, runs, events, attachments, projects,
                 new ExecutionFakes.Environments(),
+                new ExecutionFakes.TaskPlugins(),
                 new RunSettlementService(tasks, decisions, new DecisionRaiseService(rules, decisions), bugs),
                 executor, Duration.ofMinutes(30));
         service = new TaskDispatchService(

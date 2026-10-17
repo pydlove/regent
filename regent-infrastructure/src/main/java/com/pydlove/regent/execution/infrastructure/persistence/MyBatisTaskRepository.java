@@ -36,6 +36,12 @@ public class MyBatisTaskRepository implements TaskRepository {
     }
 
     @Override
+    public Optional<Task> findByIdForUpdate(TaskId id) {
+        return Optional.ofNullable(taskMapper.selectByIdForUpdate(id.value()))
+                .map(TaskDataMapper::toDomain);
+    }
+
+    @Override
     public List<Task> findDispatchable(int limit) {
         return taskMapper.selectDispatchable(limit).stream()
                 .map(TaskDataMapper::toDomain)

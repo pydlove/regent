@@ -364,6 +364,11 @@ class DecisionApprovalServiceTest {
         }
 
         @Override
+        public Optional<Task> findByIdForUpdate(TaskId id) {
+            return findById(id);
+        }
+
+        @Override
         public void save(Task task) {
             store.put(task.getId().value(), task);
             saves++;

@@ -22,6 +22,8 @@ import com.pydlove.regent.governance.application.command.RaisedDecision;
 import com.pydlove.regent.governance.domain.model.Decision;
 import com.pydlove.regent.governance.domain.model.DecisionStatus;
 import com.pydlove.regent.governance.domain.repository.DecisionRepository;
+import com.pydlove.regent.plugin.application.query.PluginContext;
+import com.pydlove.regent.plugin.domain.repository.TaskPluginRepository;
 import com.pydlove.regent.project.application.query.EnvironmentContext;
 import com.pydlove.regent.project.domain.repository.EnvironmentEntryRepository;
 import com.pydlove.regent.project.domain.model.ProjectId;
@@ -86,6 +88,7 @@ public class AgentRunService {
     private final TaskAttachmentRepository attachmentRepository;
     private final ProjectProfileRepository projectProfileRepository;
     private final EnvironmentEntryRepository environmentEntryRepository;
+    private final TaskPluginRepository taskPluginRepository;
     private final DecisionRepository decisionRepository;
     private final BranchManager branchManager;
     private final RunSettlementService settlement;
@@ -101,6 +104,7 @@ public class AgentRunService {
                            TaskAttachmentRepository attachmentRepository,
                            ProjectProfileRepository projectProfileRepository,
                            EnvironmentEntryRepository environmentEntryRepository,
+                           TaskPluginRepository taskPluginRepository,
                            DecisionRepository decisionRepository,
                            BranchManager branchManager,
                            RunSettlementService settlement,
@@ -114,6 +118,7 @@ public class AgentRunService {
         this.attachmentRepository = attachmentRepository;
         this.projectProfileRepository = projectProfileRepository;
         this.environmentEntryRepository = environmentEntryRepository;
+        this.taskPluginRepository = taskPluginRepository;
         this.decisionRepository = decisionRepository;
         this.branchManager = branchManager;
         this.settlement = settlement;
@@ -388,6 +393,7 @@ public class AgentRunService {
         requireWorkspaceFree(project, now);
         EnvironmentContext environment = EnvironmentContext.resolve(
                 environmentEntryRepository.findApplicableTo(project.id()));
+        PluginContext plugins = PluginContext.from(taskPluginRepository.findByTask(task.getId()));
 
         // 指令必须在推进状态之前算：instructionFor 靠「任务有没有会话」判断这是首跑还是续跑，
         // 先把这次会话写进去，首跑就会被当成一次带着旧会话的重试。
@@ -427,10 +433,20 @@ public class AgentRunService {
                         variable.key(), variable.value(), variable.scope(),
                         variable.tags(), variable.description()))
                 .toList();
+        List<AgentWorkPackage.Plugin> pluginSnapshots = plugins.plugins().stream()
+                .map(plugin -> new AgentWorkPackage.Plugin(
+                        plugin.pluginId().value(),
+                        plugin.pluginName(),
+                        plugin.revision(),
+                        plugin.filename(),
+                        plugin.contentHash(),
+                        plugin.content()))
+                .toList();
         return new AgentWorkPackage(PROTOCOL, task.getId().value(), run.getId().value(), run.getAttemptNo(),
                 task.getTitle(), project.code(), project.path(), branch,
-                instruction + environment.promptSection() + "\n\n---\n\n" + contract.reportingRules(),
-                task.getCodexThreadId().orElse(null), images, variables,
+                instruction + plugins.referenceSection() + environment.promptSection()
+                        + "\n\n---\n\n" + contract.reportingRules(),
+                task.getCodexThreadId().orElse(null), images, pluginSnapshots, variables,
                 project.defaultDecisionLevel().name(), (int) lease.toSeconds(), run.getLeaseExpiresAt(),
                 contractUrl);
     }

@@ -2,6 +2,7 @@ package com.pydlove.regent.boot.config;
 
 import com.pydlove.regent.identity.application.command.AuthService;
 import com.pydlove.regent.identity.application.command.EmailVerificationService;
+import com.pydlove.regent.identity.application.command.UserProfileService;
 import com.pydlove.regent.identity.domain.port.EmailVerificationCodec;
 import com.pydlove.regent.identity.domain.port.PasswordHasher;
 import com.pydlove.regent.identity.domain.port.SessionTokenCodec;
@@ -12,6 +13,7 @@ import com.pydlove.regent.identity.domain.repository.UserRepository;
 import com.pydlove.regent.identity.infrastructure.security.Pbkdf2PasswordHasher;
 import com.pydlove.regent.identity.infrastructure.security.SecureEmailVerificationCodec;
 import com.pydlove.regent.identity.infrastructure.security.SecureSessionTokenCodec;
+import com.pydlove.regent.shared.domain.port.AttachmentStorage;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -64,7 +66,9 @@ public class AuthConfig {
                                    PasswordHasher passwordHasher,
                                    SessionTokenCodec sessionTokenCodec,
                                    EmailVerificationService emailVerificationService,
-                                   @Value("${regent.auth.session-ttl:PT168H}") Duration sessionTtl) {
+                                   @Value("${regent.auth.session-ttl:PT168H}") Duration sessionTtl,
+                                   @Value("${regent.auth.remembered-session-ttl:PT4320H}")
+                                   Duration rememberedSessionTtl) {
         return new AuthService(
                 userRepository,
                 sessionRepository,
@@ -72,6 +76,16 @@ public class AuthConfig {
                 sessionTokenCodec,
                 emailVerificationService,
                 Clock.systemUTC(),
-                sessionTtl);
+                sessionTtl,
+                rememberedSessionTtl);
+    }
+
+    @Bean
+    public UserProfileService userProfileService(
+            UserRepository userRepository,
+            AttachmentStorage attachmentStorage,
+            @Value("${regent.attachments.max-bytes}") long maxAvatarBytes) {
+        return new UserProfileService(
+                userRepository, attachmentStorage, Clock.systemUTC(), maxAvatarBytes);
     }
 }

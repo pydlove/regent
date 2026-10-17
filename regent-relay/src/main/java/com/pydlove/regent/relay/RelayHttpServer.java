@@ -219,7 +219,8 @@ public final class RelayHttpServer implements AutoCloseable {
         try {
             RelayResponse response = registry.await(request, config.requestTimeout());
             Headers target = exchange.getResponseHeaders();
-            response.headers().forEach(target::set);
+            response.headers().forEach((name, values) ->
+                RelayHeaders.splitValues(values).forEach(value -> target.add(name, value)));
             byte[] responseBody = response.body();
             if ("HEAD".equals(exchange.getRequestMethod())) {
                 exchange.sendResponseHeaders(response.status(), responseBody.length == 0 ? -1 : responseBody.length);

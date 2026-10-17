@@ -1,4 +1,10 @@
 import type { DecisionLevel, RunStatus, TaskSource, TaskStatus } from '@/types/task'
+import type {
+  PlanRunStatus,
+  PlanStatus,
+  PlanTaskStatus,
+  PlanTrigger,
+} from '@/types/plan'
 
 /*
  * 后端契约的镜像。字段名与 Java 侧的 record 一一对应，不做改名 ——
@@ -30,7 +36,9 @@ export type ApiErrorBody = {
 export type AuthUser = {
   id: number
   username: string
+  displayName: string
   email: string | null
+  avatarUrl: string | null
 }
 
 /** 批量删除中的一个失败项。 */
@@ -161,6 +169,63 @@ export type TaskRunDetail = {
   events: RunEvent[]
 }
 
+export type PlanRunSummary = {
+  id: number
+  planId: number
+  planName: string
+  trigger: PlanTrigger
+  status: PlanRunStatus
+  taskCount: number
+  progressCount: number
+  succeededCount: number
+  failedCount: number
+  cancelledCount: number
+  skippedCount: number
+  runningCount: number
+  blockedCount: number
+  summary: string | null
+  startedAt: string
+  finishedAt: string | null
+}
+
+export type PlanSummary = {
+  id: number
+  name: string
+  status: PlanStatus
+  taskCount: number
+  scheduledAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  createdAt: string
+  latestRun: PlanRunSummary | null
+}
+
+export type PlanTask = {
+  id: number
+  title: string
+  taskStatus: TaskStatus | null
+  planTaskStatus: PlanTaskStatus | null
+}
+
+export type PlanDetail = {
+  plan: PlanSummary
+  tasks: PlanTask[]
+  runs: PlanRunSummary[]
+}
+
+export type PlanRunItem = {
+  taskId: number
+  title: string
+  status: PlanTaskStatus
+  detail: string | null
+  updatedAt: string
+}
+
+export type PlanRunDetail = {
+  run: PlanRunSummary
+  items: PlanRunItem[]
+}
+
 /** 图片附件的共同展示字段，任务与 Bug 的缩略图组件只依赖这一层。 */
 export type ImageAttachment = {
   id: number
@@ -218,6 +283,36 @@ export type EnvironmentEntry = {
   description: string | null
   createdAt: string
   updatedAt: string
+}
+
+/** 可复用插件列表项；列表不返回大段正文。 */
+export type PluginSummary = {
+  id: number
+  name: string
+  description: string | null
+  tags: string[]
+  enabled: boolean
+  currentRevision: number
+  filename: string
+  contentHash: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** 插件详情与编辑表单使用的完整版本。 */
+export type PluginDetail = PluginSummary & {
+  content: string
+}
+
+/** 任务绑定的插件固定版本。 */
+export type TaskPluginBinding = {
+  pluginId: number
+  name: string
+  revision: number
+  filename: string
+  contentHash: string
+  enabled: boolean
+  boundAt: string
 }
 
 /** 平台级执行设置；修改后立即影响新任务的领取，不终止已经运行的任务。 */

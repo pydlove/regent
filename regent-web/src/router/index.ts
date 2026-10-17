@@ -21,14 +21,12 @@ const router = createRouter({
     },
     {
       path: '/',
-      // 默认落地在任务页：样式基准页只是展示用，放在侧边栏底部，不当首屏
+      // 默认落地在任务页：样式基准页只是设置里的展示分区，不当首屏
       redirect: '/tasks',
     },
     {
       path: '/baseline',
-      name: 'baseline',
-      component: () => import('@/views/BaselineView.vue'),
-      meta: { title: '样式基准页' },
+      redirect: '/settings/baseline',
     },
     {
       path: '/dashboard',
@@ -41,6 +39,12 @@ const router = createRouter({
       name: 'tasks',
       component: () => import('@/views/TasksView.vue'),
       meta: { title: '任务' },
+    },
+    {
+      path: '/plans',
+      name: 'plans',
+      component: () => import('@/views/PlansView.vue'),
+      meta: { title: '计划' },
     },
     {
       path: '/decisions',
@@ -59,6 +63,12 @@ const router = createRouter({
       name: 'environments',
       component: () => import('@/views/EnvironmentsView.vue'),
       meta: { title: '环境' },
+    },
+    {
+      path: '/plugins',
+      name: 'plugins',
+      component: () => import('@/views/PluginsView.vue'),
+      meta: { title: '插件' },
     },
     {
       path: '/bugs',
