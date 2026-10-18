@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { RefreshCw, Search, X } from '@lucide/vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import DecisionLevelBadge from '@/components/business/DecisionLevelBadge.vue'
@@ -7,6 +8,10 @@ import DecisionReviewDialog from '@/components/business/DecisionReviewDialog.vue
 import ImageAttachmentsDialog from '@/components/business/ImageAttachmentsDialog.vue'
 import Button from '@/components/ui/button/Button.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
+import Icon from '@/components/ui/icon/Icon.vue'
+import IconButton from '@/components/ui/icon-button/IconButton.vue'
+import Input from '@/components/ui/input/Input.vue'
+import ListToolbar from '@/components/ui/list-toolbar/ListToolbar.vue'
 import Pagination from '@/components/ui/pagination/Pagination.vue'
 import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
 import Table from '@/components/ui/table/Table.vue'
@@ -15,7 +20,7 @@ import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
 import { useToast } from '@/composables/useToast'
 import { useDecisionStore, type DecisionScope } from '@/stores/useDecisionStore'
 import type { DecisionSummary, ImageAttachment } from '@/types/api'
-import { formatRelative } from '@/utils/format'
+import { formatDateTime, formatRelative } from '@/utils/format'
 
 /*
  * 决策页的取舍：只放「需要人拍板」的和「刚拍过板」的。
@@ -28,12 +33,12 @@ const store = useDecisionStore()
 const toast = useToast()
 
 const columns: TableColumn[] = [
-  { key: 'taskId', label: '任务', width: '72px', numeric: true },
-  { key: 'level', label: '等级', width: '168px', hideBelow: 'md' },
-  { key: 'rule', label: '命中规则', width: '128px', hideBelow: 'lg' },
-  { key: 'question', label: '待决问题' },
-  { key: 'raisedAt', label: '提出时间', align: 'right', width: '88px', hideBelow: 'md' },
-  { key: 'actions', label: '', align: 'right', width: '128px' },
+  // 任务号、任务标题、待决问题合成一列：它们共同回答「这一行在等什么」
+  { key: 'question', label: '待决事项' },
+  { key: 'level', label: '等级', width: '56px', hideBelow: 'md' },
+  { key: 'rule', label: '命中规则', width: '112px', hideBelow: 'xl' },
+  { key: 'raisedAt', label: '提出时间', align: 'right', width: '80px', hideBelow: 'xl' },
+  { key: 'actions', label: '', align: 'right', width: '132px' },
 ]
 
 // SegmentedControl 的 model 是 string，这里换算成后端的 scope 取值
@@ -41,8 +46,26 @@ const scope = computed({
   get: () => store.scope.toLowerCase(),
   set: (value: string) => {
     store.scope = value.toUpperCase() as DecisionScope
+    store.page = 1
   },
 })
+
+const keywordInput = ref(store.keyword)
+let keywordTimer: number | undefined
+watch(keywordInput, (value) => {
+  window.clearTimeout(keywordTimer)
+  keywordTimer = window.setTimeout(() => {
+    store.keyword = value.trim()
+    store.page = 1
+  }, 250)
+})
+
+const clearKeyword = () => {
+  window.clearTimeout(keywordTimer)
+  keywordInput.value = ''
+  store.keyword = ''
+  store.page = 1
+}
 
 const scopeOptions = [
   { value: 'pending', label: '待批准' },
@@ -53,6 +76,10 @@ onMounted(() => {
   void store.load()
   void store.loadPendingCount()
 })
+
+onUnmounted(() => window.clearTimeout(keywordTimer))
+
+const reload = () => Promise.all([store.load(), store.loadPendingCount()])
 
 const reviewOpen = ref(false)
 const reviewMode = ref<'view' | 'approve' | 'reject'>('view')
@@ -102,16 +129,50 @@ const resolvedByText = (by: string | null) => (by === 'AI' ? 'AI' : '人工')
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div class="flex h-toolbar shrink-0 items-center gap-3 border-b border-separator px-3 lg:px-5">
-      <h1 class="text-body font-emphasis text-label">决策</h1>
-      <span class="tnum text-body text-label-tertiary">
-        {{ store.pendingTotal }} 条待批
-      </span>
-      <SegmentedControl v-model="scope" :items="scopeOptions" size="lg" class="lg:ml-2" />
-      <p class="ml-auto hidden text-caption text-label-tertiary lg:block">
-        自主决断（L0/L1）只留痕，不在这里打扰你
-      </p>
-    </div>
+    <ListToolbar>
+      <template #title>
+        <h1 class="text-body font-emphasis text-label">决策</h1>
+        <span class="tnum text-body text-label-tertiary">
+          {{ store.pendingTotal }} 条待批
+        </span>
+      </template>
+      <template #filters>
+        <div class="relative min-w-0 flex-1 sm:w-52 sm:flex-none">
+          <Icon
+            :as="Search"
+            size="inline"
+            class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-label-tertiary"
+          />
+          <Input
+            v-model="keywordInput"
+            size="lg"
+            placeholder="搜索任务标题或待决问题"
+            aria-label="搜索决策"
+            class="pl-7 pr-7"
+          />
+          <button
+            v-if="keywordInput"
+            type="button"
+            class="absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-control text-label-tertiary hover:bg-hover hover:text-label"
+            aria-label="清空决策搜索"
+            @click="clearKeyword"
+          >
+            <Icon :as="X" size="inline" />
+          </button>
+        </div>
+        <SegmentedControl v-model="scope" :items="scopeOptions" size="lg" />
+        <p class="hidden text-caption text-label-tertiary lg:block">
+          自主决断（L0/L1）只留痕，不在这里打扰你
+        </p>
+      </template>
+      <template #actions>
+        <Tooltip content="刷新决策列表">
+          <IconButton label="刷新决策列表" size="lg" :disabled="store.loading" @click="reload">
+            <Icon :as="RefreshCw" size="large" :class="store.loading ? 'animate-spin' : ''" />
+          </IconButton>
+        </Tooltip>
+      </template>
+    </ListToolbar>
 
     <div class="scroll-area min-h-0 flex-1 overflow-auto">
       <Table
@@ -119,37 +180,55 @@ const resolvedByText = (by: string | null) => (by === 'AI' ? 'AI' : '人工')
         :rows="store.items"
         row-key="id"
         :show-empty="false"
+        touch-rows
         @select="openReview($event, 'view')"
       >
         <template #cell="{ row, column }">
-          <RouterLink
-            v-if="column.key === 'taskId'"
-            :to="{ name: 'tasks', query: { taskId: String(row.taskId) } }"
-            class="tnum rounded-sm text-accent transition-colors duration-100 ease-apple hover:underline hover:underline-offset-2"
-            :aria-label="`在任务页查看任务 #${row.taskId}`"
-            @click.stop
-          >
-            #{{ row.taskId }}
-          </RouterLink>
-
-          <span v-else-if="column.key === 'level'" class="inline-flex items-center gap-1.5">
-            <DecisionLevelBadge :level="row.effectiveLevel" />
-            <!-- 自评与最终等级不一致 = 规则把它抬上去了，这是要给人看的关键信息 -->
-            <span v-if="row.levelEscalated" class="text-caption text-label-tertiary">
-              AI 自评 {{ row.aiLevel }}
+          <span v-if="column.key === 'question'" class="flex min-w-0 items-center gap-2">
+            <RouterLink
+              :to="{ name: 'tasks', query: { taskId: String(row.taskId) } }"
+              class="tnum shrink-0 rounded-sm text-caption text-label-tertiary transition-colors duration-100 ease-apple hover:text-accent hover:underline hover:underline-offset-2"
+              :aria-label="`在任务页查看任务 #${row.taskId}`"
+              @click.stop
+            >
+              #{{ row.taskId }}
+            </RouterLink>
+            <span class="truncate" :title="`${row.taskTitle} · ${row.question}`">
+              <span class="font-emphasis text-label">{{ row.taskTitle }}</span>
+              <span class="text-label-tertiary"> · {{ row.question }}</span>
             </span>
           </span>
 
-          <span v-else-if="column.key === 'rule'" class="text-label-secondary">
+          <span
+            v-else-if="column.key === 'level'"
+            class="inline-flex items-center gap-1"
+            :title="
+              row.levelEscalated
+                ? `AI 自评 ${row.aiLevel}，规则仲裁后按 ${row.effectiveLevel} 处理`
+                : undefined
+            "
+          >
+            <DecisionLevelBadge :level="row.effectiveLevel" compact />
+            <!-- 自评与最终等级不一致 = 规则把它抬上去了，这是要给人看的关键信息 -->
+            <span v-if="row.levelEscalated" class="text-caption text-warning" aria-hidden="true">↑</span>
+            <span v-if="row.levelEscalated" class="sr-only">
+              规则抬级，AI 自评 {{ row.aiLevel }}
+            </span>
+          </span>
+
+          <span
+            v-else-if="column.key === 'rule'"
+            class="truncate text-caption text-label-tertiary"
+            :title="row.matchedRuleName ?? undefined"
+          >
             {{ row.matchedRuleName ?? '—' }}
           </span>
 
-          <span v-else-if="column.key === 'question'" :title="row.question" class="block truncate">
-            <span>{{ row.taskTitle }}</span>
-            <span class="text-label-tertiary"> · {{ row.question }}</span>
-          </span>
-
-          <span v-else-if="column.key === 'raisedAt'" class="tnum text-label-tertiary">
+          <span
+            v-else-if="column.key === 'raisedAt'"
+            class="tnum text-caption text-label-tertiary"
+            :title="formatDateTime(row.raisedAt)"
+          >
             {{ formatRelative(row.raisedAt) }}
           </span>
 
@@ -176,7 +255,16 @@ const resolvedByText = (by: string | null) => (by === 'AI' ? 'AI' : '人工')
         title="正在加载…"
         description="从后端读取决策列表"
       />
-      <EmptyState v-else-if="store.error" title="加载失败" :description="store.error" />
+      <EmptyState v-else-if="store.error" title="加载失败" :description="store.error">
+        <Button size="sm" :disabled="store.loading" @click="reload">重新加载</Button>
+      </EmptyState>
+      <EmptyState
+        v-else-if="store.total === 0 && store.keyword"
+        title="没有匹配的决策"
+        description="换个任务标题或待决问题关键词再试。"
+      >
+        <Button size="sm" @click="clearKeyword">清除搜索</Button>
+      </EmptyState>
       <EmptyState
         v-else-if="store.total === 0"
         :title="store.scope === 'PENDING' ? '没有待批决策' : '还没有处理过决策'"
@@ -185,7 +273,11 @@ const resolvedByText = (by: string | null) => (by === 'AI' ? 'AI' : '人工')
             ? '任务遇到需要拍板的地方才会出现在这里'
             : '批准或驳回之后，记录会留在这'
         "
-      />
+      >
+        <Button size="sm" @click="scope = store.scope === 'PENDING' ? 'resolved' : 'pending'">
+          {{ store.scope === 'PENDING' ? '查看已处理' : '查看待批准' }}
+        </Button>
+      </EmptyState>
     </div>
 
     <Pagination v-model:page="store.page" v-model:page-size="store.pageSize" :total="store.total" />

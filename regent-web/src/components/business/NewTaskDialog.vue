@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ImagePlus, Plus, TriangleAlert, X } from '@lucide/vue'
+import { ImagePlus, Mic, Plus, Square, TriangleAlert, X } from '@lucide/vue'
 import { computed, onUnmounted, ref, watch } from 'vue'
 
 import { ACCEPTED_IMAGE_TYPES, MAX_IMAGE_BYTES, uploadTaskAttachment } from '@/api/attachments'
@@ -16,6 +16,7 @@ import Textarea from '@/components/ui/input/Textarea.vue'
 import Progress from '@/components/ui/progress/Progress.vue'
 import Select from '@/components/ui/select/Select.vue'
 import { useProjectDialog } from '@/composables/useProjectDialog'
+import { useSpeechToChinese, type SpeechLanguage } from '@/composables/useSpeechToChinese'
 import { useToast } from '@/composables/useToast'
 import { useTaskStore } from '@/stores/useTaskStore'
 import type { PluginSummary } from '@/types/api'
@@ -111,6 +112,28 @@ const pickedProjectValue = computed({
 
 const prompt = ref('')
 const priority = ref('0')
+const speechLanguage = ref<SpeechLanguage>('zh-CN')
+const speechLanguageItems = [
+  { value: 'zh-CN', label: '普通话' },
+  { value: 'en-US', label: 'English' },
+  { value: 'ja-JP', label: '日本語' },
+  { value: 'ko-KR', label: '한국어' },
+]
+const speech = useSpeechToChinese()
+const canUseSpeech = computed(
+  () => speech.supported && speech.secureContext && phase.value === 'editing',
+)
+const speechStatus = computed(() => {
+  if (!speech.supported) return '当前浏览器不支持语音输入'
+  if (!speech.secureContext) return '语音输入需要 HTTPS，或在本机 localhost 使用'
+  if (speech.error.value) return speech.error.value
+  if (speech.translating.value) return '正在翻译成中文…'
+  if (speech.listening.value) {
+    return speech.interim.value ? `正在聆听：${speech.interim.value}` : '正在聆听，说完后点击停止'
+  }
+  if (speech.translationFallback.value) return '翻译服务不可用，已保留识别原文'
+  return speechLanguage.value === 'zh-CN' ? '中文语音直接写入指令' : '识别后自动翻译成中文'
+})
 const plugins = ref<PluginSummary[]>([])
 const selectedPluginIds = ref<number[]>([])
 const loadingPlugins = ref(false)
@@ -190,7 +213,11 @@ const loadPlugins = async () => {
 
 // 每次打开都从头开始：上次填了一半的指令留在框里，下次打开容易被当成占位文字直接提交
 watch(open, (value) => {
-  if (!value) return
+  if (!value) {
+    speech.abort()
+    return
+  }
+  speech.reset()
   prompt.value = ''
   priority.value = '0'
   error.value = null
@@ -203,6 +230,36 @@ watch(open, (value) => {
   void loadProjects()
   void loadPlugins()
 })
+
+watch(speech.translationFallback, (fallback) => {
+  if (fallback) {
+    toast.warning(
+      '语音已识别，但当前浏览器无法翻译成中文',
+      '已保留识别原文；建议使用最新版 Chrome 或 Edge',
+    )
+  }
+})
+
+const appendSpeechText = (text: string) => {
+  const normalized = text.trim()
+  if (!normalized) return
+  const current = prompt.value.trimEnd()
+  if (!current) {
+    prompt.value = normalized
+    return
+  }
+  const needsSpace = /[A-Za-z0-9]$/.test(current) && /^[A-Za-z0-9]/.test(normalized)
+  prompt.value = `${current}${needsSpace ? ' ' : ''}${normalized}`
+}
+
+const toggleSpeech = () => {
+  if (!canUseSpeech.value) return
+  if (speech.listening.value) {
+    speech.stop()
+    return
+  }
+  speech.start(speechLanguage.value, appendSpeechText)
+}
 
 const addFiles = (files: File[]) => {
   for (const file of files) {
@@ -318,6 +375,7 @@ const announceUploadResult = async (
 
 const submit = async () => {
   if (!canSubmit.value) return
+  speech.abort()
   const target = projectId.value
   if (target === null) return
   error.value = null
@@ -399,6 +457,39 @@ onUnmounted(releasePreviews)
       </DialogField>
 
       <DialogField label="指令" hint="第一行会被拿去当任务标题，不用另写">
+        <div class="mb-2 flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            :variant="speech.listening.value ? 'primary' : 'default'"
+            :disabled="!canUseSpeech"
+            @click="toggleSpeech"
+          >
+            <Icon :as="speech.listening.value ? Square : Mic" size="inline" />
+            {{
+              speech.listening.value
+                ? '停止听写'
+                : speech.translating.value
+                  ? '翻译中…'
+                  : '语音输入'
+            }}
+          </Button>
+          <div class="w-28">
+            <Select
+              v-model="speechLanguage"
+              :items="speechLanguageItems"
+              size="sm"
+              :disabled="!canUseSpeech || speech.listening.value || speech.translating.value"
+            />
+          </div>
+          <span
+            class="min-w-0 flex-1 truncate text-caption text-label-tertiary"
+            :title="speechStatus"
+            role="status"
+            aria-live="polite"
+          >
+            {{ speechStatus }}
+          </span>
+        </div>
         <Textarea
           v-model="prompt"
           :rows="10"

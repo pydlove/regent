@@ -1,6 +1,7 @@
 package com.pydlove.regent.execution.application.command;
 
 import com.pydlove.regent.execution.domain.model.ExecRequest;
+import com.pydlove.regent.execution.domain.model.ExecResult;
 import com.pydlove.regent.execution.domain.model.RunEvent;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.model.Task;
@@ -17,6 +18,7 @@ import com.pydlove.regent.project.domain.model.EnvironmentEntry;
 import com.pydlove.regent.project.domain.model.EnvironmentScope;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
+import com.pydlove.regent.shared.kernel.TokenUsage;
 import com.pydlove.regent.support.ExecutionFakes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -62,7 +64,9 @@ class TaskRunServiceTest {
         events.wire(runs);
         projects.put(ExecutionFakes.Projects.profile(1L, DecisionLevel.L1, true));
         service = new TaskRunService(tasks, runs, events, attachments, projects, environments, plugins,
-                new RunSettlementService(tasks, decisions, new DecisionRaiseService(rules, decisions), bugs),
+                new RunSettlementService(tasks, decisions, new DecisionRaiseService(rules, decisions), bugs,
+                        taskId -> {
+                        }),
                 executor, Duration.ofMinutes(30));
     }
 
@@ -101,6 +105,19 @@ class TaskRunServiceTest {
 
             assertEquals(RunStatus.FAILED, run.getStatus());
             assertEquals(TaskStatus.FAILED, tasks.get(1L).getStatus());
+        }
+
+        @Test
+        void 平台关闭中断执行时任务留在执行中等待下次启动续跑() {
+            claimedTask();
+            executor.script(new ExecResult(RunStatus.INTERRUPTED, null, "th-closed", TokenUsage.ZERO,
+                    "平台正在重启", null, true, List.of(), List.of(), null));
+
+            TaskRun run = service.execute(TASK);
+
+            assertEquals(RunStatus.INTERRUPTED, run.getStatus());
+            assertEquals(TaskStatus.RUNNING, tasks.get(1L).getStatus(),
+                    "这不是业务失败，不能把任务判成 FAILED");
         }
 
         @Test

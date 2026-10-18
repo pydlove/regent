@@ -3,8 +3,15 @@ import type { Component } from 'vue'
 
 import Badge from '@/components/ui/badge/Badge.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
+import { formatCountBadge } from '@/utils/countBadge'
 
-type SidebarItem = { label: string; to: string; icon?: Component; badge?: string }
+type SidebarItem = {
+  label: string
+  to: string
+  icon?: Component
+  badge?: number
+  badgeLabel?: string
+}
 
 const props = withDefaults(
   defineProps<{
@@ -44,10 +51,12 @@ const props = withDefaults(
           />
           <span class="truncate">{{ item.label }}</span>
           <Badge
-            v-if="item.badge"
-            class="ml-auto text-label-secondary group-aria-[current=page]:bg-white/25 group-aria-[current=page]:text-white"
+            v-if="formatCountBadge(item.badge ?? 0)"
+            class="tnum ml-auto min-w-5 shrink-0 justify-center whitespace-nowrap px-1.5 text-label-secondary group-aria-[current=page]:bg-white/25 group-aria-[current=page]:text-white"
+            :title="item.badgeLabel"
+            :aria-label="item.badgeLabel"
           >
-            {{ item.badge }}
+            {{ formatCountBadge(item.badge ?? 0) }}
           </Badge>
         </RouterLink>
       </template>

@@ -19,6 +19,7 @@ DDD 的第一步是回答「哪里值得投入最多精力」。这个平台的�
 | `bug` | 支撑域 | 缺陷单、派生修复任务 | 中 |
 | `project` | 支撑域 | 项目注册、项目画像（路径/验证方式/等级覆盖） | 中 |
 | `plugin` | 支撑域 | 可复用能力包、不可变版本、任务固定版本绑定 | 中 |
+| `testing` | 支撑域 | Web / 接口测试用例、任务完成后自动执行、独立测试记录 | 中 |
 | `notification` | 通用域 | 邮件与推送投递、通道降级 | 低，能跑就行 |
 | `settings` | 通用域 | 平台设置、中继服务器连接与安装、状态监听 | 低 |
 | `shared` | 共享内核 | 值对象、领域事件基类、异常、ID | 低，但必须稳定 |
@@ -38,6 +39,8 @@ DDD 的第一步是回答「哪里值得投入最多精力」。这个平台的�
 | `Project` | `project` | 项目画像，含决策等级覆盖配置 |
 | `EnvironmentEntry` | `project` | 可全局或按项目归属的任务执行环境信息（键值、标签、描述） |
 | `Plugin` | `plugin` | 可复用代码/说明能力包，保存当前版本与启停状态 |
+| `TestCase` | `testing` | Web / 接口测试用例，含执行命令、可选上传脚本与启停状态 |
+| `TestCaseRun` | `testing` | 任务完成后的一次测试执行事实：退出码、摘要、输出与终态 |
 | `Requirement` | `requirement` | 需求，持有 `List<TaskId>` **弱引用** |
 | `Task` | `execution` | 执行单元，含状态机与 `codex_thread_id` |
 | `TaskRun` | `execution` | 单次执行记录，token 消耗、分支名、退出码 |
@@ -67,6 +70,7 @@ DDD 的第一步是回答「哪里值得投入最多精力」。这个平台的�
 PENDING ──queue──▶ QUEUED ──dispatch──▶ RUNNING ──success──▶ DONE
    │                                      │
    └────────────dispatch──────────────────┘
+                                          ├──platform restart──▶ QUEUED（保留 thread_id，重新派发）
                                           ├──needDecision──▶ BLOCKED ──approved──▶ RUNNING (resume)
                                           │                     │
                                           │                     └──rejected──▶ CANCELLED
@@ -79,6 +83,11 @@ PENDING ──queue──▶ QUEUED ──dispatch──▶ RUNNING ──succes
 
 `QUEUED` 表示用户已提交执行、但尚未取得执行位；它不算一次执行尝试。状态迁移**只能通过领域方法**发生，
 绝不允许 `task.setStatus(...)`：
+
+平台重启后，内部 codex 进程已经不存在，普通 `RUNNING` 任务不能继续留在库里。启动恢复会把对应的
+`task_run` 收敛为 `INTERRUPTED`，再由 `Task.requeueAfterInterruption()` 把任务放回 `QUEUED`。
+恢复不绕过分支审批：原分支还在就直接复用，分支已不存在仍会生成 L2 审批；外部执行者的租约记录
+不会被平台重启改写。
 
 ```java
 public class Task extends AggregateRoot<TaskId> {
@@ -648,6 +657,13 @@ class ArchitectureTest {
     **要外部执行者独占派发，得把 `regent.execution.dispatch.enabled` 关掉** ——
     内部心跳开着时，两边会抢同一批待执行任务（这是当前已知的取舍，没有做「按任务分配执行方式」）
 
+18. ✅ 重启恢复（2026-10-17）：`ExecutionRecoveryService` 在 `ApplicationReadyEvent` 时执行。
+    它先把内部执行遗留的 `RUNNING` 记录收敛为 `INTERRUPTED`，再核对所有 `RUNNING` 任务：
+    最新记录停在 `BLOCKED` 的等批任务不动，外部执行者持有租约的任务不动，其余无人接管的任务
+    通过 `Task.requeueAfterInterruption()` 回到 `QUEUED` 并立即触发正常派发。恢复按任务开事务，
+    重复执行幂等。`CodexCliAdapter` 同时实现了关闭钩子，正常停服会终止活动 codex 子进程，
+    避免新旧平台同时修改同一个工作区；强杀留下的孤儿记录由下一次启动恢复兜底。
+
 **执行链路落地时修掉的三个真缺陷**（由 `CodexCliAdapterTest` 与 `TaskLifecycleIT` 逼出来，
 每个的失败现象都离根因很远）：
 
@@ -666,16 +682,25 @@ class ArchitectureTest {
 token 四路用量、18 条事件、出参 JSON 全部落库，`changedFiles` 与实际改动一致。
 回归仍靠假 codex 脚本回放固定 JSONL 的集成测试，真机验证只有这一次，别拿它当回归。
 
+19. ✅ 测试用例（2026-10-17）：新增独立 `testing` 上下文。测试用例按项目归属，分为 `WEB` / `API`，
+    支持执行命令与上传 UTF-8 脚本；任务可在开始执行前绑定最多 10 条用例。任务成功完成后，
+    `TestCaseExecutionService` 在独立测试线程池中按绑定顺序执行，命令在项目目录运行并继承项目环境信息，
+    上传脚本通过 `REGENT_TEST_FILE` 暴露。每条测试单独落 `test_case_run`，记录 `QUEUED / RUNNING /
+    SUCCESS / FAILED / TIMEOUT / INTERRUPTED / SKIPPED`、退出码、摘要和截断后的输出；测试失败不回滚
+    已完成任务，也不占用 codex 执行位。`V21` 让执行记录支持没有任务号的手动执行；测试用例菜单可立即
+    执行单条或勾选多条批量执行，记录通过 `trigger_type` 区分 `TASK_COMPLETION` 与 `MANUAL`。
+    平台重启会把未收场测试收敛为 `INTERRUPTED`。
+
 ### 待办
 
 16. 邮件与推送通道，以及邮件里的「一键批准」入口（`POST /api/approvals/{token}`）
 17. 需求单与「需求 → 任务」的拆解链路；Bug 单的标记已修复 / 验证关闭 / 不修复状态流转
 18. 决策规则的维护界面（规则已在表里，缺的是增删改与启停的入口）
-19. 项目的改名 / 暂停 / 删除入口（`project.enabled` 已在，缺操作入口；写侧仓储目前只支持新增，
+20. 项目的改名 / 暂停 / 删除入口（`project.enabled` 已在，缺操作入口；写侧仓储目前只支持新增，
     见 `ProjectRepository` 的注释）。**读侧已落地**（2026-10-16）：前端有了项目管理页
     （`/projects`，项目画像 + 该项目的最近任务）与全站唯一的注册入口（工具栏 / 项目页 /
     新建任务「一个项目都没有」时的死结出口）；页面上刻意不摆暂停、删除这类点了没反应的假开关
-20. 附件的删除入口（上传与查看有了，删还没有）：删行不难，难的是**两个存储要一起改** ——
+21. 附件的删除入口（上传与查看有了，删还没有）：删行不难，难的是**两个存储要一起改** ——
     `task_attachment` / `bug_attachment` 行没了、`~/.regent/attachments` 下的文件还在，或者反过来。
     这类「双写」的收尾单独设计，别顺手加一个 DELETE 接口就算完
 

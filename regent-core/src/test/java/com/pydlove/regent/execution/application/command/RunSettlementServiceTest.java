@@ -13,6 +13,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -25,14 +28,17 @@ class RunSettlementServiceTest {
     private final ExecutionFakes.Decisions decisions = new ExecutionFakes.Decisions();
     private final ExecutionFakes.Rules rules = new ExecutionFakes.Rules();
     private final ExecutionFakes.Bugs bugs = new ExecutionFakes.Bugs();
+    private final List<Long> scheduledTests = new ArrayList<>();
     private final RunSettlementService settlement = new RunSettlementService(
-            tasks, decisions, new DecisionRaiseService(rules, decisions), bugs);
+            tasks, decisions, new DecisionRaiseService(rules, decisions), bugs,
+            taskId -> scheduledTests.add(taskId.value()));
 
     private Task task;
     private Bug bug;
 
     @BeforeEach
     void setUp() {
+        scheduledTests.clear();
         bug = Bug.reportManually(PROJECT, "导出文件名乱码", BugSeverity.MAJOR,
                 null, null, null);
         bugs.save(bug);
@@ -51,6 +57,8 @@ class RunSettlementServiceTest {
         settlement.finishTask(task.getId(), RunStatus.SUCCESS);
 
         assertEquals(TaskStatus.DONE, tasks.findById(task.getId()).orElseThrow().getStatus());
+        assertEquals(List.of(task.getId().value()), scheduledTests,
+                "任务成功后应调度绑定的测试用例");
         Bug reloaded = bugs.findById(bug.getId()).orElseThrow();
         assertEquals(BugStatus.FIXED, reloaded.getStatus());
         assertNotNull(reloaded.getFixedAt().orElse(null));
@@ -62,6 +70,7 @@ class RunSettlementServiceTest {
         settlement.finishTask(task.getId(), RunStatus.FAILED);
 
         assertEquals(TaskStatus.FAILED, tasks.findById(task.getId()).orElseThrow().getStatus());
+        assertEquals(List.of(), scheduledTests, "任务失败不应自动跑测试");
         assertEquals(BugStatus.FIXING, bugs.findById(bug.getId()).orElseThrow().getStatus());
     }
 

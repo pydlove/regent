@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Copy, Eye, EyeOff, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from '@lucide/vue'
+import { Copy, Eye, EyeOff, Pencil, Plus, RefreshCw, Search, Trash2, X } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 
 import { deleteEnvironment, listEnvironments } from '@/api/environments'
@@ -12,6 +12,8 @@ import Dialog from '@/components/ui/dialog/Dialog.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
+import Input from '@/components/ui/input/Input.vue'
+import ListToolbar from '@/components/ui/list-toolbar/ListToolbar.vue'
 import Table from '@/components/ui/table/Table.vue'
 import type { TableColumn } from '@/components/ui/table/table.types'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
@@ -35,6 +37,7 @@ const columns: TableColumn[] = [
 const entries = ref<EnvironmentEntry[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
+const keyword = ref('')
 const revealed = ref(new Set<number>())
 
 const dialogOpen = ref(false)
@@ -143,14 +146,59 @@ const toggleValue = (id: number) => {
 
 const scopeLabel = (entry: EnvironmentEntry) =>
   entry.scope === 'GLOBAL' ? '全局' : projectNames.value[entry.projectId ?? -1] ?? `项目 #${entry.projectId}`
+
+const filteredEntries = computed(() => {
+  const query = keyword.value.trim().toLocaleLowerCase('zh-CN')
+  if (!query) return entries.value
+  return entries.value.filter((entry) =>
+    [
+      entry.key,
+      scopeLabel(entry),
+      entry.description ?? '',
+      entry.tags.join(' '),
+    ].some((value) => value.toLocaleLowerCase('zh-CN').includes(query)),
+  )
+})
+const entryCountLabel = computed(() =>
+  keyword.value.trim()
+    ? `${filteredEntries.value.length} / ${entries.value.length}`
+    : String(entries.value.length),
+)
 </script>
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div class="flex h-toolbar shrink-0 items-center gap-3 border-b border-separator px-5">
-      <h1 class="text-body font-emphasis text-label">环境</h1>
-      <span class="tnum text-body text-label-tertiary">{{ entries.length }}</span>
-      <div class="ml-auto flex items-center gap-2">
+    <ListToolbar>
+      <template #title>
+        <h1 class="text-body font-emphasis text-label">环境</h1>
+        <span class="tnum text-body text-label-tertiary">{{ entryCountLabel }}</span>
+      </template>
+      <template #filters>
+        <div class="relative min-w-0 flex-1 sm:w-52 sm:flex-none">
+          <Icon
+            :as="Search"
+            size="inline"
+            class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-label-tertiary"
+          />
+          <Input
+            v-model="keyword"
+            size="lg"
+            placeholder="搜索环境键、归属或标签"
+            aria-label="搜索环境信息"
+            class="pl-7 pr-7"
+          />
+          <button
+            v-if="keyword"
+            type="button"
+            class="absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-control text-label-tertiary hover:bg-hover hover:text-label"
+            aria-label="清空环境搜索"
+            @click="keyword = ''"
+          >
+            <Icon :as="X" size="inline" />
+          </button>
+        </div>
+      </template>
+      <template #actions>
         <Tooltip content="刷新">
           <IconButton label="刷新环境信息" size="lg" :disabled="loading" @click="load">
             <Icon :as="RefreshCw" size="large" />
@@ -159,13 +207,13 @@ const scopeLabel = (entry: EnvironmentEntry) =>
         <Button variant="primary" size="lg" @click="openCreate">
           <Icon :as="Plus" size="inline" />新增环境信息
         </Button>
-      </div>
-    </div>
+      </template>
+    </ListToolbar>
 
     <div class="scroll-area min-h-0 flex-1 overflow-auto">
       <Table
         :columns="columns"
-        :rows="entries"
+        :rows="filteredEntries"
         :show-empty="false"
         @select="openDetail($event as EnvironmentEntry)"
       >
@@ -247,10 +295,13 @@ const scopeLabel = (entry: EnvironmentEntry) =>
         v-else-if="entries.length === 0"
         title="还没有环境信息"
         description="新增数据库地址、账号、密钥或其他任务执行时需要的信息。"
+      />
+      <EmptyState
+        v-else-if="filteredEntries.length === 0"
+        title="没有匹配的环境信息"
+        description="换个环境键、归属、标签或描述关键词再试。"
       >
-        <Button variant="primary" @click="openCreate">
-          <Icon :as="KeyRound" size="inline" />新增环境信息
-        </Button>
+        <Button @click="keyword = ''">清除搜索</Button>
       </EmptyState>
     </div>
 

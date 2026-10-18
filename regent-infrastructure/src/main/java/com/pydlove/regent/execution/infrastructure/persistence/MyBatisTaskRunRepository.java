@@ -44,6 +44,13 @@ public class MyBatisTaskRunRepository implements TaskRunRepository {
     }
 
     @Override
+    public List<TaskRun> findRunningInternal() {
+        return taskRunMapper.selectRunningInternal(TaskRun.EXECUTOR_INTERNAL).stream()
+                .map(TaskRunDataMapper::toDomain)
+                .toList();
+    }
+
+    @Override
     public boolean hasActiveLease(ProjectId projectId, Instant now) {
         return taskRunMapper.countActiveLeasesByProject(projectId.value(), TaskRun.EXECUTOR_AGENT, toDb(now)) > 0;
     }

@@ -84,4 +84,38 @@ class TaskContinuationTest {
             assertThrows(DomainException.class, task::beginContinuation);
         }
     }
+
+    @Nested
+    @DisplayName("重启恢复")
+    class RestartRecovery {
+
+        @Test
+        void 执行中的任务回到排队且保留会话与尝试次数() {
+            Task task = runningTaskWithThread();
+            int attempts = task.getAttemptCount();
+
+            task.requeueAfterInterruption();
+
+            assertEquals(TaskStatus.QUEUED, task.getStatus());
+            assertEquals("th-1", task.getCodexThreadId().orElseThrow());
+            assertEquals("codex/task-1", task.getBranchName().orElseThrow());
+            assertEquals(attempts, task.getAttemptCount(), "尝试次数由下一次 dispatch 统一增加");
+            assertTrue(task.getStartedAt().isEmpty());
+        }
+
+        @Test
+        void 没在执行的任意任务都不能走恢复入口() {
+            Task pending = Task.manual(PROJECT, "补测试", "给导出功能补测试", 0);
+
+            assertThrows(DomainException.class, pending::requeueAfterInterruption);
+        }
+
+        @Test
+        void 等待决策的任务不能被重启恢复抢走() {
+            Task task = runningTaskWithThread();
+            task.block(DecisionId.of(7L));
+
+            assertThrows(DomainException.class, task::requeueAfterInterruption);
+        }
+    }
 }

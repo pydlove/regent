@@ -56,6 +56,15 @@
         FOR UPDATE
     </select>
 
+    <!-- 启动恢复用：只取没有逻辑删除的执行中任务，数量应当很小。 -->
+    <select id="selectRunning" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskData">
+        SELECT <include refid="columns"/>
+        FROM task t
+        WHERE t.deleted = 0
+          AND t.status = 'RUNNING'
+        ORDER BY t.id
+    </select>
+
     <!--
       列表查询：两条标量子查询补的是「读模型才需要」的字段。
 

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRunMapper">
+
+    <sql id="runColumns">
+        id, project_id, task_id, trigger_type, test_case_id, test_case_name, test_type, command_text,
+        script_filename, script_content, script_hash, status, exit_code, summary, output,
+        queued_at, started_at, finished_at, created_at
+    </sql>
+
+    <select id="selectById"
+            resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRunRow">
+        SELECT <include refid="runColumns"/>
+        FROM test_case_run
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByTask"
+            resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRunRow">
+        SELECT <include refid="runColumns"/>
+        FROM test_case_run
+        WHERE task_id = #{taskId}
+        ORDER BY id DESC
+    </select>
+
+    <select id="selectByTestCase"
+            resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRunRow">
+        SELECT <include refid="runColumns"/>
+        FROM test_case_run
+        WHERE test_case_id = #{testCaseId}
+        ORDER BY id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectLatestByTestCaseIds"
+            resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRunRow">
+        SELECT <include refid="runColumns"/>
+        FROM (
+            SELECT r.*,
+                   ROW_NUMBER() OVER (PARTITION BY r.test_case_id ORDER BY r.id DESC) AS row_no
+            FROM test_case_run r
+            WHERE r.test_case_id IN
+            <foreach collection="testCaseIds" item="testCaseId" open="(" separator="," close=")">
+                #{testCaseId}
+            </foreach>
+        ) ranked
+        WHERE ranked.row_no = 1
+    </select>
+
+    <select id="selectActive"
+            resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRunRow">
+        SELECT <include refid="runColumns"/>
+        FROM test_case_run
+        WHERE status IN ('QUEUED', 'RUNNING')
+        ORDER BY id
+    </select>
+
+    <select id="countByTask" resultType="int">
+        SELECT COUNT(*)
+        FROM test_case_run
+        WHERE task_id = #{taskId}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO test_case_run (
+            project_id, task_id, trigger_type, test_case_id, test_case_name, test_type, command_text,
+            script_filename, script_content, script_hash, status, exit_code, summary, output,
+            queued_at, started_at, finished_at, created_at
+        ) VALUES (
+            #{projectId}, #{taskId}, #{triggerType}, #{testCaseId}, #{testCaseName}, #{testType}, #{commandText},
+            #{scriptFilename}, #{scriptContent}, #{scriptHash}, #{status}, #{exitCode}, #{summary}, #{output},
+            #{queuedAt}, #{startedAt}, #{finishedAt}, #{createdAt}
+        )
+    </insert>
+
+    <update id="update">
+        UPDATE test_case_run
+        SET status = #{status},
+            exit_code = #{exitCode},
+            summary = #{summary},
+            output = #{output},
+            started_at = #{startedAt},
+            finished_at = #{finishedAt}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

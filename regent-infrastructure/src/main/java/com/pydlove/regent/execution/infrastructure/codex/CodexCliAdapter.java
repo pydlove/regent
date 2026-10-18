@@ -23,7 +23,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -56,7 +58,7 @@ import java.util.concurrent.TimeUnit;
  *       原文件名可能带中文，而 argv 的编码随平台字符集走，落成问号时 codex 就找不到文件了。</li>
  * </ul>
  */
-public class CodexCliAdapter implements AgentExecutor {
+public class CodexCliAdapter implements AgentExecutor, AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(CodexCliAdapter.class);
 
@@ -71,6 +73,8 @@ public class CodexCliAdapter implements AgentExecutor {
     private final Path runDirectory;
     private final SchemaFileProvider schemaFileProvider;
     private final CodexJsonlParser parser = new CodexJsonlParser();
+    private final Set<Process> activeProcesses = ConcurrentHashMap.newKeySet();
+    private volatile boolean closing;
 
     public CodexCliAdapter(String command, Path runDirectory, SchemaFileProvider schemaFileProvider) {
         this.command = command;
@@ -86,6 +90,9 @@ public class CodexCliAdapter implements AgentExecutor {
 
     @Override
     public ExecResult execute(ExecRequest request, RunEventListener listener) {
+        if (closing) {
+            return interrupted(null, TokenUsage.ZERO);
+        }
         Path outputFile;
         Path errorFile;
         Path promptFile;
@@ -132,49 +139,133 @@ public class CodexCliAdapter implements AgentExecutor {
                     "无法启动执行器（" + executor() + "）：" + e.getMessage(), null);
         }
 
-        log.info("codex 已启动：项目={} 会话={} 超时={}",
-                request.projectId(), request.isResume() ? request.resumeThreadId() : "（新会话）", request.timeout());
+        activeProcesses.add(process);
+        if (closing) {
+            destroyTree(process, false);
+        }
 
-        StreamSummary summary = new StreamSummary();
-        Thread pump = new Thread(() -> pumpStdout(process, summary), "codex-stdout");
-        pump.setDaemon(true);
-        pump.start();
+        try {
+            log.info("codex 已启动：项目={} 会话={} 超时={}",
+                    request.projectId(), request.isResume() ? request.resumeThreadId() : "（新会话）", request.timeout());
 
-        boolean finished = await(process, listener, summary, request.timeout().toMillis());
-        if (!finished) {
-            process.destroy();
+            StreamSummary summary = new StreamSummary();
+            Thread pump = new Thread(() -> pumpStdout(process, summary), "codex-stdout");
+            pump.setDaemon(true);
+            pump.start();
+
+            boolean finished = await(process, listener, summary, request.timeout().toMillis());
+            if (!finished) {
+                process.destroy();
+                joinQuietly(pump);
+                drain(listener, summary);
+                destroyTree(process, true);
+                cleanup(outputFile, errorFile, promptFile);
+                GitRefGuard.cleanup(gitGuard);
+                if (closing) {
+                    log.info("codex 因平台关闭被中断：项目={} 会话={}", request.projectId(), summary.threadId());
+                    return interrupted(summary.threadId(), summary.tokens());
+                }
+                log.warn("codex 执行超时，已终止进程：项目={} 会话={}", request.projectId(), summary.threadId());
+                return new ExecResult(RunStatus.TIMEOUT, null, summary.threadId(), summary.tokens(),
+                        "执行超过 " + request.timeout() + " 未结束，已终止进程", readQuietly(outputFile),
+                        false, List.of(), List.of(), null);
+            }
             joinQuietly(pump);
             drain(listener, summary);
-            process.destroyForcibly();
+
+            int exitCode = process.exitValue();
+            String rawResult = readQuietly(outputFile);
+            String stderrTail = tail(readQuietly(errorFile));
             cleanup(outputFile, errorFile, promptFile);
             GitRefGuard.cleanup(gitGuard);
-            log.warn("codex 执行超时，已终止进程：项目={} 会话={}", request.projectId(), summary.threadId());
-            return new ExecResult(RunStatus.TIMEOUT, null, summary.threadId(), summary.tokens(),
-                    "执行超过 " + request.timeout() + " 未结束，已终止进程", readQuietly(outputFile),
-                    false, List.of(), List.of(), null);
-        }
-        joinQuietly(pump);
-        drain(listener, summary);
+            if (closing) {
+                log.info("codex 因平台关闭被中断：项目={} 会话={}", request.projectId(), summary.threadId());
+                return interrupted(summary.threadId(), summary.tokens());
+            }
+            log.info("codex 已结束：项目={} 退出码={} 会话={} token={}",
+                    request.projectId(), exitCode, summary.threadId(), summary.tokens().total());
 
-        int exitCode = process.exitValue();
-        String rawResult = readQuietly(outputFile);
-        String stderrTail = tail(readQuietly(errorFile));
-        cleanup(outputFile, errorFile, promptFile);
-        GitRefGuard.cleanup(gitGuard);
-        log.info("codex 已结束：项目={} 退出码={} 会话={} token={}",
-                request.projectId(), exitCode, summary.threadId(), summary.tokens().total());
+            if (exitCode != 0) {
+                return CodexReportTranslator.invalid(exitCode, summary.threadId(), summary.tokens(),
+                        "执行器退出码 " + exitCode + "：" + firstLine(stderrTail), rawResult);
+            }
+            Optional<CodexJsonlParser.CodexReport> report = parser.parseReport(rawResult);
+            if (report.isEmpty()) {
+                return CodexReportTranslator.invalid(exitCode, summary.threadId(), summary.tokens(),
+                        "末条消息不是约定结构的 JSON，无法读出结论", rawResult);
+            }
+            return CodexReportTranslator.translate(report.get(), exitCode, summary.threadId(),
+                    summary.tokens(), rawResult);
+        } finally {
+            activeProcesses.remove(process);
+        }
+    }
 
-        if (exitCode != 0) {
-            return CodexReportTranslator.invalid(exitCode, summary.threadId(), summary.tokens(),
-                    "执行器退出码 " + exitCode + "：" + firstLine(stderrTail), rawResult);
+    /** 关闭适配器时终止所有由本实例拉起的 codex 进程，避免新旧平台同时修改同一个工作区。 */
+    @Override
+    public void close() {
+        closing = true;
+        List<Process> processes = List.copyOf(activeProcesses);
+        if (processes.isEmpty()) {
+            return;
         }
-        Optional<CodexJsonlParser.CodexReport> report = parser.parseReport(rawResult);
-        if (report.isEmpty()) {
-            return CodexReportTranslator.invalid(exitCode, summary.threadId(), summary.tokens(),
-                    "末条消息不是约定结构的 JSON，无法读出结论", rawResult);
+        for (Process process : processes) {
+            destroyTree(process, false);
         }
-        return CodexReportTranslator.translate(report.get(), exitCode, summary.threadId(),
-                summary.tokens(), rawResult);
+
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        for (Process process : processes) {
+            while (process.isAlive() && System.nanoTime() < deadline) {
+                try {
+                    process.waitFor(50, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        for (Process process : processes) {
+            if (process.isAlive()) {
+                destroyTree(process, true);
+            }
+        }
+        log.info("codex 适配器已关闭，终止了 {} 个活动进程", processes.size());
+    }
+
+    private static ExecResult interrupted(String threadId, TokenUsage tokens) {
+        return new ExecResult(RunStatus.INTERRUPTED, null, threadId, tokens,
+                "平台正在重启，执行进程已中断；下次启动会自动续跑", null, true,
+                List.of(), List.of(), null);
+    }
+
+    private static void destroyTree(Process process, boolean forcibly) {
+        List<ProcessHandle> descendants;
+        try {
+            descendants = process.descendants().toList();
+        } catch (RuntimeException e) {
+            // 某些平台/沙箱不允许枚举子进程；主进程仍必须被杀掉。
+            descendants = List.of();
+        }
+        for (ProcessHandle descendant : descendants) {
+            try {
+                if (forcibly) {
+                    descendant.destroyForcibly();
+                } else {
+                    descendant.destroy();
+                }
+            } catch (RuntimeException ignored) {
+                // 子进程可能刚好自行退出，继续处理主进程。
+            }
+        }
+        try {
+            if (forcibly) {
+                process.destroyForcibly();
+            } else {
+                process.destroy();
+            }
+        } catch (RuntimeException ignored) {
+            // 进程已经退出时不再重复报错。
+        }
     }
 
     /** 交给模型的完整指令：任务本身 + 出参约定。约定必须随指令一起给，否则模型不知道要按什么格式汇报。 */

@@ -1,4 +1,6 @@
 <script setup lang="ts" generic="T extends Record<string, unknown>">
+import { computed } from 'vue'
+
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
 
 import type { TableColumn } from './table.types'
@@ -9,13 +11,17 @@ const props = withDefaults(
     rows: T[]
     rowKey?: string
     selectedId?: string | number | null
+    /** 批量勾选的行。与 selectedId（当前详情行）分开：前者是淡强调色底，后者才是实心蓝。 */
+    checkedIds?: ReadonlyArray<string | number>
+    /** 触屏列表把行高抬到 36px；桌面仍保持 macOS 的 28px 紧凑行。 */
+    touchRows?: boolean
     /**
      * 空态兜底。调用方自己有更具体的空态（「没有待批决策」这类）时传 false，
      * 否则表格的「暂无数据」会和页面的空态**同时出现**，一个屏幕上两个空。
      */
     showEmpty?: boolean
   }>(),
-  { rowKey: 'id', selectedId: null, showEmpty: true },
+  { rowKey: 'id', selectedId: null, checkedIds: () => [], touchRows: false, showEmpty: true },
 )
 
 const emit = defineEmits<{ select: [row: T]; rowDblclick: [row: T] }>()
@@ -24,6 +30,8 @@ const HIDE_BELOW_CLASS: Record<NonNullable<TableColumn['hideBelow']>, string> = 
   sm: 'hidden sm:table-cell',
   md: 'hidden md:table-cell',
   lg: 'hidden lg:table-cell',
+  xl: 'hidden xl:table-cell',
+  '2xl': 'hidden 2xl:table-cell',
 }
 
 const hideClass = (column: TableColumn) =>
@@ -36,6 +44,11 @@ function cellText(row: T, key: string): string {
 
 function isSelected(row: T): boolean {
   return props.selectedId !== null && row[props.rowKey] === props.selectedId
+}
+
+const checkedKeys = computed(() => new Set(props.checkedIds.map(String)))
+function isChecked(row: T): boolean {
+  return checkedKeys.value.has(String(row[props.rowKey]))
 }
 </script>
 
@@ -60,6 +73,7 @@ function isSelected(row: T): boolean {
             v-for="column in columns"
             :key="column.key"
             :style="{ width: column.width }"
+            scope="col"
             :class="[
               'sticky top-0 z-10 h-6 select-none border-b border-separator bg-sidebar px-2 text-caption font-emphasis text-label-secondary',
               column.align === 'right' ? 'text-right' : 'text-left',
@@ -78,10 +92,17 @@ function isSelected(row: T): boolean {
           v-for="row in rows"
           :key="String(row[rowKey])"
           :class="[
-            'group h-row cursor-default',
-            isSelected(row) ? 'bg-accent text-white' : 'hover:bg-hover',
+            'group cursor-default',
+            touchRows ? 'h-control-xl sm:h-row' : 'h-row',
+            isSelected(row)
+              ? 'bg-accent text-white'
+              : isChecked(row)
+                ? 'bg-accent/[0.06] hover:bg-accent/[0.09]'
+                : 'hover:bg-hover',
           ]"
+          :aria-selected="isSelected(row)"
           :data-selected="isSelected(row) ? 'true' : undefined"
+          :data-checked="isChecked(row) ? 'true' : undefined"
           @click="emit('select', row)"
           @dblclick="emit('rowDblclick', row)"
         >

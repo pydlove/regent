@@ -9,5 +9,5 @@ export type TableColumn = {
    * 窄屏收起断点：视口小于该断点时这一列隐藏。
    * 手机装不下整张表，次要列先收起来 —— 完整信息在详情面板与弹框里，列表只保留能定位到那一行的列。
    */
-  hideBelow?: 'sm' | 'md' | 'lg'
+  hideBelow?: 'sm' | 'md' | 'lg' | 'xl' | '2xl'
 }

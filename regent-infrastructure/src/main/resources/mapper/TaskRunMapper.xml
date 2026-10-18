@@ -38,6 +38,18 @@
         ORDER BY attempt_no
     </select>
 
+    <!--
+      平台内部执行的孤儿记录。只按 executor 过滤，不按任务状态过滤：
+      同一次任务可能因为连续重启留下多条 RUNNING，全部都要收敛，不能只处理最后一条。
+    -->
+    <select id="selectRunningInternal" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskRunData">
+        SELECT <include refid="columns"/>
+        FROM task_run
+        WHERE status = 'RUNNING'
+          AND executor = #{executor}
+        ORDER BY task_id, attempt_no
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO task_run (task_id, attempt_no, status, exit_code, token_input, token_cached_input,
                               token_output, branch_name, executor, agent_name, lease_expires_at,

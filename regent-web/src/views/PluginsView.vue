@@ -11,6 +11,7 @@ import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
 import Input from '@/components/ui/input/Input.vue'
+import ListToolbar from '@/components/ui/list-toolbar/ListToolbar.vue'
 import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
 import Switch from '@/components/ui/switch/Switch.vue'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
@@ -104,17 +105,14 @@ const toggle = async (plugin: PluginSummary, enabled: boolean) => {
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div
-      class="flex min-h-toolbar shrink-0 flex-wrap items-center gap-2 border-b border-separator px-4 py-2 sm:px-5 lg:h-toolbar lg:flex-nowrap lg:py-0"
-    >
-      <div class="mr-auto flex min-w-0 items-baseline gap-2">
+    <ListToolbar>
+      <template #title>
         <h1 class="text-body font-emphasis text-label">插件</h1>
         <span class="tnum text-caption text-label-tertiary">
           {{ enabledCount }} 启用 / {{ plugins.length }} 全部
         </span>
-      </div>
-
-      <div class="ml-auto flex items-center gap-2">
+      </template>
+      <template #actions>
         <Tooltip content="刷新">
           <IconButton label="刷新插件" size="lg" :disabled="loading" @click="load">
             <Icon :as="RefreshCw" size="large" />
@@ -123,10 +121,9 @@ const toggle = async (plugin: PluginSummary, enabled: boolean) => {
         <Button variant="primary" size="lg" @click="openCreate">
           <Icon :as="Plus" size="inline" />新增插件
         </Button>
-      </div>
-
-      <div class="order-last flex w-full items-center gap-2 sm:order-none sm:ml-auto sm:w-auto">
-        <div class="relative min-w-0 flex-1 sm:w-56 sm:flex-none">
+      </template>
+      <template #filters>
+        <div class="relative min-w-0 flex-1 sm:w-52 sm:flex-none">
           <Icon
             :as="Search"
             size="inline"
@@ -150,8 +147,8 @@ const toggle = async (plugin: PluginSummary, enabled: boolean) => {
           </button>
         </div>
         <SegmentedControl v-model="statusFilterModel" :items="statusItems" size="lg" />
-      </div>
-    </div>
+      </template>
+    </ListToolbar>
 
     <div class="scroll-area min-h-0 flex-1 overflow-auto">
       <div
@@ -239,11 +236,7 @@ const toggle = async (plugin: PluginSummary, enabled: boolean) => {
         v-else-if="plugins.length === 0"
         title="插件库还是空的"
         description="把已经写好的 Kafka 接入、数据库工具或其他组件存进来，任务执行时就不用每次重新生成。"
-      >
-        <Button variant="primary" @click="openCreate">
-          <Icon :as="Blocks" size="inline" />新增插件
-        </Button>
-      </EmptyState>
+      />
       <EmptyState
         v-else-if="filteredPlugins.length === 0"
         title="没有匹配的插件"

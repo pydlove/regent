@@ -24,6 +24,7 @@ Regent 换个做法：需求一次性录进平台，平台逐个调起 Codex 执
 | 分级决策 | L0–L3 四级；AI 自评等级与规则命中等级取高者（就高不就低） |
 | 决策留痕 | 每条决策记录「谁做的决定」与依据规则，可事后追溯 |
 | 断点续跑 | 依赖 `codex exec` 的 `thread_id`，人工批准后从断点接着执行，上下文不丢 |
+| 重启恢复 | 平台重启后把遗留的内部执行标记为「已中断」，任务自动重新排队；有 `thread_id` 时继续原会话 |
 | 缺陷闭环 | 执行中发现的问题进 Bug 单，派生修复任务，按等级决定自动修还是等批 |
 | 插件能力库 | 把 Kafka 读取、数据库工具等组件存成固定版本能力包，执行时直接交给 AI 复用 |
 | 双通道通知 | 邮件为基座，微信/飞书推送为增强，通道失败逐级降级 |
@@ -132,7 +133,8 @@ deploy/                 本地启停脚本 + 远程发布脚本
 - 领域层：`Task` 聚合（带守卫的状态机）、`TaskRun` 聚合（一次尝试一行不可改写的事实）、
   决策分级仲裁 `DecisionArbiter`（规则从 `decision_rule` 表加载，解析失败即报错不跳过）
 - 应用层：`TaskRunService`（一次尝试的完整生命周期，含自动决断循环与人工批准后的续跑）、
-  `TaskDispatchService`（认领 + 后台执行，并发上限与失败冷却）、`DecisionRaiseService`（分级入口）
+  `TaskDispatchService`（认领 + 后台执行，并发上限与失败冷却）、`ExecutionRecoveryService`
+  （启动时收敛重启遗留的执行并把任务放回队列）、`DecisionRaiseService`（分级入口）
 - 基础设施：`CodexCliAdapter`（进程、超时、stdout/stderr 分流、JSONL、末条消息）、
   `GitBranchManager`（每个任务一条分支，绝不直接改主干）、MyBatis 仓储
 - 接口：`GET /api/tasks`（支持 `status` / `projectId` / `keyword` / 分页）、`POST /api/tasks`（人工录入）、

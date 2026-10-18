@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.testing.infrastructure.persistence.TestCaseMapper">
+
+    <sql id="testCaseColumns">
+        id, project_id, name, test_type, description, command_text,
+        script_filename, script_content, script_hash, enabled, created_at, updated_at
+    </sql>
+
+    <select id="selectById"
+            resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRow">
+        SELECT <include refid="testCaseColumns"/>
+        FROM test_case
+        WHERE id = #{id} AND deleted = 0
+    </select>
+
+    <select id="selectByIdForUpdate"
+            resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRow">
+        SELECT <include refid="testCaseColumns"/>
+        FROM test_case
+        WHERE id = #{id} AND deleted = 0
+        FOR UPDATE
+    </select>
+
+    <select id="selectAll"
+            resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRow">
+        SELECT <include refid="testCaseColumns"/>
+        FROM test_case
+        WHERE deleted = 0
+        ORDER BY enabled DESC, updated_at DESC, id DESC
+    </select>
+
+    <select id="selectByProject"
+            resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRow">
+        SELECT <include refid="testCaseColumns"/>
+        FROM test_case
+        WHERE project_id = #{projectId} AND deleted = 0
+        ORDER BY enabled DESC, updated_at DESC, id DESC
+    </select>
+
+    <select id="countByName" resultType="int">
+        SELECT COUNT(*)
+        FROM test_case
+        WHERE project_id = #{projectId}
+          AND name = #{name}
+          AND deleted = 0
+        <if test="excludingId != null">
+            AND id != #{excludingId}
+        </if>
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO test_case (
+            project_id, name, test_type, description, command_text,
+            script_filename, script_content, script_hash, enabled, deleted, created_at, updated_at
+        ) VALUES (
+            #{projectId}, #{name}, #{testType}, #{description}, #{commandText},
+            #{scriptFilename}, #{scriptContent}, #{scriptHash}, #{enabled}, 0, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="update">
+        UPDATE test_case
+        SET name = #{name},
+            test_type = #{testType},
+            description = #{description},
+            command_text = #{commandText},
+            script_filename = #{scriptFilename},
+            script_content = #{scriptContent},
+            script_hash = #{scriptHash},
+            enabled = #{enabled},
+            updated_at = #{updatedAt}
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="softDelete">
+        UPDATE test_case
+        SET deleted = 1,
+            enabled = 0,
+            updated_at = #{updatedAt}
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <select id="selectBindingsByTask"
+            resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseBindingRow">
+        SELECT tc.id AS test_case_id,
+               tc.name,
+               tc.test_type,
+               tc.command_text,
+               tc.script_filename,
+               tc.script_content,
+               tc.script_hash,
+               tc.enabled,
+               tc.deleted,
+               ttc.bound_at
+        FROM task_test_case ttc
+        JOIN test_case tc ON tc.id = ttc.test_case_id
+        WHERE ttc.task_id = #{taskId}
+        ORDER BY tc.name, tc.id
+    </select>
+
+    <delete id="deleteBindingsByTask">
+        DELETE FROM task_test_case
+        WHERE task_id = #{taskId}
+    </delete>
+
+    <insert id="insertBinding">
+        INSERT INTO task_test_case (task_id, test_case_id, bound_at)
+        VALUES (#{taskId}, #{testCaseId}, #{boundAt})
+    </insert>
+
+</mapper>

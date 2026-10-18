@@ -3,7 +3,9 @@ import {
   AlertTriangle,
   Blocks,
   Bot,
+  Check,
   ChevronLeft,
+  Copy,
   ImagePlus,
   Pencil,
   Play,
@@ -31,6 +33,7 @@ import RunDetailDialog from '@/components/business/RunDetailDialog.vue'
 import RunStatusBadge from '@/components/business/RunStatusBadge.vue'
 import TaskEditDialog from '@/components/business/TaskEditDialog.vue'
 import TaskPluginDialog from '@/components/business/TaskPluginDialog.vue'
+import TaskTestCasePanel from '@/components/business/TaskTestCasePanel.vue'
 import TaskStatusBadge from '@/components/business/TaskStatusBadge.vue'
 import WorkItemSwitcher from '@/components/business/WorkItemSwitcher.vue'
 import Badge from '@/components/ui/badge/Badge.vue'
@@ -41,6 +44,7 @@ import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
 import Input from '@/components/ui/input/Input.vue'
+import ListToolbar from '@/components/ui/list-toolbar/ListToolbar.vue'
 import Pagination from '@/components/ui/pagination/Pagination.vue'
 import Select from '@/components/ui/select/Select.vue'
 import Table from '@/components/ui/table/Table.vue'
@@ -72,7 +76,13 @@ import {
   type TaskSource,
   type TaskStatus,
 } from '@/types/task'
-import { formatDateTime, formatDuration, formatDurationMillis, formatTokens } from '@/utils/format'
+import {
+  formatDateTime,
+  formatDuration,
+  formatDurationMillis,
+  formatRelative,
+  formatTokens,
+} from '@/utils/format'
 import { parseTaskIdQuery } from '@/utils/taskNavigation'
 import BugView from '@/views/BugsView.vue'
 
@@ -93,26 +103,27 @@ let routeAppliedFilter = false
 
 const sourceMeta: Record<
   TaskSource,
-  { label: string; tone: 'neutral' | 'accent' | 'warning' }
+  { label: string; tone: 'neutral' | 'accent' | 'warning'; text: string }
 > = {
-  MANUAL: { label: '人工', tone: 'neutral' },
-  REQUIREMENT: { label: '需求', tone: 'accent' },
-  BUG_FIX: { label: 'Bug 修复', tone: 'warning' },
+  MANUAL: { label: '人工', tone: 'neutral', text: 'text-label-tertiary' },
+  REQUIREMENT: { label: '需求', tone: 'accent', text: 'text-accent' },
+  BUG_FIX: { label: 'Bug 修复', tone: 'warning', text: 'text-warning' },
 }
 
 const columns = computed<TableColumn[]>(() => [
   { key: 'selection', label: '', width: '36px' },
-  { key: 'id', label: '#', width: '56px', numeric: true },
+  // 编号并进标题列：它只是定位符，不值得单独占掉 56px 的标题宽度
   { key: 'title', label: '任务' },
-  { key: 'source', label: '类型', width: '88px' },
+  { key: 'source', label: '类型', width: '72px', hideBelow: 'xl' },
   // 选定具体项目后，项目名对每一行都一样，不再占列表宽度
   ...(store.projectId === null
-    ? [{ key: 'projectName', label: '项目', width: '144px', hideBelow: 'md' as const }]
+    ? [{ key: 'projectName', label: '项目', width: '116px', hideBelow: 'xl' as const }]
     : []),
-  { key: 'level', label: '等级', width: '128px', hideBelow: 'md' as const },
-  { key: 'status', label: '状态', width: '104px' },
-  { key: 'duration', label: '耗时', align: 'right', width: '72px', hideBelow: 'lg' as const },
-  { key: 'tokens', label: 'Token', align: 'right', width: '80px', hideBelow: 'lg' as const },
+  { key: 'level', label: '等级', width: '60px', hideBelow: 'md' },
+  { key: 'status', label: '状态', width: '88px' },
+  { key: 'updated', label: '更新', width: '80px', hideBelow: '2xl' },
+  { key: 'duration', label: '耗时', align: 'right', width: '76px', hideBelow: 'xl' },
+  { key: 'tokens', label: 'Token', align: 'right', width: '68px', hideBelow: 'xl' },
 ])
 
 const statusOptions = [
@@ -184,6 +195,13 @@ watch(
 )
 
 const selected = computed(() => store.selected)
+const codexThreadId = computed(() => store.detail?.threadId ?? null)
+const codexSessionStatus = computed(() => {
+  if (!store.detail) return { label: '读取中', tone: 'neutral' as const }
+  return codexThreadId.value
+    ? { label: '已建立', tone: 'success' as const }
+    : { label: '尚未建立', tone: 'neutral' as const }
+})
 const focusedTask = computed(() => {
   const taskId = store.taskIdFilter
   return taskId === null ? null : store.items.find((row) => row.id === taskId) ?? null
@@ -210,6 +228,59 @@ const openEdit = () => {
 const selectedIds = ref<Set<number>>(new Set())
 const selectableRows = computed(() => store.items.filter((row) => canDelete(row.status)))
 const selectedCount = computed(() => selectedIds.value.size)
+const copiedThreadId = ref(false)
+let copyThreadIdTimer: number | undefined
+
+const copyThreadId = async () => {
+  const threadId = codexThreadId.value
+  if (!threadId) return
+
+  let copied = false
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(threadId)
+      copied = true
+    }
+  } catch {
+    // 非 HTTPS 或浏览器拒绝剪贴板权限时，退回选中文本框复制
+  }
+
+  if (!copied) {
+    const field = document.createElement('textarea')
+    try {
+      field.value = threadId
+      field.setAttribute('readonly', '')
+      field.className = 'fixed left-[-9999px] top-0'
+      document.body.appendChild(field)
+      field.select()
+      copied = document.execCommand('copy')
+    } catch {
+      copied = false
+    } finally {
+      field.remove()
+    }
+  }
+
+  if (!copied) {
+    toast.warning('会话 ID 没有复制成功', '可以直接选中会话 ID 手动复制')
+    return
+  }
+
+  copiedThreadId.value = true
+  window.clearTimeout(copyThreadIdTimer)
+  copyThreadIdTimer = window.setTimeout(() => {
+    copiedThreadId.value = false
+  }, 1600)
+  toast.success('Codex 会话 ID 已复制')
+}
+
+const hasListFilters = computed(
+  () =>
+    store.statusFilter !== 'ALL' ||
+    store.levelFilter !== 'ALL' ||
+    store.keyword.trim() !== '' ||
+    store.taskIdFilter !== null,
+)
 const dispatchableSelectedIds = computed(() =>
   store.items
     .filter((row) => selectedIds.value.has(row.id) && canBatchDispatch(row.status))
@@ -223,6 +294,10 @@ const selectionState = computed<boolean | 'indeterminate'>(() => {
 })
 
 const isRowSelected = (id: number) => selectedIds.value.has(id)
+
+const clearRowSelection = () => {
+  selectedIds.value = new Set()
+}
 
 const setRowSelected = (id: number, checked: boolean) => {
   const next = new Set(selectedIds.value)
@@ -302,6 +377,15 @@ const dismissTaskFilter = () => {
   const query = { ...route.query }
   delete query.taskId
   void router.replace({ name: 'tasks', query })
+}
+
+const resetListFilters = () => {
+  window.clearTimeout(keywordTimer)
+  keywordInput.value = ''
+  store.statusFilter = 'ALL'
+  store.levelFilter = 'ALL'
+  store.keyword = ''
+  if (store.taskIdFilter !== null) dismissTaskFilter()
 }
 
 const openReview = (mode: 'approve' | 'reject') => {
@@ -671,6 +755,8 @@ watch(
   () => store.selected?.id,
   (id) => {
     stopRunsTimer()
+    window.clearTimeout(copyThreadIdTimer)
+    copiedThreadId.value = false
     promptOpen.value = false
     editOpen.value = false
     runDialogOpen.value = false
@@ -727,6 +813,7 @@ watch(
 onUnmounted(() => {
   stopRunsTimer()
   stopTasksTimer()
+  window.clearTimeout(copyThreadIdTimer)
 })
 </script>
 
@@ -734,62 +821,36 @@ onUnmounted(() => {
   <BugView v-if="bugView" />
   <div v-else class="flex h-full min-h-0">
     <div class="flex min-w-0 flex-1 flex-col">
-      <!--
-        手机端筛选行折成两行：标题/计数/筛选一行，操作区（搜索、刷新、新建）占满一行。
-        较宽桌面（xl）恢复 52px 单行；lg 仍保留折行，避免新增页签挤掉操作区。
-      -->
-      <div
-        class="flex min-h-toolbar shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-separator px-3 py-1.5 xl:h-toolbar xl:flex-nowrap xl:px-5 xl:py-0"
-      >
-        <h1 class="text-body font-emphasis text-label">任务</h1>
-        <WorkItemSwitcher value="TASKS" />
-        <span class="tnum text-body text-label-tertiary">
-          {{ store.total }} / {{ store.taskTotal }}
-        </span>
-        <button
-          v-if="store.taskIdFilter !== null"
-          type="button"
-          class="inline-flex h-control items-center gap-1.5 rounded-full border border-accent/20 bg-accent/10 px-2.5 text-caption font-emphasis text-accent transition-colors duration-100 ease-apple hover:bg-accent/15"
-          title="清除任务筛选"
-          @click="dismissTaskFilter"
-        >
-          <span class="tnum">任务 #{{ store.taskIdFilter }}</span>
-          <Icon :as="X" size="inline" />
-        </button>
-        <Select v-model="statusFilter" :items="statusOptions" size="lg" class="w-32 lg:ml-2" />
-        <Select v-model="levelFilter" :items="levelOptions" size="lg" class="w-36" />
-        <div class="ml-auto flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto">
-          <Tooltip v-if="dispatchableSelectedIds.length > 0" :content="dispatchHint">
-            <Button
-              variant="primary"
-              size="lg"
-              :disabled="dispatchingSelected"
-              @click="dispatchSelected"
-            >
-              <Icon :as="Play" size="inline" />
-              {{
-                dispatchingSelected
-                  ? '派发中…'
-                  : `批量派发给 codex ${dispatchableSelectedIds.length} 个`
-              }}
-            </Button>
-          </Tooltip>
-          <Button
-            v-if="selectedCount > 0"
-            variant="danger"
-            size="lg"
-            :disabled="deleting"
-            @click="requestDelete([...selectedIds])"
-          >
-            <Icon :as="Trash2" size="inline" />
-            批量删除 {{ selectedCount }} 个
-          </Button>
+      <ListToolbar>
+        <template #title>
+          <h1 class="text-body font-emphasis text-label">任务</h1>
+          <WorkItemSwitcher value="TASKS" />
+          <span class="tnum text-body text-label-tertiary">
+            {{ store.total }} / {{ store.taskTotal }}
+          </span>
+        </template>
+        <template #filters>
           <Input
             v-model="keywordInput"
             placeholder="搜索任务标题"
             size="lg"
-            class="w-full sm:w-52"
+            aria-label="搜索任务标题"
+            class="min-w-0 flex-1 sm:w-52 sm:flex-none"
           />
+          <Select v-model="statusFilter" :items="statusOptions" size="lg" class="w-32" />
+          <Select v-model="levelFilter" :items="levelOptions" size="lg" class="w-36" />
+          <button
+            v-if="store.taskIdFilter !== null"
+            type="button"
+            class="inline-flex h-control items-center gap-1.5 rounded-full border border-accent/20 bg-accent/10 px-2.5 text-caption font-emphasis text-accent transition-colors duration-100 ease-apple hover:bg-accent/15"
+            title="清除任务筛选"
+            @click="dismissTaskFilter"
+          >
+            <span class="tnum">任务 #{{ store.taskIdFilter }}</span>
+            <Icon :as="X" size="inline" />
+          </button>
+        </template>
+        <template #actions>
           <Tooltip content="刷新任务列表">
             <IconButton
               label="刷新任务列表"
@@ -804,11 +865,60 @@ onUnmounted(() => {
               />
             </IconButton>
           </Tooltip>
-          <Tooltip content="新建任务">
-            <IconButton label="新建任务" size="lg" @click="createOpen = true">
-              <Icon :as="Plus" size="large" />
-            </IconButton>
+          <Button variant="primary" size="lg" @click="createOpen = true">
+            <Icon :as="Plus" size="inline" />新建任务
+          </Button>
+        </template>
+      </ListToolbar>
+
+      <!--
+        批量操作只在真的选中了行时出现。常驻在工具栏里会让 1024–1440 这一段最常用的宽度
+        同时挤着筛选、搜索、刷新、新建和两条长按钮；macOS 的列表也把选区动作放在上下文位置。
+      -->
+      <div
+        v-if="selectedCount > 0"
+        class="flex min-h-toolbar-compact shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-separator bg-accent/6 px-3 py-1.5 lg:px-5"
+        aria-live="polite"
+      >
+        <p class="text-caption text-label">
+          已选择 <span class="tnum font-emphasis">{{ selectedCount }}</span> 项
+        </p>
+        <button
+          type="button"
+          class="inline-flex items-center gap-0.5 text-caption text-accent transition-colors duration-100 ease-apple hover:text-accent/80"
+          @click="clearRowSelection"
+        >
+          <Icon :as="X" size="inline" />清除选择
+        </button>
+        <p class="hidden text-caption text-label-tertiary md:block">
+          只有可删除的任务会进入选区
+        </p>
+        <div class="ml-auto flex items-center gap-2">
+          <Tooltip v-if="dispatchableSelectedIds.length > 0" :content="dispatchHint">
+            <Button
+              variant="primary"
+              size="sm"
+              :disabled="dispatchingSelected"
+              @click="dispatchSelected"
+            >
+              <Icon :as="Play" size="inline" />
+              <template v-if="dispatchingSelected">派发中…</template>
+              <template v-else>
+                <span class="sm:hidden">派发 {{ dispatchableSelectedIds.length }} 个</span>
+                <span class="hidden sm:inline">
+                  派发给 codex {{ dispatchableSelectedIds.length }} 个
+                </span>
+              </template>
+            </Button>
           </Tooltip>
+          <Button
+            variant="danger"
+            size="sm"
+            :disabled="deleting"
+            @click="requestDelete([...selectedIds])"
+          >
+            <Icon :as="Trash2" size="inline" />删除 {{ selectedCount }} 个
+          </Button>
         </div>
       </div>
 
@@ -817,6 +927,8 @@ onUnmounted(() => {
           :columns="columns"
           :rows="store.items"
           :selected-id="selected?.id ?? null"
+          :checked-ids="[...selectedIds]"
+          touch-rows
           :show-empty="false"
           @select="store.select"
         >
@@ -840,31 +952,55 @@ onUnmounted(() => {
               />
             </div>
             <span
-              v-else-if="column.key === 'id'"
-              class="tnum text-label-tertiary group-data-[selected=true]:text-white"
+              v-else-if="column.key === 'title'"
+              class="flex min-w-0 items-center gap-2"
             >
-              {{ row.id }}
+              <span
+                class="tnum shrink-0 text-caption text-label-tertiary group-data-[selected=true]:text-white/60"
+              >
+                #{{ row.id }}
+              </span>
+              <span
+                class="truncate font-emphasis text-label group-data-[selected=true]:text-white"
+                :title="row.title"
+              >
+                {{ row.title }}
+              </span>
             </span>
             <span
-              v-else-if="column.key === 'title'"
-              class="font-emphasis text-label group-data-[selected=true]:text-white"
-            >
-              {{ row.title }}
-            </span>
-            <Badge
               v-else-if="column.key === 'source'"
-              :tone="sourceMeta[row.source as TaskSource].tone"
+              :class="[
+                'truncate text-caption',
+                sourceMeta[row.source as TaskSource].text,
+                'group-data-[selected=true]:text-white/70',
+              ]"
             >
               {{ sourceMeta[row.source as TaskSource].label }}
-            </Badge>
+            </span>
             <span
               v-else-if="column.key === 'projectName'"
-              class="text-label-secondary group-data-[selected=true]:text-white"
+              class="truncate text-label-secondary group-data-[selected=true]:text-white/70"
+              :title="row.projectName"
             >
               {{ row.projectName }}
             </span>
-            <DecisionLevelBadge v-else-if="column.key === 'level'" :level="row.level" />
-            <TaskStatusBadge v-else-if="column.key === 'status'" :status="row.status" />
+            <DecisionLevelBadge
+              v-else-if="column.key === 'level'"
+              :level="row.level"
+              compact
+            />
+            <TaskStatusBadge
+              v-else-if="column.key === 'status'"
+              :status="row.status"
+              variant="dot"
+            />
+            <span
+              v-else-if="column.key === 'updated'"
+              class="tnum text-caption text-label-tertiary group-data-[selected=true]:text-white/70"
+              :title="formatDateTime(row.updatedAt)"
+            >
+              {{ formatRelative(row.updatedAt) }}
+            </span>
             <span
               v-else-if="column.key === 'duration'"
               class="tnum text-label group-data-[selected=true]:text-white"
@@ -892,13 +1028,38 @@ onUnmounted(() => {
         />
         <EmptyState
           v-else-if="store.total === 0"
-          :title="store.taskIdFilter === null ? '没有匹配的任务' : `没有找到任务 #${store.taskIdFilter}`"
-          :description="
-            store.taskIdFilter === null
-              ? '换个关键词，或把筛选切回「全部」'
-              : '这个任务可能已被删除，或当前账号没有读取权限'
+          :title="
+            store.taskIdFilter !== null
+              ? `没有找到任务 #${store.taskIdFilter}`
+              : hasListFilters
+                ? '没有匹配的任务'
+                : store.projectId !== null
+                  ? '这个项目还没有任务'
+                  : '还没有任务'
           "
-        />
+          :description="
+            store.taskIdFilter !== null
+              ? '这个任务可能已被删除，或当前账号没有读取权限'
+              : hasListFilters
+                ? '调整状态、等级或关键词，或清除筛选后再看。'
+                : store.projectId !== null
+                  ? '新建任务会落到当前项目，也可以切到「全部项目」查看已有任务。'
+                  : '录入第一条需求，AI 会从待执行队列开始接手。'
+          "
+        >
+          <div class="flex flex-wrap items-center justify-center gap-2">
+            <Button
+              v-if="store.projectId !== null"
+              size="sm"
+              @click="store.projectId = null"
+            >
+              查看全部项目
+            </Button>
+            <Button v-if="hasListFilters" size="sm" @click="resetListFilters">
+              清除筛选
+            </Button>
+          </div>
+        </EmptyState>
       </div>
 
       <Pagination v-model:page="store.page" v-model:page-size="store.pageSize" :total="store.total" />
@@ -995,13 +1156,44 @@ onUnmounted(() => {
               {{ formatDateTime(store.detail?.createdAt ?? selected.createdAt) }}
             </dd>
           </div>
-          <div v-if="store.detail?.threadId" class="flex items-center gap-2">
-            <dt class="whitespace-nowrap text-caption text-label-secondary">执行线程</dt>
-            <dd class="tnum ml-auto truncate text-caption text-label">
-              {{ store.detail.threadId }}
-            </dd>
-          </div>
         </dl>
+
+        <div class="mt-4 rounded-panel border border-separator-soft bg-content p-3">
+          <div class="flex items-center gap-2">
+            <p class="text-caption font-emphasis text-label-secondary">Codex 会话</p>
+            <Badge :tone="codexSessionStatus.tone">
+              {{ codexSessionStatus.label }}
+            </Badge>
+            <Tooltip
+              v-if="codexThreadId"
+              :content="copiedThreadId ? '已复制' : '复制会话 ID'"
+            >
+              <IconButton
+                :label="copiedThreadId ? '会话 ID 已复制' : '复制 Codex 会话 ID'"
+                size="sm"
+                class="ml-auto"
+                @click="copyThreadId"
+              >
+                <Icon :as="copiedThreadId ? Check : Copy" size="inline" />
+              </IconButton>
+            </Tooltip>
+          </div>
+
+          <template v-if="codexThreadId">
+            <div class="mt-2 rounded-panel bg-window px-2.5 py-2">
+              <p class="select-all break-all font-mono text-caption leading-relaxed text-label">
+                {{ codexThreadId }}
+              </p>
+            </div>
+            <p class="mt-1.5 text-caption text-label-tertiary">
+              后续批准继续或平台重启恢复时，会从这个会话断点续跑。
+            </p>
+          </template>
+          <p v-else-if="store.detail" class="mt-1.5 text-caption text-label-tertiary">
+            首次派发给 codex 后自动生成；之后的批准继续与重启恢复都会沿用它。
+          </p>
+          <p v-else class="mt-1.5 text-caption text-label-tertiary">正在读取会话信息…</p>
+        </div>
 
         <div class="mt-4 border-t border-separator pt-3">
           <div class="flex items-center gap-2">
@@ -1034,6 +1226,12 @@ onUnmounted(() => {
             没有绑定插件。已写好的组件可以固定版本复用，不必每次重新生成。
           </p>
         </div>
+
+        <TaskTestCasePanel
+          :task-id="selected.id"
+          :project-id="selected.projectId"
+          :status="selected.status"
+        />
 
         <!-- 图片不只是留档：派发时它们会跟着指令一起交给 codex，所以放在详情里而不是另开一页 -->
         <div class="mt-4 border-t border-separator pt-3">

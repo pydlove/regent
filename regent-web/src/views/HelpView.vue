@@ -4,6 +4,7 @@ import {
   BookOpen,
   ChevronDown,
   CircleHelp,
+  FlaskConical,
   FolderKanban,
   History,
   Lightbulb,
@@ -36,6 +37,7 @@ import {
 const categoryIcons: Record<HelpCategoryId, Component> = {
   start: BookOpen,
   tasks: ListChecks,
+  testing: FlaskConical,
   decisions: Workflow,
   configuration: FolderKanban,
   records: History,
@@ -45,6 +47,7 @@ const categoryIcons: Record<HelpCategoryId, Component> = {
 const categoryTones: Record<HelpCategoryId, string> = {
   start: 'bg-accent/12 text-accent',
   tasks: 'bg-accent/12 text-accent',
+  testing: 'bg-success/12 text-success',
   decisions: 'bg-warning/15 text-warning',
   configuration: 'bg-success/12 text-success',
   records: 'bg-danger/10 text-danger',

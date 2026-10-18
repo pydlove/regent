@@ -198,6 +198,11 @@ public class TaskRunService {
     private TaskRun finishTerminal(Execution execution, ExecResult result) {
         execution.run.finish(result);
         taskRunRepository.save(execution.run);
+        if (result.status() == RunStatus.INTERRUPTED) {
+            // 平台关闭打断了进程，不是任务业务失败。任务留在 RUNNING，
+            // 由下次启动的恢复服务放回队列并续跑。
+            return execution.run;
+        }
         settlement.finishTask(execution.task.getId(), execution.run.getStatus());
         return execution.run;
     }

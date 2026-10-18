@@ -42,6 +42,13 @@ public class MyBatisTaskRepository implements TaskRepository {
     }
 
     @Override
+    public List<Task> findRunning() {
+        return taskMapper.selectRunning().stream()
+                .map(TaskDataMapper::toDomain)
+                .toList();
+    }
+
+    @Override
     public List<Task> findDispatchable(int limit) {
         return taskMapper.selectDispatchable(limit).stream()
                 .map(TaskDataMapper::toDomain)

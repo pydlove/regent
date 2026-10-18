@@ -16,6 +16,7 @@ import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
 import Input from '@/components/ui/input/Input.vue'
+import ListToolbar from '@/components/ui/list-toolbar/ListToolbar.vue'
 import Pagination from '@/components/ui/pagination/Pagination.vue'
 import Textarea from '@/components/ui/input/Textarea.vue'
 import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
@@ -219,22 +220,24 @@ onMounted(() => {
 <template>
   <div class="flex h-full min-h-0">
     <div class="flex min-w-0 flex-1 flex-col">
-      <div
-        class="flex min-h-toolbar shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-separator px-3 py-1.5 xl:h-toolbar xl:flex-nowrap xl:px-5 xl:py-0"
-      >
-        <h1 class="text-body font-emphasis text-label">Bug 单</h1>
-        <WorkItemSwitcher value="BUGS" />
-        <span class="tnum text-body text-label-tertiary">
-          {{ bugStore.openTotal }} 条未解决
-        </span>
-        <SegmentedControl v-model="bugStore.scope" :items="scopeOptions" size="lg" class="lg:ml-2" />
-        <div class="ml-auto flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto">
+      <ListToolbar>
+        <template #title>
+          <h1 class="text-body font-emphasis text-label">Bug 单</h1>
+          <WorkItemSwitcher value="BUGS" />
+          <span class="tnum text-body text-label-tertiary">
+            {{ bugStore.openTotal }} 条未解决
+          </span>
+        </template>
+        <template #filters>
           <Input v-model="bugStore.keyword" placeholder="搜索" size="lg" class="w-full sm:w-52" />
+          <SegmentedControl v-model="bugStore.scope" :items="scopeOptions" size="lg" />
+        </template>
+        <template #actions>
           <Button variant="primary" size="lg" @click="createOpen = true">
             <Icon :as="Plus" size="inline" />录入 Bug
           </Button>
-        </div>
-      </div>
+        </template>
+      </ListToolbar>
 
       <div class="scroll-area min-h-0 flex-1 overflow-auto">
         <p v-if="bugStore.error" class="border-b border-separator px-5 py-2 text-caption text-danger">

@@ -119,6 +119,23 @@ public class TaskRun {
     }
 
     /**
+     * 平台进程重启导致本次执行失去执行者。
+     *
+     * <p>只适用于平台自己拉起的内部执行：外部执行者有租约，失联由租约回收处理，
+     * 不能因为平台重启就把别人还在跑的记录判成中断。
+     */
+    public void interrupt(String reason) {
+        requireRunning("只有执行中的记录可以被中断");
+        if (!EXECUTOR_INTERNAL.equals(executor)) {
+            throw new DomainException("外部执行者的记录不能按平台重启中断：" + id);
+        }
+        this.status = RunStatus.INTERRUPTED;
+        this.summary = requireText(reason, "中断原因");
+        this.finishedAt = now();
+        this.leaseExpiresAt = null;
+    }
+
+    /**
      * 外部执行者认领这次尝试。
      *
      * <p>租约是这条路唯一的活性证明：外部执行者跑在别人的进程里，平台既看不见它、

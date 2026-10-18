@@ -26,6 +26,12 @@ public interface TaskRepository {
      */
     Optional<Task> findByIdForUpdate(TaskId id);
 
+    /**
+     * 当前所有执行中的任务。平台启动时用它核对是否留下没人接管的执行：
+     * 进程内状态已经随重启消失，数据库里却仍写着 {@code RUNNING}。
+     */
+    List<Task> findRunning();
+
     /** 新增或整体更新。新增时由实现回填数据库生成的主键（{@code Task.assignIdentity}）。 */
     void save(Task task);
 

@@ -71,6 +71,12 @@ const router = createRouter({
       meta: { title: '插件' },
     },
     {
+      path: '/test-cases',
+      name: 'test-cases',
+      component: () => import('@/views/TestCasesView.vue'),
+      meta: { title: '测试用例' },
+    },
+    {
       path: '/help',
       name: 'help',
       component: () => import('@/views/HelpView.vue'),

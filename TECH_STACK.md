@@ -136,6 +136,8 @@ spring:
 | `relay_setting` | `V10__relay_settings.sql` | 中继服务器地址与状态监听开关；连接器共享密钥仍只保存在本机部署配置 |
 | `relay_install_settings` | `V11__relay_install_settings.sql` | 中继安装的服务器 IP、SSH 用户名与安装目录；SSH 密码只在安装请求中使用，不落库 |
 | `plugin` / `plugin_version` / `task_plugin` | `V17__plugin_library.sql`、`V18__plugin_builtin_key.sql` | 可复用能力包、不可变内容版本与任务固定版本绑定；`builtin_key` 标识随 JAR 发布的内置插件，启动时幂等同步，插件正文不保存凭据 |
+| `test_case` / `task_test_case` / `test_case_run` | `V20__test_case_suite.sql` | Web / 接口测试用例、任务完成后的绑定，以及独立于 codex 执行记录的测试结果与输出 |
+| `test_case_run` 手动执行字段 | `V21__manual_test_case_runs.sql` | 增加项目归属与 `trigger_type`，允许手动执行没有 `task_id` |
 
 全部用 `utf8mb4`，主键用 `BIGINT`，状态字段用 `VARCHAR` 存枚举名（不用 MySQL `ENUM`，避免改枚举要动表结构）。时间统一 `DATETIME(3)` 存 UTC。
 

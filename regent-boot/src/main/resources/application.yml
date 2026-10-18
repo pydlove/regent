@@ -106,6 +106,9 @@ regent:
       interval-ms: 15000
       initial-delay-ms: 20000
       batch-size: 3
+    recovery:
+      # 启动后收敛上次进程留下的内部执行并立即续跑。关掉后它们会停在原状态，需人工处理
+      enabled: ${REGENT_EXECUTION_RECOVERY_ENABLED:true}
   plan:
     scheduler:
       # 到点启动计划并刷新运行中计划；关闭后仍可人工触发，但执行结果不会自动收敛。
@@ -128,6 +131,11 @@ regent:
       enabled: ${REGENT_AGENT_LEASE_SWEEP_ENABLED:true}
       interval-ms: 60000
       initial-delay-ms: 45000
+  testing:
+    # 测试用例在任务完成后独立执行，不占用 codex 的任务执行位。
+    timeout: ${REGENT_TEST_TIMEOUT:PT10M}
+    max-output-bytes: ${REGENT_TEST_MAX_OUTPUT_BYTES:262144}
+    workers: ${REGENT_TEST_WORKERS:2}
   relay:
     install:
       # 设置页点击安装时调用的远程部署脚本。脚本必须能访问项目构建产物。

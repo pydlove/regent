@@ -6,8 +6,10 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Search,
+  X,
 } from '@lucide/vue'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { ApiError } from '@/api/http'
 import { getPlan, listPlans, runPlan } from '@/api/plans'
@@ -17,6 +19,8 @@ import Button from '@/components/ui/button/Button.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
+import Input from '@/components/ui/input/Input.vue'
+import ListToolbar from '@/components/ui/list-toolbar/ListToolbar.vue'
 import StatusDot from '@/components/ui/status-dot/StatusDot.vue'
 import Table from '@/components/ui/table/Table.vue'
 import type { TableColumn } from '@/components/ui/table/table.types'
@@ -40,20 +44,53 @@ const loading = ref(false)
 const running = ref(false)
 const formOpen = ref(false)
 const error = ref<string | null>(null)
+const keyword = ref('')
 const toast = useToast()
 
 const columns: TableColumn[] = [
+  // 编号只是定位符，并进计划名，把宽度留给名称本身
   { key: 'name', label: '计划' },
-  { key: 'status', label: '状态', width: '96px' },
-  { key: 'scheduledAt', label: '执行时间', width: '168px', hideBelow: 'md' },
-  { key: 'tasks', label: '任务', align: 'right', width: '64px' },
-  { key: 'result', label: '本轮结果', width: '112px', hideBelow: 'lg' },
+  { key: 'status', label: '状态', width: '88px' },
+  { key: 'scheduledAt', label: '执行时间', width: '104px', hideBelow: 'xl' },
+  { key: 'tasks', label: '任务', align: 'right', width: '56px' },
+  { key: 'result', label: '本轮结果', width: '104px', hideBelow: 'xl' },
 ]
 
+/** 表格里只保留「月/日 时:分」，完整到秒的时间放 title，详情面板仍显示完整值。 */
+function formatSchedule(iso: string | null): string {
+  const full = formatDateTime(iso)
+  return full === '—' ? full : full.slice(5, 16)
+}
+
 const selected = computed(() => plans.value.find((plan) => plan.id === selectedId.value) ?? null)
+const filteredPlans = computed(() => {
+  const query = keyword.value.trim().toLocaleLowerCase('zh-CN')
+  if (!query) return plans.value
+  return plans.value.filter((plan) =>
+    [
+      plan.name,
+      `#${plan.id}`,
+      String(plan.id),
+      planStatusLabel(plan.status),
+      plan.latestRun ? planRunStatusLabel(plan.latestRun.status) : '',
+    ].some((value) => value.toLocaleLowerCase('zh-CN').includes(query)),
+  )
+})
+const planCountLabel = computed(() =>
+  keyword.value.trim()
+    ? `${filteredPlans.value.length} / ${plans.value.length}`
+    : String(plans.value.length),
+)
 const hasActivePlan = computed(() =>
   plans.value.some((plan) => plan.status === 'SCHEDULED' || plan.status === 'RUNNING'),
 )
+
+watch(keyword, () => {
+  if (selectedId.value !== null && !filteredPlans.value.some((plan) => plan.id === selectedId.value)) {
+    selectedId.value = null
+    detail.value = null
+  }
+})
 
 function messageOf(value: unknown): string {
   if (value instanceof ApiError) return value.message
@@ -111,10 +148,11 @@ async function load(preserveSelection = true) {
     const loaded = await listPlans()
     plans.value = loaded
     const previous = preserveSelection ? selectedId.value : null
-    const nextId =
+    const previousStillExists =
       previous !== null && loaded.some((plan) => plan.id === previous)
-        ? previous
-        : loaded[0]?.id ?? null
+    // 手机端选中即整屏详情，落地页应该是列表本身；桌面才自动选中第一条，避免右栏空着
+    const compact = window.matchMedia('(max-width: 1023px)').matches
+    const nextId = previousStillExists ? previous : compact ? null : loaded[0]?.id ?? null
     selectedId.value = nextId
     await loadDetail(nextId)
   } catch (value) {
@@ -147,6 +185,7 @@ async function executeNow() {
 }
 
 async function onCreated(plan: PlanSummary) {
+  keyword.value = ''
   await load(false)
   selectedId.value = plan.id
   await loadDetail(plan.id)
@@ -169,10 +208,37 @@ const latestRun = computed<PlanRunSummary | null>(() => detail.value?.plan.lates
 <template>
   <div class="flex h-full min-h-0">
     <div class="flex min-w-0 flex-1 flex-col">
-      <div class="flex h-toolbar shrink-0 items-center gap-3 border-b border-separator px-5">
-        <h1 class="text-body font-emphasis text-label">计划</h1>
-        <span class="tnum text-body text-label-tertiary">{{ plans.length }}</span>
-        <div class="ml-auto flex items-center gap-2">
+      <ListToolbar>
+        <template #title>
+          <h1 class="text-body font-emphasis text-label">计划</h1>
+          <span class="tnum text-body text-label-tertiary">{{ planCountLabel }}</span>
+        </template>
+        <template #filters>
+          <div class="relative min-w-0 flex-1 sm:w-52 sm:flex-none">
+            <Icon
+              :as="Search"
+              size="inline"
+              class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-label-tertiary"
+            />
+            <Input
+              v-model="keyword"
+              size="lg"
+              placeholder="搜索计划名称、编号或状态"
+              aria-label="搜索计划"
+              class="pl-7 pr-7"
+            />
+            <button
+              v-if="keyword"
+              type="button"
+              class="absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-control text-label-tertiary hover:bg-hover hover:text-label"
+              aria-label="清空计划搜索"
+              @click="keyword = ''"
+            >
+              <Icon :as="X" size="inline" />
+            </button>
+          </div>
+        </template>
+        <template #actions>
           <Tooltip content="刷新">
             <IconButton label="刷新计划" size="lg" :disabled="loading" @click="load(true)">
               <Icon :as="RefreshCw" size="large" />
@@ -181,23 +247,32 @@ const latestRun = computed<PlanRunSummary | null>(() => detail.value?.plan.lates
           <Button variant="primary" size="lg" @click="formOpen = true">
             <Icon :as="Plus" size="inline" />新建计划
           </Button>
-        </div>
-      </div>
+        </template>
+      </ListToolbar>
 
       <div class="scroll-area min-h-0 flex-1 overflow-auto">
         <Table
           :columns="columns"
-          :rows="plans"
+          :rows="filteredPlans"
           :selected-id="selectedId"
           :show-empty="false"
+          touch-rows
           @select="select"
         >
           <template #cell="{ row, column }">
-            <StatusDot v-if="column.key === 'status'" :dot="planDot(row.status)">
+            <span v-if="column.key === 'name'" class="flex min-w-0 items-center gap-2">
+              <span class="tnum shrink-0 text-caption text-label-tertiary">#{{ row.id }}</span>
+              <span class="truncate font-emphasis text-label" :title="row.name">{{ row.name }}</span>
+            </span>
+            <StatusDot v-else-if="column.key === 'status'" :dot="planDot(row.status)">
               {{ planStatusLabel(row.status) }}
             </StatusDot>
-            <span v-else-if="column.key === 'scheduledAt'" class="text-caption text-label-secondary">
-              {{ formatDateTime(row.scheduledAt) }}
+            <span
+              v-else-if="column.key === 'scheduledAt'"
+              class="tnum text-caption text-label-secondary"
+              :title="formatDateTime(row.scheduledAt)"
+            >
+              {{ formatSchedule(row.scheduledAt) }}
             </span>
             <span
               v-else-if="column.key === 'tasks'"
@@ -224,10 +299,13 @@ const latestRun = computed<PlanRunSummary | null>(() => detail.value?.plan.lates
           v-else-if="plans.length === 0"
           title="还没有计划"
           description="把待执行或排队中的任务组成一次定时批次，到点后自动执行并生成总结。"
+        />
+        <EmptyState
+          v-else-if="filteredPlans.length === 0"
+          title="没有匹配的计划"
+          description="换个名称、编号或状态关键词再试。"
         >
-          <Button variant="primary" @click="formOpen = true">
-            <Icon :as="Plus" size="inline" />新建计划
-          </Button>
+          <Button @click="keyword = ''">清除搜索</Button>
         </EmptyState>
       </div>
     </div>
@@ -236,8 +314,8 @@ const latestRun = computed<PlanRunSummary | null>(() => detail.value?.plan.lates
       :class="[
         'bg-window',
         selected
-          ? 'fixed inset-0 z-40 w-full overflow-y-auto border-separator p-4 lg:static lg:inset-auto lg:z-auto lg:w-96 lg:shrink-0 lg:border-l'
-          : 'hidden lg:block lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:border-l lg:border-separator lg:p-4',
+          ? 'fixed inset-0 z-40 w-full overflow-y-auto border-separator p-4 lg:static lg:inset-auto lg:z-auto lg:w-80 lg:shrink-0 lg:border-l'
+          : 'hidden lg:block lg:w-80 lg:shrink-0 lg:overflow-y-auto lg:border-l lg:border-separator lg:p-4',
       ]"
     >
       <template v-if="selected && detail">

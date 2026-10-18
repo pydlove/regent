@@ -14,6 +14,9 @@ import java.util.Locale;
  * <p>{@code RUNNING} 不在 {@code V1__init_schema.sql} 最初的取值注释里，是 V2 迁移补上的：
  * 事件流需要一个在进程还在跑时就存在的父行（{@code run_event.task_run_id} 是外键），
  * 而「先写结果、跑完再落行」会让运行中的日志没有任何挂靠点。
+ *
+ * <p>{@code INTERRUPTED} 表示平台进程重启导致这次尝试失去执行者，不是业务失败；
+ * 对应的任务会在启动恢复中重新排队。外部执行者的失联仍走租约回收，不使用这个状态。
  */
 public enum RunStatus {
 
@@ -21,6 +24,7 @@ public enum RunStatus {
     SUCCESS,
     FAILED,
     BLOCKED,
+    INTERRUPTED,
     TIMEOUT;
 
     /** 是否已收敛。收敛之后不允许再写结论。 */

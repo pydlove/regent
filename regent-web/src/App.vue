@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FolderKanban,
+  FlaskConical,
   KeyRound,
   LayoutDashboard,
   ListChecks,
@@ -18,12 +19,13 @@ import { TooltipProvider } from 'reka-ui'
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import IconButton from '@/components/ui/icon-button/IconButton.vue'
-import Icon from '@/components/ui/icon/Icon.vue'
+import AppFooter from '@/components/business/AppFooter.vue'
 import FailedTaskNotifications from '@/components/business/FailedTaskNotifications.vue'
 import ProjectFormDialog from '@/components/business/ProjectFormDialog.vue'
 import UserProfileCard from '@/components/business/UserProfileCard.vue'
 import UserProfileDialog from '@/components/business/UserProfileDialog.vue'
+import IconButton from '@/components/ui/icon-button/IconButton.vue'
+import Icon from '@/components/ui/icon/Icon.vue'
 import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
 import SearchableSelect from '@/components/ui/searchable-select/SearchableSelect.vue'
 import Sidebar from '@/components/ui/sidebar/Sidebar.vue'
@@ -93,18 +95,26 @@ const projects = computed(() => [
 // 角标只挂「需要人管」的数：待批决策的数字和决策页是同一个源，不会两处对不上
 const navItems = computed(() => [
   { label: '工作台', to: '/dashboard', icon: LayoutDashboard },
-  { label: '任务', to: '/tasks', icon: ListChecks, badge: String(store.taskTotal) },
+  {
+    label: '任务',
+    to: '/tasks',
+    icon: ListChecks,
+    badge: store.taskTotal,
+    badgeLabel: `共 ${store.taskTotal} 个任务`,
+  },
   { label: '计划', to: '/plans', icon: CalendarClock },
   {
     label: '决策',
     to: '/decisions',
     icon: Workflow,
-    badge: decisionStore.pendingTotal ? String(decisionStore.pendingTotal) : undefined,
+    badge: decisionStore.pendingTotal,
+    badgeLabel: `共 ${decisionStore.pendingTotal} 条待批决策`,
   },
   // 项目不放角标：它是配置，不是「等你处理」的事 —— 角标一旦不表示待办，就没人再看它了
   { label: '项目', to: '/projects', icon: FolderKanban },
   { label: '环境', to: '/environments', icon: KeyRound },
   { label: '插件', to: '/plugins', icon: Blocks },
+  { label: '测试用例', to: '/test-cases', icon: FlaskConical },
 ])
 
 const profileDialogOpen = ref(false)
@@ -289,6 +299,7 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
           <RouterView />
         </main>
       </div>
+      <AppFooter />
     </div>
     <RouterView v-else />
     <ProjectFormDialog v-if="!authPage" v-model:open="projectDialogOpen" />

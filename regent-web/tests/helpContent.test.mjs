@@ -4,7 +4,7 @@ import test from 'node:test'
 const { HELP_TOPICS, filterHelpTopics } = await import('../src/content/help.ts')
 
 test('按问题标题搜索常见问题', () => {
-  const result = filterHelpTopics(HELP_TOPICS, '任务状态')
+  const result = filterHelpTopics(HELP_TOPICS, '任务状态分别代表什么')
 
   assert.deepEqual(
     result.map((topic) => topic.id),
@@ -30,6 +30,33 @@ test('分类与关键词同时生效', () => {
   assert.deepEqual(
     result.map((topic) => topic.id),
     ['environment-entries'],
+  )
+})
+
+test('测试用例说明可按上传变量、绑定与失败状态检索', () => {
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, 'REGENT_TEST_FILE').some(
+      (topic) => topic.id === 'test-case-create',
+    ),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '绑定', 'testing').some(
+      (topic) => topic.id === 'test-case-binding',
+    ),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, 'TIMEOUT').some(
+      (topic) => topic.id === 'test-case-results',
+    ),
+  )
+})
+
+test('语音输入说明可按麦克风与 HTTPS 检索', () => {
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '麦克风').some((topic) => topic.id === 'voice-input'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, 'HTTPS').some((topic) => topic.id === 'voice-input'),
   )
 })
 

@@ -246,6 +246,13 @@ public final class ExecutionFakes {
         }
 
         @Override
+        public List<Task> findRunning() {
+            return store.values().stream()
+                    .filter(task -> task.getStatus() == TaskStatus.RUNNING)
+                    .toList();
+        }
+
+        @Override
         public void save(Task task) {
             // 新录入的任务还没有 ID，替身在这里补一个 —— 真实仓储由数据库自增列回填，
             // 少了这一步，任何「录入后拿 ID」的用例都会在替身上撞空指针，而不是撞到真问题
@@ -338,6 +345,14 @@ public final class ExecutionFakes {
         public List<TaskRun> listByTask(TaskId taskId) {
             return store.values().stream()
                     .filter(run -> run.getTaskId().equals(taskId))
+                    .toList();
+        }
+
+        @Override
+        public List<TaskRun> findRunningInternal() {
+            return store.values().stream()
+                    .filter(run -> run.getStatus() == RunStatus.RUNNING)
+                    .filter(run -> TaskRun.EXECUTOR_INTERNAL.equals(run.getExecutor()))
                     .toList();
         }
 

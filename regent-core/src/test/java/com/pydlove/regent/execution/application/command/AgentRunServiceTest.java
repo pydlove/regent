@@ -72,7 +72,8 @@ class AgentRunServiceTest {
         DecisionRaiseService decisionRaiseService = new DecisionRaiseService(rules, decisions);
         return new AgentRunService(tasks, runs, events, attachments, projects, environments, plugins,
                 decisions, branches, new BranchProvisioningService(branches, decisionRaiseService),
-                new RunSettlementService(tasks, decisions, decisionRaiseService, bugs),
+                new RunSettlementService(tasks, decisions, decisionRaiseService, bugs, taskId -> {
+                }),
                 contract(), concurrencyGate, lease, "http://127.0.0.1:8787/api/agent/contract");
     }
 

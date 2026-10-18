@@ -1,6 +1,7 @@
 export type HelpCategoryId =
   | 'start'
   | 'tasks'
+  | 'testing'
   | 'decisions'
   | 'configuration'
   | 'records'
@@ -51,6 +52,11 @@ export const HELP_CATEGORIES: readonly HelpCategory[] = [
     id: 'tasks',
     label: '任务与执行',
     description: '录入、派发、排队与任务状态',
+  },
+  {
+    id: 'testing',
+    label: '测试与验收',
+    description: 'Web / 接口测试用例、绑定与结果',
   },
   {
     id: 'decisions',
@@ -176,6 +182,20 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     },
   },
   {
+    id: 'voice-input',
+    category: 'tasks',
+    question: '如何用语音输入任务指令？',
+    keywords: ['语音', '麦克风', '翻译', '中文', 'English', 'HTTPS'],
+    answer: {
+      paragraphs: [
+        '在新建任务的指令框上方点击“语音输入”，选择说话语言后开始听写，识别结果会追加到当前指令中，不会覆盖已经输入的文字。',
+        '普通话直接写入中文；English、日本語和 한국어 会尝试使用浏览器翻译能力转成中文。若浏览器不支持翻译，会保留识别原文并给出提示。',
+      ],
+      note: '语音输入只在 HTTPS 或本机 localhost 下可用，推荐最新版 Chrome 或 Edge。音频不会上传给 Regent 后端，但浏览器自身的语音识别或翻译服务可能联网处理。',
+      links: [{ label: '新建任务', to: '/tasks' }],
+    },
+  },
+  {
     id: 'task-statuses',
     category: 'tasks',
     question: '任务状态分别代表什么？',
@@ -223,6 +243,76 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         '图片属于执行输入。任务开始后补上的图片，会在该任务的下一次执行尝试中生效。',
       ],
       note: '为安全起见不接受 SVG。截图比文字更容易说明界面问题和报错现场。',
+    },
+  },
+  {
+    id: 'test-case-types',
+    category: 'testing',
+    question: 'Web 测试和接口测试有什么区别？',
+    keywords: ['测试用例', 'Web', '接口', 'API', 'Playwright', 'Newman', 'Pytest'],
+    answer: {
+      paragraphs: [
+        'Web 测试和接口测试首先是管理分类：Web 用例通常验证页面、交互和浏览器行为，接口用例通常验证 HTTP 接口、数据契约或业务链路。',
+        '平台不内置固定测试框架。实际怎么运行由用例里的执行命令决定，可以使用项目已经安装的 Playwright、Newman、Pytest、JUnit 或其他工具。',
+      ],
+      links: [{ label: '打开测试用例', to: '/test-cases' }],
+    },
+  },
+  {
+    id: 'test-case-create',
+    category: 'testing',
+    question: '如何新建并上传测试用例？',
+    keywords: ['新建测试用例', '上传', '脚本', '命令', 'REGENT_TEST_FILE', '512KB'],
+    answer: {
+      paragraphs: [
+        '选择项目、类型和名称，再填写一条执行命令。执行命令会在项目根目录运行，并自动继承该项目的环境信息。',
+        '可以额外上传一个 UTF-8 测试文件，单文件上限 512 KB。执行时平台会把脚本还原到本次运行的临时目录，并通过环境变量 REGENT_TEST_FILE 提供路径，不会污染项目工作区。',
+      ],
+      steps: [
+        '新建 Web 或接口测试用例。',
+        '填写项目里真实可用的测试命令。',
+        '需要脚本时上传 .sh、.js、.py 或其他文本文件。',
+        '保存后确认用例处于启用状态。',
+      ],
+      note: '如果只上传 .sh、.js 或 .py 且没有填写命令，平台会按扩展名推断执行方式。密码和 Token 应放在环境信息中，不要写进脚本。',
+      links: [{ label: '新建测试用例', to: '/test-cases' }],
+    },
+  },
+  {
+    id: 'test-case-binding',
+    category: 'testing',
+    question: '测试用例什么时候执行，如何手动或绑定执行？',
+    keywords: ['绑定', '任务完成', '自动执行', '手动执行', '批量执行', '最多10个'],
+    answer: {
+      paragraphs: [
+        '在任务详情的“测试用例”卡片中选择用例，最多绑定 10 条。任务进入执行中、待批准或已完成状态后不能再改绑，需要重新执行的任务可以先重试或修改绑定。',
+        '绑定的用例只会在任务成功完成（DONE）后自动执行；任务失败或被终止时不会跑测试。测试结果也不会反过来改变任务状态。',
+        '如果只想立即验证一次，可以在“测试用例”菜单直接执行单条用例，或勾选多条后批量执行。手动执行不依赖任务，但同样会保存完整结果。',
+      ],
+      steps: [
+        '自动执行：在任务未开始前绑定用例，任务成功完成后等待结果。',
+        '单条执行：在测试用例行点“立即执行”。',
+        '批量执行：勾选多条已启用用例，再点“执行选中”。',
+        '在“查看执行记录”中核对触发方式、退出码和输出。',
+      ],
+      links: [
+        { label: '打开测试用例', to: '/test-cases' },
+        { label: '前往任务页', to: '/tasks' },
+      ],
+    },
+  },
+  {
+    id: 'test-case-results',
+    category: 'testing',
+    question: '测试结果里的通过、失败、超时和跳过分别是什么意思？',
+    keywords: ['测试失败', '执行记录', 'SUCCESS', 'FAILED', 'TIMEOUT', 'SKIPPED', '中断'],
+    answer: {
+      paragraphs: [
+        '通过表示进程退出码为 0；失败表示进程以非零退出码结束；超时表示超过平台配置的测试时限后被终止；已跳过表示执行时用例已停用或删除。',
+        '每条测试都会单独保存触发方式、退出码、摘要和输出。任务完成触发的记录会显示任务号，菜单手动执行的记录显示“手动执行”。测试失败不会回滚已完成任务，也不会自动重跑；平台重启时，尚未收场的测试会标记为已中断。',
+      ],
+      note: '先看失败测试的输出和环境信息，确认是断言失败、依赖缺失、端口不通还是超时，再判断应该修代码、改用例还是调整环境。',
+      links: [{ label: '查看测试用例记录', to: '/test-cases' }],
     },
   },
   {

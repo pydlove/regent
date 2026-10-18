@@ -11,6 +11,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -132,6 +133,28 @@ class TaskRunTest {
         void 阻塞结果必须带上待决策问题() {
             assertThrows(DomainException.class, () -> new ExecResult(RunStatus.BLOCKED, 0, "th-1",
                     TokenUsage.ZERO, "停下来了", null, true, List.of(), List.of(), null));
+        }
+
+        @Test
+        void 平台重启中断只收敛内部执行且不算业务失败() {
+            TaskRun run = running();
+
+            run.interrupt("平台重启");
+
+            assertEquals(RunStatus.INTERRUPTED, run.getStatus());
+            assertTrue(run.getStatus().isFinished());
+            assertFalse(run.getStatus().isFailure(), "重启不是代码或环境失败，不能显示成红色失败");
+            assertEquals("平台重启", run.getSummary());
+            assertNotNull(run.getFinishedAt());
+            assertThrows(DomainException.class, () -> run.interrupt("再中断一次"));
+        }
+
+        @Test
+        void 外部执行记录不能被平台重启中断() {
+            TaskRun run = running();
+            run.claimBy("codex-desktop", Instant.now().plusSeconds(600));
+
+            assertThrows(DomainException.class, () -> run.interrupt("平台重启"));
         }
     }
 

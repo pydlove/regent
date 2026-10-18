@@ -17,6 +17,8 @@ public interface TaskMapper {
 
     TaskData selectByIdForUpdate(@Param("id") long id);
 
+    List<TaskData> selectRunning();
+
     List<TaskListRow> selectListPage(@Param("status") String status,
                                      @Param("level") String level,
                                      @Param("projectId") Long projectId,

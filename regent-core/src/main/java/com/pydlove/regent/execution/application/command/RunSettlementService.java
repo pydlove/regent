@@ -22,6 +22,7 @@ import com.pydlove.regent.governance.domain.model.ResolvedBy;
 import com.pydlove.regent.governance.domain.repository.DecisionRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
+import com.pydlove.regent.testing.domain.port.TestCaseExecutionScheduler;
 
 /**
  * 一次尝试的编排大脑 —— 「开局说什么」与「收场怎么算」。
@@ -51,15 +52,18 @@ public class RunSettlementService {
     private final DecisionRepository decisionRepository;
     private final DecisionRaiseService decisionRaiseService;
     private final BugRepository bugRepository;
+    private final TestCaseExecutionScheduler testCaseExecutionScheduler;
 
     public RunSettlementService(TaskRepository taskRepository,
                                 DecisionRepository decisionRepository,
                                 DecisionRaiseService decisionRaiseService,
-                                BugRepository bugRepository) {
+                                BugRepository bugRepository,
+                                TestCaseExecutionScheduler testCaseExecutionScheduler) {
         this.taskRepository = taskRepository;
         this.decisionRepository = decisionRepository;
         this.decisionRaiseService = decisionRaiseService;
         this.bugRepository = bugRepository;
+        this.testCaseExecutionScheduler = testCaseExecutionScheduler;
     }
 
     /**
@@ -135,6 +139,7 @@ public class RunSettlementService {
             fresh.complete();
             taskRepository.save(fresh);
             markBugFixed(fresh);
+            testCaseExecutionScheduler.scheduleAfterTaskCompleted(taskId);
             return;
         } else {
             fresh.fail();

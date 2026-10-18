@@ -18,6 +18,8 @@ public interface TaskRunMapper {
 
     List<TaskRunData> selectByTask(@Param("taskId") long taskId);
 
+    List<TaskRunData> selectRunningInternal(@Param("executor") String executor);
+
     List<TaskRunData> selectExpiredLeases(@Param("executor") String executor,
                                           @Param("now") LocalDateTime now);
 

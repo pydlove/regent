@@ -237,6 +237,27 @@ public class Task {
         touch();
     }
 
+    /**
+     * 平台重启后，把被中断的执行重新放回队列。
+     *
+     * <p>这不是一次新的执行尝试：尝试次数和执行记录都由紧接着的派发流程创建。
+     * 这里保留 {@code codexThreadId}，下一次派发才能用 {@code codex exec resume}
+     * 接着原会话继续；分支也保留，避免把上一轮改动留在一条无人接管的分支上。
+     */
+    public void requeueAfterInterruption() {
+        requireState(TaskStatus.RUNNING, "只有执行中的任务可以在中断后重新排队");
+        if (branchName == null || branchName.isBlank()) {
+            throw new DomainException("任务没有分支名，无法从中断中恢复：" + id);
+        }
+        if (blockingDecisionId != null) {
+            throw new DomainException("任务仍在等待决策，不能按重启中断恢复：" + id);
+        }
+        this.status = TaskStatus.QUEUED;
+        this.startedAt = null;
+        this.finishedAt = null;
+        touch();
+    }
+
     public void complete() {
         requireState(TaskStatus.RUNNING, "只有执行中的任务可以完成");
         this.status = TaskStatus.DONE;

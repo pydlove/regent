@@ -406,6 +406,13 @@ class DecisionApprovalServiceTest {
         }
 
         @Override
+        public List<Task> findRunning() {
+            return store.values().stream()
+                    .filter(task -> task.getStatus() == TaskStatus.RUNNING)
+                    .toList();
+        }
+
+        @Override
         public void save(Task task) {
             store.put(task.getId().value(), task);
             saves++;

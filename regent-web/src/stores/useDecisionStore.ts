@@ -28,6 +28,7 @@ export const useDecisionStore = defineStore('decisions', () => {
   const page = ref(1)
   const pageSize = ref(20)
   const scope = ref<DecisionScope>('PENDING')
+  const keyword = ref('')
 
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -38,7 +39,12 @@ export const useDecisionStore = defineStore('decisions', () => {
     loading.value = true
     error.value = null
     try {
-      const result = await listDecisions({ scope: scope.value, page: page.value, size: pageSize.value })
+      const result = await listDecisions({
+        scope: scope.value,
+        keyword: keyword.value,
+        page: page.value,
+        size: pageSize.value,
+      })
       items.value = result.items
       total.value = result.total
       if (result.totalPages > 0 && page.value > result.totalPages) {
@@ -84,7 +90,7 @@ export const useDecisionStore = defineStore('decisions', () => {
     }
   }
 
-  watch([scope, page, pageSize], () => {
+  watch([scope, keyword, page, pageSize], () => {
     void load()
   })
 
@@ -94,6 +100,7 @@ export const useDecisionStore = defineStore('decisions', () => {
     page,
     pageSize,
     scope,
+    keyword,
     loading,
     error,
     pendingTotal,

@@ -30,12 +30,13 @@ export type TaskSource = 'REQUIREMENT' | 'BUG_FIX' | 'MANUAL'
  *      │
  *      ├──出参说 FAILED／出参读不懂／进程崩了──▶ FAILED
  *      ├──出参说 BLOCKED──▶ BLOCKED（任务挂起等人，本次尝试到此为止）
+ *      ├──平台重启导致进程消失──▶ INTERRUPTED（不是业务失败，下次启动续跑）
  *      └──超过墙钟上限被杀──▶ TIMEOUT
  *
  * 它和 TaskStatus 是两件事：任务的状态是「现在能不能干活」，尝试的结局是
  * 「这一次花了多少、改了什么、结论是什么」。同一个任务可以有多次失败的尝试而状态一直是 RUNNING。
  */
-export type RunStatus = 'RUNNING' | 'SUCCESS' | 'FAILED' | 'BLOCKED' | 'TIMEOUT'
+export type RunStatus = 'RUNNING' | 'SUCCESS' | 'FAILED' | 'BLOCKED' | 'INTERRUPTED' | 'TIMEOUT'
 
 /** 还在跑：运行记录面板据此决定要不要自动刷新。 */
 export const runInProgress = (s: RunStatus) => s === 'RUNNING'

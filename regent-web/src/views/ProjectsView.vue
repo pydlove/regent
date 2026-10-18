@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronLeft, ListChecks, Plus, RefreshCw } from '@lucide/vue'
+import { ChevronLeft, ListChecks, Plus, RefreshCw, Search, X } from '@lucide/vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -12,6 +12,8 @@ import Button from '@/components/ui/button/Button.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
+import Input from '@/components/ui/input/Input.vue'
+import ListToolbar from '@/components/ui/list-toolbar/ListToolbar.vue'
 import StatusDot from '@/components/ui/status-dot/StatusDot.vue'
 import Table from '@/components/ui/table/Table.vue'
 import type { TableColumn } from '@/components/ui/table/table.types'
@@ -45,10 +47,24 @@ const columns: TableColumn[] = [
 
 const loading = ref(false)
 const error = ref<string | null>(null)
+const keyword = ref('')
 
 const selectedId = ref<number | null>(null)
 const selected = computed(
   () => store.projects.find((project) => project.id === selectedId.value) ?? null,
+)
+const filteredProjects = computed(() => {
+  const query = keyword.value.trim().toLocaleLowerCase('zh-CN')
+  if (!query) return store.projects
+  return store.projects.filter((project) =>
+    [project.name, project.code, project.path, project.defaultDecisionLevel]
+      .some((value) => value.toLocaleLowerCase('zh-CN').includes(query)),
+  )
+})
+const projectCountLabel = computed(() =>
+  keyword.value.trim()
+    ? `${filteredProjects.value.length} / ${store.projects.length}`
+    : String(store.projects.length),
 )
 
 /**
@@ -132,8 +148,15 @@ watch(selectedId, () => void loadProjectTasks())
 /** 注册成功后：整页刷新，并把新项目选中 —— 刚建的东西应该立刻是焦点 */
 watch(lastRegistered, async (project) => {
   if (!project) return
+  keyword.value = ''
   await load()
   selectedId.value = project.id
+})
+
+watch(keyword, () => {
+  if (selectedId.value !== null && !filteredProjects.value.some((project) => project.id === selectedId.value)) {
+    selectedId.value = null
+  }
 })
 
 /** 跳到任务页并带上这个项目的筛选：双击项目行或点检查器按钮走同一条路 */
@@ -148,10 +171,37 @@ const openInTasks = (project = selected.value) => {
 <template>
   <div class="flex h-full min-h-0">
     <div class="flex min-w-0 flex-1 flex-col">
-      <div class="flex h-toolbar shrink-0 items-center gap-3 border-b border-separator px-5">
-        <h1 class="text-body font-emphasis text-label">项目</h1>
-        <span class="tnum text-body text-label-tertiary">{{ store.projects.length }}</span>
-        <div class="ml-auto flex items-center gap-2">
+      <ListToolbar>
+        <template #title>
+          <h1 class="text-body font-emphasis text-label">项目</h1>
+          <span class="tnum text-body text-label-tertiary">{{ projectCountLabel }}</span>
+        </template>
+        <template #filters>
+          <div class="relative min-w-0 flex-1 sm:w-52 sm:flex-none">
+            <Icon
+              :as="Search"
+              size="inline"
+              class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-label-tertiary"
+            />
+            <Input
+              v-model="keyword"
+              size="lg"
+              placeholder="搜索项目名称、标识或路径"
+              aria-label="搜索项目"
+              class="pl-7 pr-7"
+            />
+            <button
+              v-if="keyword"
+              type="button"
+              class="absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-control text-label-tertiary hover:bg-hover hover:text-label"
+              aria-label="清空项目搜索"
+              @click="keyword = ''"
+            >
+              <Icon :as="X" size="inline" />
+            </button>
+          </div>
+        </template>
+        <template #actions>
           <Tooltip content="刷新">
             <IconButton label="刷新项目" size="lg" :disabled="loading" @click="load">
               <Icon :as="RefreshCw" size="large" />
@@ -160,13 +210,13 @@ const openInTasks = (project = selected.value) => {
           <Button variant="primary" size="lg" @click="openProjectDialog()">
             <Icon :as="Plus" size="inline" />注册项目
           </Button>
-        </div>
-      </div>
+        </template>
+      </ListToolbar>
 
       <div class="scroll-area min-h-0 flex-1 overflow-auto">
         <Table
           :columns="columns"
-          :rows="store.projects"
+          :rows="filteredProjects"
           :selected-id="selectedId"
           :show-empty="false"
           @select="selectedId = $event.id"
@@ -205,10 +255,13 @@ const openInTasks = (project = selected.value) => {
           v-else-if="store.projects.length === 0"
           title="还没有注册任何项目"
           description="项目决定 codex 在哪个目录跑。注册一个，任务才有地方挂 —— 路径必须是本机已存在的目录。"
+        />
+        <EmptyState
+          v-else-if="filteredProjects.length === 0"
+          title="没有匹配的项目"
+          description="换个名称、标识或路径关键词再试。"
         >
-          <Button variant="primary" @click="openProjectDialog()">
-            <Icon :as="Plus" size="inline" />注册项目
-          </Button>
+          <Button @click="keyword = ''">清除搜索</Button>
         </EmptyState>
       </div>
     </div>

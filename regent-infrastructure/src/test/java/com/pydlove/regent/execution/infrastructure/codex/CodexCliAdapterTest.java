@@ -20,6 +20,10 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -305,6 +309,29 @@ class CodexCliAdapterTest {
         assertTrue(result.summary().contains("无法启动执行器"), result.summary());
     }
 
+    @Test
+    @DisplayName("平台关闭：终止活动 codex 进程，并把这次执行标记为中断")
+    void 关闭时终止活动进程() throws Exception {
+        Path started = workspace.resolve("started.log");
+        写脚本("printf 'started' > \"%s\"\nsleep 30".formatted(started));
+        CodexCliAdapter adapter = adapter();
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<ExecResult> future = pool.submit(() -> adapter.execute(请求(null), (type, payload) -> {
+            }));
+            等待文件(started);
+
+            adapter.close();
+            ExecResult result = future.get(10, TimeUnit.SECONDS);
+
+            assertEquals(RunStatus.INTERRUPTED, result.status());
+            assertTrue(result.summary().contains("平台正在重启"), result.summary());
+        } finally {
+            adapter.close();
+            pool.shutdownNow();
+        }
+    }
+
     // ------------------------------------------------------------------
 
     private ExecRequest 请求(String resumeThreadId) {
@@ -318,6 +345,14 @@ class CodexCliAdapterTest {
 
     private CodexCliAdapter adapter() {
         return new CodexCliAdapter(script.toString(), runs, new SchemaFileProvider(runs));
+    }
+
+    private static void 等待文件(Path file) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!Files.exists(file) && System.nanoTime() < deadline) {
+            Thread.sleep(20);
+        }
+        assertTrue(Files.exists(file), "假 codex 没有启动");
     }
 
     /** 假执行器收到的参数，按调用切开。 */

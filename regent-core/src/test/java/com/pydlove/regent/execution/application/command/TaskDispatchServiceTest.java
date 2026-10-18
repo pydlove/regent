@@ -57,7 +57,8 @@ class TaskDispatchServiceTest {
         TaskRunService runService = new TaskRunService(tasks, runs, events, attachments, projects,
                 new ExecutionFakes.Environments(),
                 new ExecutionFakes.TaskPlugins(),
-                new RunSettlementService(tasks, decisions, decisionRaiseService, bugs),
+                new RunSettlementService(tasks, decisions, decisionRaiseService, bugs, taskId -> {
+                }),
                 executor, Duration.ofMinutes(30));
         service = new TaskDispatchService(
                 tasks, projects, branches, new BranchProvisioningService(branches, decisionRaiseService),

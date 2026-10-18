@@ -317,6 +317,80 @@ export type TaskPluginBinding = {
   boundAt: string
 }
 
+export type TestCaseType = 'WEB' | 'API'
+
+export type TestCaseRunStatus =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'TIMEOUT'
+  | 'INTERRUPTED'
+  | 'SKIPPED'
+
+/** 测试用例列表项。 */
+export type TestCaseSummary = {
+  id: number
+  projectId: number
+  projectName: string
+  name: string
+  type: TestCaseType
+  description: string | null
+  command: string | null
+  scriptFilename: string | null
+  scriptHash: string | null
+  scriptSize: number
+  enabled: boolean
+  latestRunStatus: TestCaseRunStatus | null
+  latestRunAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** 测试用例详情，额外返回可编辑的脚本正文。 */
+export type TestCaseDetail = TestCaseSummary & {
+  scriptContent: string | null
+}
+
+/** 任务绑定的测试用例。 */
+export type TaskTestCaseBinding = {
+  testCaseId: number
+  name: string
+  type: TestCaseType
+  command: string | null
+  scriptFilename: string | null
+  enabled: boolean
+  boundAt: string
+}
+
+export type TestCaseRunSummary = {
+  id: number
+  projectId: number
+  taskId: number | null
+  trigger: 'TASK_COMPLETION' | 'MANUAL'
+  testCaseId: number
+  testCaseName: string
+  type: TestCaseType
+  status: TestCaseRunStatus
+  exitCode: number | null
+  summary: string | null
+  queuedAt: string
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export type TestCaseRunDetail = TestCaseRunSummary & {
+  command: string | null
+  scriptFilename: string | null
+  scriptHash: string | null
+  output: string | null
+}
+
+export type TestCaseBatchRunResult = {
+  runs: TestCaseRunSummary[]
+  failures: { testCaseId: number; message: string }[]
+}
+
 /** 平台级执行设置；修改后立即影响新任务的领取，不终止已经运行的任务。 */
 export type ExecutionSettings = {
   maxConcurrentTasks: number

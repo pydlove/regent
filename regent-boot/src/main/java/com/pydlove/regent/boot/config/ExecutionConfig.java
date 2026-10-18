@@ -3,6 +3,7 @@ package com.pydlove.regent.boot.config;
 import com.pydlove.regent.bug.domain.repository.BugRepository;
 import com.pydlove.regent.execution.application.command.AgentRunService;
 import com.pydlove.regent.execution.application.command.BranchProvisioningService;
+import com.pydlove.regent.execution.application.command.ExecutionRecoveryService;
 import com.pydlove.regent.execution.application.command.ExecutionSettingsService;
 import com.pydlove.regent.execution.application.command.RunSettlementService;
 import com.pydlove.regent.execution.application.command.TaskAttachmentService;
@@ -31,6 +32,7 @@ import com.pydlove.regent.plugin.domain.repository.TaskPluginRepository;
 import com.pydlove.regent.project.domain.repository.EnvironmentEntryRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.shared.domain.TransactionRunner;
+import com.pydlove.regent.testing.domain.port.TestCaseExecutionScheduler;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -61,7 +63,7 @@ public class ExecutionConfig {
         return new SchemaFileProvider(Path.of(home, "schema"));
     }
 
-    @Bean
+    @Bean(destroyMethod = "close")
     public AgentExecutor agentExecutor(@Value("${regent.execution.codex-command}") String command,
                                        @Value("${regent.home}") String home,
                                        SchemaFileProvider schemaFileProvider) {
@@ -78,6 +80,14 @@ public class ExecutionConfig {
     public BranchProvisioningService branchProvisioningService(BranchManager branchManager,
                                                                DecisionRaiseService decisionRaiseService) {
         return new BranchProvisioningService(branchManager, decisionRaiseService);
+    }
+
+    /** 平台启动时收敛上次进程留下的内部执行，并把任务交回正常派发链路。 */
+    @Bean
+    public ExecutionRecoveryService executionRecoveryService(TaskRepository taskRepository,
+                                                             TaskRunRepository taskRunRepository,
+                                                             TransactionRunner transactionRunner) {
+        return new ExecutionRecoveryService(taskRepository, taskRunRepository, transactionRunner);
     }
 
     /**
@@ -154,9 +164,11 @@ public class ExecutionConfig {
     public RunSettlementService runSettlementService(TaskRepository taskRepository,
                                                      DecisionRepository decisionRepository,
                                                      DecisionRaiseService decisionRaiseService,
-                                                     BugRepository bugRepository) {
+                                                     BugRepository bugRepository,
+                                                     TestCaseExecutionScheduler testCaseExecutionScheduler) {
         return new RunSettlementService(
-                taskRepository, decisionRepository, decisionRaiseService, bugRepository);
+                taskRepository, decisionRepository, decisionRaiseService, bugRepository,
+                testCaseExecutionScheduler);
     }
 
     @Bean

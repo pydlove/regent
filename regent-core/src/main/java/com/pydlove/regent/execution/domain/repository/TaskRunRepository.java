@@ -25,6 +25,14 @@ public interface TaskRunRepository {
     List<TaskRun> listByTask(TaskId taskId);
 
     /**
+     * 仍停在 {@code RUNNING} 的平台内部执行。
+     *
+     * <p>这类记录的执行进程与本平台在同一个 JVM 背后；平台重启后进程必然已经不在，
+     * 启动恢复据此把它们收敛为 {@code INTERRUPTED}。外部执行者有租约，不在这条查询里。
+     */
+    List<TaskRun> findRunningInternal();
+
+    /**
      * 这个项目上有没有外部执行者正拿着的活跃租约。
      *
      * <p>判据是「库里还有没有没过期的租约」，而不是进程内的名单：平台重启、执行者换台机器，
