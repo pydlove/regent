@@ -77,7 +77,7 @@
           </section>
 
           <div id="workspace-warning" class="workspace-warning" hidden>
-            当前工作区有未提交改动。版本内容和预览可以生成，但创建 Git 标签前必须先提交代码并刷新页面。
+            当前工作区有未提交改动。版本内容和预览可以生成，但创建 Git 标签前必须先提交代码。
           </div>
 
           <section class="form-panel">
@@ -143,9 +143,17 @@
                 <input id="confirm-review" type="checkbox" />
                 <span>我已核对版本号和发布内容，确认开始构建并发布</span>
               </label>
-              <button id="publish-button" class="button primary large" type="button" disabled>
-                确认发布
-              </button>
+              <div class="confirm-actions">
+                <p id="publish-blocker" class="publish-blocker" aria-live="polite" hidden></p>
+                <div class="confirm-buttons">
+                  <button id="workspace-refresh" class="button small" type="button" hidden>
+                    重新检查工作区
+                  </button>
+                  <button id="publish-button" class="button primary large" type="button" disabled>
+                    确认发布
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
 

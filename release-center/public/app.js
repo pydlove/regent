@@ -24,6 +24,8 @@ const elements = {
   pushTag: document.querySelector('#push-tag'),
   tagPreview: document.querySelector('#tag-preview'),
   confirmReview: document.querySelector('#confirm-review'),
+  workspaceRefresh: document.querySelector('#workspace-refresh'),
+  publishBlocker: document.querySelector('#publish-blocker'),
   publishButton: document.querySelector('#publish-button'),
   jobPanel: document.querySelector('#job-panel'),
   jobTitle: document.querySelector('#job-title'),
@@ -37,7 +39,7 @@ let workspaceDirty = false
 let draftStale = false
 let draftSaveTimer = null
 
-const DIRTY_WARNING = '当前工作区有未提交改动。版本内容和预览可以生成，但创建 Git 标签前必须先提交代码并刷新页面。'
+const DIRTY_WARNING = '当前工作区有未提交改动。版本内容和预览可以生成，但创建 Git 标签前必须先提交代码。'
 const STALE_DRAFT_WARNING = '这份发布预览生成后代码提交有更新，请确认当前内容仍覆盖最新改动，或重新生成。'
 
 function showError(message) {
@@ -53,12 +55,27 @@ function setBusy(busy) {
 }
 
 function updateConfirmState() {
-  elements.publishButton.disabled = !(
+  const ready = (
     previewVersion
     && !workspaceDirty
     && elements.confirmReview.checked
     && elements.highlights.children.length > 0
   )
+  elements.publishButton.disabled = !ready
+  elements.workspaceRefresh.hidden = !(workspaceDirty || draftStale)
+
+  let blocker = ''
+  if (previewVersion && workspaceDirty) {
+    blocker = '当前工作区有未提交改动。提交代码后点击“重新检查工作区”，无需刷新整页。'
+  } else if (previewVersion && elements.highlights.children.length === 0) {
+    blocker = '至少保留一个更新项后才能发布。'
+  } else if (previewVersion && !elements.confirmReview.checked) {
+    blocker = '勾选“我已核对”后才能确认发布。'
+  } else if (previewVersion && draftStale) {
+    blocker = '预览生成后代码有更新，请确认当前内容仍覆盖最新改动。'
+  }
+  elements.publishBlocker.textContent = blocker
+  elements.publishBlocker.hidden = !blocker
 }
 
 function updateWorkspaceWarning() {
@@ -183,12 +200,28 @@ async function request(path, options) {
   return body
 }
 
-async function loadState() {
-  const state = await request('/api/state')
+function applyWorkspaceState(state) {
   workspaceDirty = state.dirty === true
   draftStale = state.draftStale === true
-  elements.gitHead.textContent = state.gitHead
   updateWorkspaceWarning()
+  updateConfirmState()
+}
+
+async function refreshWorkspaceState() {
+  elements.workspaceRefresh.disabled = true
+  try {
+    const state = await request('/api/state')
+    applyWorkspaceState(state)
+    return state
+  } finally {
+    elements.workspaceRefresh.disabled = false
+  }
+}
+
+async function loadState() {
+  const state = await request('/api/state')
+  applyWorkspaceState(state)
+  elements.gitHead.textContent = state.gitHead
   elements.currentVersion.textContent = state.currentVersion
   elements.nextVersion.textContent = `下一个建议：${state.suggestedVersion}`
   if (!elements.version.value) elements.version.value = state.suggestedVersion
@@ -332,6 +365,10 @@ async function publish() {
   try {
     const content = readPreview()
     if (!elements.confirmReview.checked) throw new Error('请先确认发布内容')
+    const state = await refreshWorkspaceState()
+    if (state.dirty === true) {
+      throw new Error('工作区有未提交改动，请先提交代码后再发布')
+    }
     elements.publishButton.disabled = true
     const result = await request('/api/publish', {
       method: 'POST',
@@ -359,7 +396,16 @@ elements.addHighlight.addEventListener('click', () => {
   updateConfirmState()
   scheduleDraftSave()
 })
-elements.confirmReview.addEventListener('change', updateConfirmState)
+elements.confirmReview.addEventListener('change', () => {
+  updateConfirmState()
+  if (elements.confirmReview.checked) {
+    void refreshWorkspaceState().catch((error) => showError(error.message))
+  }
+})
+elements.workspaceRefresh.addEventListener('click', () => {
+  showError('')
+  void refreshWorkspaceState().catch((error) => showError(error.message))
+})
 elements.summary.addEventListener('input', () => {
   updateConfirmState()
   scheduleDraftSave()
