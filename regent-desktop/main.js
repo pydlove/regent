@@ -273,7 +273,9 @@ function createUpdateWindow() {
   if (updateWindow) return
   updateWindow = new BrowserWindow({
     width: 440,
-    height: 230,
+    height: 280,
+    // 更新卡片内容高度固定，按内容区计算避免标题栏挤占后出现窗口滚动条。
+    useContentSize: true,
     resizable: false,
     closable: false,
     minimizable: false,
