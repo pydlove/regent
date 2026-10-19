@@ -109,7 +109,7 @@ const tokenBreakdown = computed(() => {
     v-model:open="open"
     layout="log"
     :title="run ? `第 ${run.attemptNo} 次尝试` : '运行记录'"
-    :description="run ? `${run.branchName} · ${formatRelative(run.startedAt)} 开始` : '正在读取这次执行的记录'"
+    :description="run ? `${run.branchName ?? '项目目录'} · ${formatRelative(run.startedAt)} 开始` : '正在读取这次执行的记录'"
     :icon="ScrollText"
   >
     <p v-if="loading" class="text-caption text-label-secondary">正在读取…</p>

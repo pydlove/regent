@@ -9,9 +9,11 @@ import com.pydlove.regent.bug.domain.repository.BugRepository;
 import com.pydlove.regent.execution.application.command.BugFixDispatchService;
 import com.pydlove.regent.execution.application.command.TaskCommandService;
 import com.pydlove.regent.execution.application.command.TaskDispatchService;
+import com.pydlove.regent.execution.application.command.TaskDraftService;
 import com.pydlove.regent.execution.application.query.TaskQueryService;
 import com.pydlove.regent.execution.application.query.TaskRunQueryService;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
+import com.pydlove.regent.execution.domain.repository.TaskDraftRepository;
 import com.pydlove.regent.execution.domain.repository.TaskQueryRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
@@ -26,6 +28,7 @@ import com.pydlove.regent.project.application.command.ProjectRegistrationService
 import com.pydlove.regent.project.application.command.EnvironmentEntryService;
 import com.pydlove.regent.project.application.query.DirectoryListingService;
 import com.pydlove.regent.project.application.query.ProjectGitBranchQueryService;
+import com.pydlove.regent.project.domain.port.ProjectSummaryScheduler;
 import com.pydlove.regent.project.domain.repository.EnvironmentEntryRepository;
 import com.pydlove.regent.project.domain.port.ProjectGitBranchReader;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
@@ -94,8 +97,18 @@ public class ApplicationConfig {
     }
 
     @Bean
-    public ProjectRegistrationService projectRegistrationService(ProjectRepository projectRepository) {
-        return new ProjectRegistrationService(projectRepository);
+    public TaskDraftService taskDraftService(TaskDraftRepository taskDraftRepository,
+                                             ProjectProfileRepository projectProfileRepository) {
+        return new TaskDraftService(taskDraftRepository, projectProfileRepository);
+    }
+
+    @Bean
+    public ProjectRegistrationService projectRegistrationService(
+            ProjectRepository projectRepository,
+            ProjectSummaryScheduler projectSummaryScheduler,
+            TransactionRunner transactionRunner) {
+        return new ProjectRegistrationService(
+                projectRepository, projectSummaryScheduler, transactionRunner);
     }
 
     @Bean

@@ -55,7 +55,7 @@ public class EnvironmentController {
     private static SaveEnvironmentCommand toCommand(EnvironmentRequest request) {
         EnvironmentScope scope = EnvironmentScope.parse(request.scope());
         ProjectId projectId = request.projectId() == null ? null : ProjectId.of(request.projectId());
-        return new SaveEnvironmentCommand(scope, projectId, request.key(), request.value(),
-                request.tags(), request.description());
+        return new SaveEnvironmentCommand(scope, projectId, request.value(),
+                request.tags(), request.description(), Boolean.TRUE.equals(request.secret()));
     }
 }

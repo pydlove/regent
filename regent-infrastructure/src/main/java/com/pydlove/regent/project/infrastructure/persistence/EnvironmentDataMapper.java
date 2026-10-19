@@ -25,6 +25,7 @@ public final class EnvironmentDataMapper {
         data.setItemValue(entry.getValue());
         data.setTags(entry.getTags().isEmpty() ? null : String.join(",", entry.getTags()));
         data.setDescription(entry.getDescription());
+        data.setSecret(entry.isSecret());
         data.setCreatedAt(toDb(entry.getCreatedAt()));
         data.setUpdatedAt(toDb(entry.getUpdatedAt()));
         return data;
@@ -43,6 +44,7 @@ public final class EnvironmentDataMapper {
                 row.getItemValue(),
                 parseTags(row.getTags()),
                 row.getDescription(),
+                Boolean.TRUE.equals(row.getSecret()),
                 toInstant(row.getCreatedAt()),
                 toInstant(row.getUpdatedAt()));
     }

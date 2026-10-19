@@ -6,11 +6,13 @@ const currentYear = new Date().getFullYear()
 
 <template>
   <footer
-    class="flex h-footer shrink-0 items-center gap-2 border-t border-separator bg-window px-3 text-caption text-label-tertiary lg:px-5"
+    class="relative flex h-footer shrink-0 items-center border-t border-separator bg-window px-3 text-caption text-label-tertiary lg:px-5"
   >
-    <p>Copyright © {{ currentYear }} Regent AI</p>
-    <span aria-hidden="true" class="text-label-tertiary/60">·</span>
-    <AppVersionDialog />
-    <p class="ml-auto hidden sm:block">Regent AI 任务执行平台</p>
+    <p class="absolute left-1/2 -translate-x-1/2 whitespace-nowrap">
+      Copyright © {{ currentYear }} Regent AI
+    </p>
+    <div class="ml-auto flex items-center">
+      <AppVersionDialog />
+    </div>
   </footer>
 </template>

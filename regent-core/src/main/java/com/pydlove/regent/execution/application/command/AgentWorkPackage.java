@@ -16,7 +16,7 @@ import java.util.List;
  * @param title             任务标题（人写的那一行）
  * @param projectCode       项目标识
  * @param workdir           工作区绝对路径
- * @param branch            必须在这条分支上干活；平台已经切过去了
+ * @param branch            建议工作的分支；为空表示直接在 workdir 当前状态执行
  * @param instruction       本次指令，末尾已经带上平台的上报约定
  * @param sessionId         平台记录的续跑钥匙（执行者报的会话 ID）；为空表示这次是新会话
  * @param images            任务附件的绝对路径，按顺序挂给模型

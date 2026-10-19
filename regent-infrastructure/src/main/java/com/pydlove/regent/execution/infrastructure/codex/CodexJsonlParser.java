@@ -65,7 +65,9 @@ public final class CodexJsonlParser {
             return Optional.empty();
         }
         JsonNode decision = node.path("decision");
+        JsonNode branch = node.path("branch");
         boolean hasDecision = decision.isObject();
+        boolean hasBranch = branch.isObject();
         return Optional.of(new CodexReport(
                 text(node, "status"),
                 text(node, "summary"),
@@ -76,7 +78,10 @@ public final class CodexJsonlParser {
                 hasDecision ? text(decision, "recommendation") : null,
                 hasDecision ? decision.path("reversible").asBoolean(false) : false,
                 hasDecision ? text(decision, "blastRadius") : null,
-                bugs(node.path("bugs"))));
+                bugs(node.path("bugs")),
+                hasBranch ? branch.path("requested").asBoolean(false) : false,
+                hasBranch ? text(branch, "name") : null,
+                hasBranch ? text(branch, "reason") : null));
     }
 
     private Optional<JsonNode> readTree(String raw) {
@@ -168,7 +173,10 @@ public final class CodexJsonlParser {
             String recommendation,
             Boolean reversible,
             String blastRadius,
-            List<CodexBug> bugs) {
+            List<CodexBug> bugs,
+            boolean branchRequested,
+            String branchName,
+            String branchReason) {
 
         public boolean hasDecision() {
             return level != null && !level.isBlank() && question != null && !question.isBlank();

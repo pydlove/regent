@@ -121,16 +121,8 @@ public class Decision {
         resolve(DecisionStatus.APPROVED, DecisionOutcome.byHuman(choice, note));
     }
 
-    /**
-     * 人工驳回。理由必填。
-     *
-     * <p>驳回是「否决 AI 的判断」，理由会作为上下文交给下一轮执行。没有理由的驳回，
-     * 等于把一次人工介入变成一条无法解释的历史记录 —— 复盘时只能看到「当时没让做」。
-     */
+    /** 人工驳回。理由可选，填写后会作为说明留在决策记录中。 */
     public void reject(String choice, String note) {
-        if (note == null || note.isBlank()) {
-            throw new DomainException("驳回必须写明理由：下一轮执行要靠它知道为什么被否");
-        }
         resolve(DecisionStatus.REJECTED, DecisionOutcome.byHuman(choice, note));
     }
 

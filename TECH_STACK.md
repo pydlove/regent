@@ -32,7 +32,7 @@
 | **迁移** | **Flyway** | 父 POM 管理（11.x） | `flyway-core` + `flyway-mysql` |
 | JSON | Jackson | 父 POM 管理 | 逐行解析 `codex exec --json` 的 JSONL |
 | JSON Schema | **手写契约文件** | — | `regent-infrastructure/src/main/resources/codex/` 下的 schema + 上报约定；victools 生成留作将来（见第五节） |
-| 进程调用 | `java.lang.ProcessBuilder` | JDK | 拉起 `codex exec` / `codex exec resume` |
+| 进程调用 | `java.lang.ProcessBuilder` | JDK | 拉起 `codex exec` / `codex exec resume`、本机测试脚本与 OpenSSH 部署 |
 | 调度 | Spring `@Scheduled` + `ThreadPoolTaskExecutor` | — | 不引 Quartz，现阶段用不上 |
 | 邮件 | `spring-boot-starter-mail` | — | JavaMailSender |
 | 推送 | Spring `RestClient` | — | Server酱 / PushPlus / 飞书 / 钉钉 webhook |
@@ -132,12 +132,18 @@ spring:
 |---|---|---|
 | `task_attachment` | `V3__task_attachment.sql` | 任务图片附件：展示用文件名、`image/*` 类型、字节数、平台侧存储路径（磁盘文件名只有 UUID + 扩展名） |
 | `bug_attachment` | `V8__bug_attachment.sql` | Bug 单图片附件：复现截图与现场证据，存储规则与任务附件一致，外键挂 `bug` |
-| `environment_entry` | `V9__environment_entry.sql` | 任务环境信息：全局或项目归属、环境键、任意文本值、标签与描述；项目同键值覆盖全局 |
+| `environment_entry` | `V9__environment_entry.sql` | 任务环境信息：环境键由应用自动生成（`ENV_nnn`），用户填写 64 字名称；支持全局或项目归属、任意文本值、标签；项目同键值覆盖全局 |
+| 环境名称与密码标记 | `V26__environment_entry_name_and_secret.sql` | 名称限制为 64 字；增加 `secret` 标记，密码值在列表与详情默认脱敏 |
 | `relay_setting` | `V10__relay_settings.sql` | 中继服务器地址与状态监听开关；连接器共享密钥仍只保存在本机部署配置 |
 | `relay_install_settings` | `V11__relay_install_settings.sql` | 中继安装的服务器 IP、SSH 用户名与安装目录；SSH 密码只在安装请求中使用，不落库 |
 | `plugin` / `plugin_version` / `task_plugin` | `V17__plugin_library.sql`、`V18__plugin_builtin_key.sql` | 可复用能力包、不可变内容版本与任务固定版本绑定；`builtin_key` 标识随 JAR 发布的内置插件，启动时幂等同步，插件正文不保存凭据 |
 | `test_case` / `task_test_case` / `test_case_run` | `V20__test_case_suite.sql` | Web / 接口测试用例、任务完成后的绑定，以及独立于 codex 执行记录的测试结果与输出 |
 | `test_case_run` 手动执行字段 | `V21__manual_test_case_runs.sql` | 增加项目归属与 `trigger_type`，允许手动执行没有 `task_id` |
+| `task_draft` | `V22__task_draft.sql` | 当前登录用户的单份任务录入草稿；保存项目、指令、优先级与插件 ID，不进入任务队列 |
+| 项目资料字段 | `V23__project_summary.sql` | 保存 Codex 只读分析生成的 Markdown 项目资料、生成状态、失败原因与生成时间 |
+| 部署配置与执行记录 | `V24__deployment.sql` | 保存服务器 SSH 配置、部署脚本与执行快照；密码不进入部署快照，日志写入 `~/.regent/deployments/runs/` |
+| 部署归属项目 | `V25__deployment_project.sql` | 给部署配置与执行快照增加 `project_id`，部署创建后归属项目不可变更 |
+| 部署密码密文 | `V27__deployment_credential.sql` | 独立保存 AES-GCM 加密后的 SSH 密码；主密钥只存在 `~/.regent/deployment/credential.key` |
 
 全部用 `utf8mb4`，主键用 `BIGINT`，状态字段用 `VARCHAR` 存枚举名（不用 MySQL `ENUM`，避免改枚举要动表结构）。时间统一 `DATETIME(3)` 存 UTC。
 
@@ -211,7 +217,7 @@ DTO 收在 `regent-interfaces` 的 `interfaces/dto` 包下，**没有单独的 `
 两个文件随 classpath 打包；执行时由 `SchemaFileProvider` 首次调用落到 `~/.regent/`，因为
 `codex exec --output-schema` **只接受文件路径**，不接受内联 schema。运行产物一律不落仓库。
 
-出参有五个字段（`status` / `summary` / `changedFiles` / `decision` / `bugs`）。
+出参有六个字段（`status` / `summary` / `changedFiles` / `branch` / `decision` / `bugs`）。
 `bugs` 是执行器发现的缺陷清单，平台会把每项落成来源任务可追溯的 Bug 单；
 没有发现缺陷时传空数组。验证结论仍写在 `summary` 里，暂未拆成独立字段：
 
@@ -220,8 +226,15 @@ public record CodexExecResult(
     Status status,                 // DONE / BLOCKED / FAILED
     String summary,
     List<String> changedFiles,
+    BranchDto branch,              // 可选；requested=true 时平台在成功后创建 feature 分支
     DecisionDto decision,          // 只有 BLOCKED 时是对象，其余为 null
     List<BugDto> bugs              // 本轮发现的缺陷，没有则为空
+) {}
+
+public record BranchDto(
+    boolean requested,
+    String name,
+    String reason
 ) {}
 
 public record DecisionDto(
@@ -241,6 +254,10 @@ public record BugDto(
     String detail
 ) {}
 ```
+
+`branch` 只是执行器的隔离分支请求。项目根目录不是有效 Git 仓库（普通目录、空仓库或
+多个 Git 仓库的父目录）时，平台忽略该请求并保持 `branch_name = NULL`，任务仍按执行结果
+正常收敛；不会因为当前目录没有分支名判定失败。
 
 **DTO 与 schema 的一致性还没有单测守**。`CodexReportTranslator` 按字段名读 `-o` 落盘的 JSON，
 schema 改字段而解析没跟上（或反之）只有集成测试能发现。想补的那一步是 DTO 用
@@ -338,7 +355,7 @@ regent:
     codex-command: ${REGENT_CODEX_COMMAND:codex}
     timeout: ${REGENT_EXEC_TIMEOUT:PT30M}     # 单次执行的墙钟上限，ISO-8601
     max-concurrency: ${REGENT_MAX_CONCURRENCY:1}   # 仅首次默认；界面保存后以数据库配置为准
-    branch-enabled: ${REGENT_BRANCH_ENABLED:true}  # 一任务一分支；新建分支必须先人工审批，关闭则在当前分支跑
+    branch-enabled: ${REGENT_BRANCH_ENABLED:true}  # 根目录有效 Git 仓库才记录分支；非 Git 目录分支为空
     dispatch:                                 # 派发心跳。关了就只能靠人点「派发执行」
       enabled: ${REGENT_DISPATCH_ENABLED:true}
       interval-ms: 15000

@@ -47,6 +47,12 @@ const router = createRouter({
       meta: { title: '计划' },
     },
     {
+      path: '/deployments',
+      name: 'deployments',
+      component: () => import('@/views/DeploymentsView.vue'),
+      meta: { title: '部署' },
+    },
+    {
       path: '/decisions',
       name: 'decisions',
       component: () => import('@/views/DecisionsView.vue'),

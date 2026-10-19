@@ -59,7 +59,7 @@ public class TaskRun {
             throw new DomainException("尝试序号从 1 开始：" + attemptNo);
         }
         this.attemptNo = attemptNo;
-        this.branchName = requireText(branchName, "分支名");
+        this.branchName = blankToNull(branchName);
         this.status = RunStatus.RUNNING;
         this.tokens = TokenUsage.ZERO;
         this.changedFiles = List.of();

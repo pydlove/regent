@@ -212,16 +212,18 @@ class DecisionApprovalServiceTest {
         }
 
         @Test
-        void 驳回理由为空时拒绝且不写库() {
+        void 驳回理由为空时仍终止任务并留痕() {
             pendingDecision();
-            blockedTask();
+            Task task = blockedTask();
             resetCounters();
 
-            assertThrows(DomainException.class,
-                    () -> service.reject(DECISION_ID.value(), ReviewCommand.of(null, "  ")));
+            Decision result = service.reject(DECISION_ID.value(), ReviewCommand.of(null, "  "));
 
-            assertEquals(DecisionStatus.PENDING, decisions.findById(DECISION_ID).orElseThrow().getStatus());
-            assertEquals(0, tasks.saveCount());
+            assertEquals(DecisionStatus.REJECTED, result.getStatus());
+            assertTrue(result.getResolutionNote().isEmpty());
+            assertEquals(TaskStatus.CANCELLED, task.getStatus());
+            assertEquals(1, tasks.saveCount());
+            assertEquals(1, decisions.saveCount());
         }
     }
 

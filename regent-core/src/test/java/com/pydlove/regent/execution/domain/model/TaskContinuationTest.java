@@ -55,6 +55,18 @@ class TaskContinuationTest {
 
             assertEquals(2, task.getAttemptCount());
         }
+
+        @Test
+        void 没有分支名的任务也能续跑() {
+            Task task = Task.manual(PROJECT, "补测试", "给导出功能补测试", 0);
+            task.dispatch(null);
+            task.recordThreadId("th-1");
+
+            task.beginContinuation();
+
+            assertEquals(2, task.getAttemptCount());
+            assertTrue(task.getBranchName().isEmpty());
+        }
     }
 
     @Nested
@@ -101,6 +113,19 @@ class TaskContinuationTest {
             assertEquals("codex/task-1", task.getBranchName().orElseThrow());
             assertEquals(attempts, task.getAttemptCount(), "尝试次数由下一次 dispatch 统一增加");
             assertTrue(task.getStartedAt().isEmpty());
+        }
+
+        @Test
+        void 没有分支名的任务也能从重启中断恢复() {
+            Task task = Task.manual(PROJECT, "补测试", "给导出功能补测试", 0);
+            task.dispatch(null);
+            task.recordThreadId("th-1");
+
+            task.requeueAfterInterruption();
+
+            assertEquals(TaskStatus.QUEUED, task.getStatus());
+            assertEquals("th-1", task.getCodexThreadId().orElseThrow());
+            assertTrue(task.getBranchName().isEmpty());
         }
 
         @Test

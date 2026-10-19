@@ -30,10 +30,17 @@ import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl
 import StatusDot from '@/components/ui/status-dot/StatusDot.vue'
 import Switch from '@/components/ui/switch/Switch.vue'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
+import { useCodexInstallDialog } from '@/composables/useCodexInstallDialog'
 import { useTheme, type ThemePreference } from '@/composables/useTheme'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/useAuthStore'
-import type { RelayInstallResult, RelaySettings, RelayState, RelayStatus } from '@/types/api'
+import { useExecutionRuntimeStore } from '@/stores/useExecutionRuntimeStore'
+import type {
+  RelayInstallResult,
+  RelaySettings,
+  RelayState,
+  RelayStatus,
+} from '@/types/api'
 import BaselineView from '@/views/BaselineView.vue'
 
 type SettingsSection = 'appearance' | 'baseline' | 'execution' | 'relay' | 'account'
@@ -56,6 +63,8 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 const auth = useAuthStore()
+const executionRuntime = useExecutionRuntimeStore()
+const { openDialog: openCodexInstallDialog } = useCodexInstallDialog()
 const { preference, setTheme } = useTheme()
 
 const sectionParam = computed(() => {
@@ -102,6 +111,9 @@ const executionLoading = ref(false)
 const executionSaving = ref(false)
 const executionLoaded = ref(false)
 const executionError = ref<string | null>(null)
+const codexRuntime = computed(() => executionRuntime.status)
+const codexChecking = computed(() => executionRuntime.loading)
+const codexError = computed(() => executionRuntime.error)
 
 const numericLimit = computed(() => Number(executionLimit.value))
 const executionValid = computed(
@@ -110,6 +122,20 @@ const executionValid = computed(
 const executionDirty = computed(
   () => executionLoaded.value && executionLimit.value !== savedExecutionLimit.value,
 )
+const codexStatusLabel = computed(() => {
+  if (codexChecking.value) return '检测中'
+  if (!codexRuntime.value) return '未检测'
+  return codexRuntime.value.available ? '可用' : '不可用'
+})
+const codexStatusDot = computed(() => {
+  if (codexChecking.value) return 'bg-accent'
+  if (!codexRuntime.value) return 'bg-neutral'
+  return codexRuntime.value.available ? 'bg-success' : 'bg-danger'
+})
+const codexCheckedAt = computed(() => {
+  if (!codexRuntime.value) return ''
+  return new Date(codexRuntime.value.checkedAt).toLocaleString('zh-CN')
+})
 
 function messageOf(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback
@@ -146,6 +172,10 @@ async function saveExecutionSettings() {
   } finally {
     executionSaving.value = false
   }
+}
+
+async function detectCodex() {
+  await executionRuntime.check(true)
 }
 
 const relayForm = reactive({
@@ -476,6 +506,16 @@ onMounted(() => {
   syncRelayPolling()
 })
 
+watch(
+  activeSection,
+  (section) => {
+    if (section === 'execution' && !codexRuntime.value && !codexChecking.value) {
+      void detectCodex()
+    }
+  },
+  { immediate: true },
+)
+
 onBeforeUnmount(() => {
   stopRelayPolling()
   document.removeEventListener('visibilitychange', handleVisibilityChange)
@@ -547,9 +587,83 @@ onBeforeUnmount(() => {
           <header class="mb-6">
             <h1 class="text-metric font-emphasis text-label">执行</h1>
             <p class="mt-1 text-body text-label-secondary">
-              控制平台同时运行的任务数量，新设置立即影响任务领取。
+              检查本机 Codex 执行器，并控制平台同时运行的任务数量。
             </p>
           </header>
+
+          <section class="mb-4 overflow-hidden rounded-panel bg-content shadow-panel">
+            <div class="flex items-start gap-4 px-4 py-4">
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-body font-emphasis text-label">Codex 执行器</span>
+                  <StatusDot :dot="codexStatusDot">{{ codexStatusLabel }}</StatusDot>
+                </div>
+                <p class="mt-1 text-caption text-label-secondary">
+                  检测本机是否能找到并运行 codex。只执行版本命令，不调用模型。
+                </p>
+              </div>
+              <div class="flex shrink-0 items-center gap-2">
+                <Button size="sm" @click="openCodexInstallDialog">安装 / 更新</Button>
+                <Button size="sm" :disabled="codexChecking" @click="detectCodex">
+                  <Icon
+                    :as="RefreshCw"
+                    size="inline"
+                    :class="{ 'animate-spin': codexChecking }"
+                  />
+                  {{ codexChecking ? '检测中…' : '重新检测' }}
+                </Button>
+              </div>
+            </div>
+
+            <template v-if="codexRuntime">
+              <div class="h-px bg-separator-soft" />
+              <dl class="grid gap-2 px-4 py-3 text-caption sm:grid-cols-2">
+                <div class="flex min-w-0 items-center gap-2">
+                  <dt class="shrink-0 text-label-secondary">配置命令</dt>
+                  <dd class="ml-auto truncate font-mono text-label">
+                    {{ codexRuntime.configuredCommand }}
+                  </dd>
+                </div>
+                <div class="flex min-w-0 items-center gap-2">
+                  <dt class="shrink-0 text-label-secondary">版本</dt>
+                  <dd class="ml-auto truncate text-label">{{ codexRuntime.version ?? '未返回' }}</dd>
+                </div>
+                <div class="flex min-w-0 items-center gap-2 sm:col-span-2">
+                  <dt class="shrink-0 text-label-secondary">实际路径</dt>
+                  <dd class="ml-auto truncate font-mono text-label">
+                    {{ codexRuntime.executablePath ?? '未找到' }}
+                  </dd>
+                </div>
+                <div class="flex min-w-0 items-center gap-2 sm:col-span-2">
+                  <dt class="shrink-0 text-label-secondary">检测结果</dt>
+                  <dd
+                    class="ml-auto text-right"
+                    :class="codexRuntime.available ? 'text-label-secondary' : 'text-danger'"
+                  >
+                    {{ codexRuntime.message }}
+                  </dd>
+                </div>
+              </dl>
+              <div
+                v-if="!codexRuntime.available"
+                class="border-t border-separator-soft bg-warning/5 px-4 py-3"
+              >
+                <p class="text-caption font-emphasis text-label">必须安装 Codex 才能执行任务</p>
+                <p class="mt-2 text-caption text-label-tertiary">
+                  npm 和 GitHub 位于国外，国内网络可能需要代理或“魔法”才能完成安装。
+                </p>
+                <Button class="mt-2" size="sm" @click="openCodexInstallDialog">
+                  查看安装方式
+                </Button>
+              </div>
+              <p class="border-t border-separator-soft px-4 py-2 text-caption text-label-tertiary">
+                最近检测：{{ codexCheckedAt }}。可用只代表可执行文件能启动，不代表 Codex 已完成登录。
+              </p>
+            </template>
+            <p v-if="codexError" class="border-t border-separator-soft px-4 py-2 text-caption text-danger">
+              {{ codexError }}
+            </p>
+          </section>
 
           <div class="overflow-hidden rounded-panel bg-content shadow-panel">
             <div

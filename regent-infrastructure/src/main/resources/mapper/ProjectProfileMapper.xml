@@ -7,19 +7,22 @@
 <mapper namespace="com.pydlove.regent.project.infrastructure.persistence.ProjectProfileMapper">
 
     <select id="selectById" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectProfileRow">
-        SELECT id, code, name, path, default_decision_level, enabled
+        SELECT id, code, name, path, default_decision_level, enabled,
+               summary_status, summary, summary_error, summary_generated_at
         FROM project
         WHERE id = #{id} AND deleted = 0
     </select>
 
     <select id="selectByCode" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectProfileRow">
-        SELECT id, code, name, path, default_decision_level, enabled
+        SELECT id, code, name, path, default_decision_level, enabled,
+               summary_status, summary, summary_error, summary_generated_at
         FROM project
         WHERE code = #{code} AND deleted = 0
     </select>
 
     <select id="selectAll" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectProfileRow">
-        SELECT id, code, name, path, default_decision_level, enabled
+        SELECT id, code, name, path, default_decision_level, enabled,
+               summary_status, summary, summary_error, summary_generated_at
         FROM project
         WHERE deleted = 0
         ORDER BY id

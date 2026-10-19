@@ -50,8 +50,10 @@ import Select from '@/components/ui/select/Select.vue'
 import Table from '@/components/ui/table/Table.vue'
 import type { TableColumn } from '@/components/ui/table/table.types'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
+import { useCodexInstallDialog } from '@/composables/useCodexInstallDialog'
 import { useToast } from '@/composables/useToast'
 import { useDecisionStore } from '@/stores/useDecisionStore'
+import { useExecutionRuntimeStore } from '@/stores/useExecutionRuntimeStore'
 import { useRunStore } from '@/stores/useRunStore'
 import { useTaskStore } from '@/stores/useTaskStore'
 import type {
@@ -93,8 +95,10 @@ import BugView from '@/views/BugsView.vue'
 
 const store = useTaskStore()
 const decisionStore = useDecisionStore()
+const executionRuntime = useExecutionRuntimeStore()
 const runStore = useRunStore()
 const toast = useToast()
+const { openDialog: openCodexInstallDialog } = useCodexInstallDialog()
 const route = useRoute()
 const router = useRouter()
 const bugView = computed(() => route.query.view === 'bugs')
@@ -363,6 +367,20 @@ watch(
   { immediate: true },
 )
 
+/*
+ * 详情里的决策卡只能展示「当前任务自己的、仍在待批」的那一条。
+ * decision 是异步取回来的独立状态；只看它是否非空，会在切换任务或审批完成后
+ * 把上一条决策继续渲染在当前任务下面。
+ */
+const activeDecision = computed(() => {
+  const task = selected.value
+  const current = decision.value
+  if (!task || !current) return null
+  if (task.status !== 'BLOCKED' || task.decisionId !== current.id) return null
+  if (current.taskId !== task.id || current.status !== 'PENDING') return null
+  return current
+})
+
 const reviewOpen = ref(false)
 const reviewMode = ref<'approve' | 'reject'>('approve')
 
@@ -389,7 +407,7 @@ const resetListFilters = () => {
 }
 
 const openReview = (mode: 'approve' | 'reject') => {
-  if (!decision.value) {
+  if (!activeDecision.value) {
     toast.warning('决策详情还没读取到', decisionError.value ?? '请等加载完成后再试')
     return
   }
@@ -398,7 +416,7 @@ const openReview = (mode: 'approve' | 'reject') => {
 }
 
 const onReviewed = async (payload: { mode: 'approve' | 'reject'; note: string }) => {
-  const current = decision.value
+  const current = activeDecision.value
   const task = selected.value
   if (!current || !task) return
 
@@ -419,7 +437,7 @@ const onReviewed = async (payload: { mode: 'approve' | 'reject'; note: string })
   if (payload.mode === 'approve') {
     toast.success(`#${task.id} 已批准`, '任务已放行；已有执行会话时会从断点续跑')
   } else {
-    toast.show(`#${task.id} 已驳回，任务终止`, { description: '理由已写入决策留痕' })
+    toast.show(`#${task.id} 已驳回，任务终止`, { description: '决策已留痕' })
   }
 }
 
@@ -438,21 +456,45 @@ const retry = async () => {
   toast.show(`#${task.id} 已回到待执行`, { description: '执行器下一轮会重新接手' })
 }
 
+const dispatchingTask = ref(false)
+
+const requireCodexReady = async (): Promise<boolean> => {
+  if (!executionRuntime.status) {
+    await executionRuntime.check()
+  }
+  const status = executionRuntime.status
+  if (status && !status.available) {
+    openCodexInstallDialog()
+    toast.warning(
+      'Codex 未就绪，暂时不能派发',
+      '请先到「设置 → 执行」安装或配置 Codex，然后重新检测',
+    )
+    return false
+  }
+  return true
+}
+
 const dispatch = async () => {
   const task = selected.value
-  if (!task) return
-  const failure = await store.dispatch(task.id)
-  if (failure) {
-    toast.warning(`#${task.id} 派发被拒绝`, failure)
-    return
+  if (!task || dispatchingTask.value) return
+  if (!(await requireCodexReady())) return
+  dispatchingTask.value = true
+  try {
+    const failure = await store.dispatch(task.id)
+    if (failure) {
+      toast.warning(`#${task.id} 派发被拒绝`, failure)
+      return
+    }
+    if (store.selected?.status === 'QUEUED') {
+      toast.show(`#${task.id} 已进入排队`, { description: '执行位空出来后会自动开始，无需再次点击' })
+      return
+    }
+    // 认领成功只说明「codex 已经起跑」，结果还在路上，所以随后把运行记录刷出来
+    await runStore.load(task.id)
+    toast.show(`#${task.id} 已派发给 codex`, { description: 'codex 在本机后台执行，任务状态和运行记录每 3 秒自动刷新' })
+  } finally {
+    dispatchingTask.value = false
   }
-  if (store.selected?.status === 'QUEUED') {
-    toast.show(`#${task.id} 已进入排队`, { description: '执行位空出来后会自动开始，无需再次点击' })
-    return
-  }
-  // 认领成功只说明「codex 已经起跑」，结果还在路上，所以随后把运行记录刷出来
-  await runStore.load(task.id)
-  toast.show(`#${task.id} 已派发给 codex`, { description: 'codex 在本机后台执行，任务状态和运行记录每 3 秒自动刷新' })
 }
 
 /** 派发 = 平台在本机拉起 codex CLI。当前只有这一个内部执行器，按钮与提示都要让人知道这一点 */
@@ -474,6 +516,7 @@ const batchFailureDescription = (
 const dispatchSelected = async () => {
   const ids = dispatchableSelectedIds.value
   if (ids.length === 0 || dispatchingSelected.value) return
+  if (!(await requireCodexReady())) return
 
   const selectedTaskId = selected.value?.id ?? null
   dispatchingSelected.value = true
@@ -1068,95 +1111,97 @@ onUnmounted(() => {
     <!--
       详情面板：桌面是右栏（288px）；手机（<lg）改成整屏覆盖层 ——
       390px 屏幕放不下「列表 + 288px 侧栏」并排，打开详情就让列表让位，看完点「返回列表」收回。
+      详情正文单独滚动，操作条固定在面板底部，长记录不会再把关键按钮顶出首屏。
     -->
     <aside
       :class="[
-        'bg-window',
+        'h-full min-h-0 bg-window',
         selected
-          ? 'fixed inset-0 z-40 w-full overflow-y-auto border-separator p-4 lg:static lg:inset-auto lg:z-auto lg:w-72 lg:shrink-0 lg:border-l'
-          : 'hidden lg:block lg:w-72 lg:shrink-0 lg:overflow-y-auto lg:border-l lg:border-separator lg:p-4',
+          ? 'fixed inset-0 z-40 flex w-full flex-col overflow-hidden border-separator lg:static lg:inset-auto lg:z-auto lg:w-72 lg:shrink-0 lg:border-l'
+          : 'hidden lg:flex lg:w-72 lg:shrink-0 lg:flex-col lg:border-l lg:border-separator',
       ]"
     >
       <template v-if="selected">
         <button
           type="button"
-          class="mb-3 inline-flex items-center gap-0.5 text-caption text-accent lg:hidden"
+          class="mx-4 mt-4 inline-flex items-center gap-0.5 text-caption text-accent lg:hidden"
           @click="store.clearSelection()"
         >
           <Icon :as="ChevronLeft" size="inline" />返回列表
         </button>
-        <div class="flex items-center gap-2">
-          <span class="tnum text-caption text-label-tertiary">#{{ selected.id }}</span>
-          <DecisionLevelBadge :level="selected.level" />
-          <Badge :tone="sourceMeta[selected.source].tone">
-            {{ sourceMeta[selected.source].label }}
-          </Badge>
-          <TaskStatusBadge :status="selected.status" class="ml-auto" />
-        </div>
-        <h2 class="mt-2 text-body font-emphasis text-label">{{ selected.title }}</h2>
+        <div class="scroll-area min-h-0 flex-1 overflow-y-auto p-4">
+          <div class="flex items-center gap-2">
+            <span class="tnum text-caption text-label-tertiary">#{{ selected.id }}</span>
+            <DecisionLevelBadge :level="selected.level" />
+            <Badge :tone="sourceMeta[selected.source].tone">
+              {{ sourceMeta[selected.source].label }}
+            </Badge>
+            <TaskStatusBadge :status="selected.status" class="ml-auto" />
+          </div>
+          <h2 class="mt-2 text-body font-emphasis text-label">{{ selected.title }}</h2>
 
-        <div v-if="store.detail" class="mt-2">
-          <div class="flex items-center gap-2">
-            <p class="text-caption font-emphasis text-label-secondary">指令</p>
-            <button
-              type="button"
-              class="ml-auto text-caption text-accent transition-colors duration-100 ease-apple hover:text-accent/80"
-              @click="promptOpen = true"
-            >
-              查看详情
-            </button>
+          <div v-if="store.detail" class="mt-2">
+            <div class="flex items-center gap-2">
+              <p class="text-caption font-emphasis text-label-secondary">指令</p>
+              <button
+                type="button"
+                class="ml-auto text-caption text-accent transition-colors duration-100 ease-apple hover:text-accent/80"
+                @click="promptOpen = true"
+              >
+                查看详情
+              </button>
+            </div>
+            <p class="mt-1 line-clamp-4 whitespace-pre-wrap text-caption text-label-secondary">
+              {{ store.detail.prompt }}
+            </p>
           </div>
-          <p class="mt-1 line-clamp-4 whitespace-pre-wrap text-caption text-label-secondary">
-            {{ store.detail.prompt }}
-          </p>
-        </div>
 
-        <dl class="mt-4 space-y-2">
-          <div class="flex items-center gap-2">
-            <dt class="whitespace-nowrap text-caption text-label-secondary">项目</dt>
-            <dd class="ml-auto text-caption text-label">{{ selected.projectName }}</dd>
-          </div>
-          <div class="flex items-center gap-2">
-            <dt class="whitespace-nowrap text-caption text-label-secondary">优先级</dt>
-            <dd class="tnum ml-auto text-caption text-label">{{ selected.priority }}</dd>
-          </div>
-          <div class="flex items-center gap-2">
-            <dt class="whitespace-nowrap text-caption text-label-secondary">分支</dt>
-            <dd class="ml-auto text-caption text-label">{{ selected.branchName ?? '—' }}</dd>
-          </div>
-          <div class="flex items-center gap-2">
-            <dt class="whitespace-nowrap text-caption text-label-secondary">耗时</dt>
-            <dd class="tnum ml-auto text-caption text-label">
-              {{ formatDurationMillis(selected.executionMillis) }}
-            </dd>
-          </div>
-          <div class="flex items-center gap-2">
-            <dt class="whitespace-nowrap text-caption text-label-secondary">Token</dt>
-            <dd class="tnum ml-auto text-caption text-label">{{ formatTokens(selected.tokens) }}</dd>
-          </div>
-          <div class="flex items-center gap-2">
-            <dt class="whitespace-nowrap text-caption text-label-secondary">尝试次数</dt>
-            <dd class="tnum ml-auto text-caption text-label">{{ selected.attemptCount }}</dd>
-          </div>
-          <div class="flex items-center gap-2">
-            <dt class="whitespace-nowrap text-caption text-label-secondary">开始执行时间</dt>
-            <dd class="tnum ml-auto whitespace-nowrap text-caption text-label">
-              {{ formatDateTime(store.detail?.startedAt ?? selected.startedAt) }}
-            </dd>
-          </div>
-          <div class="flex items-center gap-2">
-            <dt class="whitespace-nowrap text-caption text-label-secondary">完成时间</dt>
-            <dd class="tnum ml-auto whitespace-nowrap text-caption text-label">
-              {{ formatDateTime(store.detail?.finishedAt ?? selected.finishedAt) }}
-            </dd>
-          </div>
-          <div class="flex items-center gap-2">
-            <dt class="whitespace-nowrap text-caption text-label-secondary">创建时间</dt>
-            <dd class="tnum ml-auto whitespace-nowrap text-caption text-label">
-              {{ formatDateTime(store.detail?.createdAt ?? selected.createdAt) }}
-            </dd>
-          </div>
-        </dl>
+          <dl class="mt-4 space-y-2">
+            <div class="flex items-center gap-2">
+              <dt class="whitespace-nowrap text-caption text-label-secondary">项目</dt>
+              <dd class="ml-auto text-caption text-label">{{ selected.projectName }}</dd>
+            </div>
+            <div class="flex items-center gap-2">
+              <dt class="whitespace-nowrap text-caption text-label-secondary">优先级</dt>
+              <dd class="tnum ml-auto text-caption text-label">{{ selected.priority }}</dd>
+            </div>
+            <div class="flex items-center gap-2">
+              <dt class="whitespace-nowrap text-caption text-label-secondary">分支</dt>
+              <dd class="ml-auto text-caption text-label">{{ selected.branchName ?? '项目目录' }}</dd>
+            </div>
+            <div class="flex items-center gap-2">
+              <dt class="whitespace-nowrap text-caption text-label-secondary">耗时</dt>
+              <dd class="tnum ml-auto text-caption text-label">
+                {{ formatDurationMillis(selected.executionMillis) }}
+              </dd>
+            </div>
+            <div class="flex items-center gap-2">
+              <dt class="whitespace-nowrap text-caption text-label-secondary">Token</dt>
+              <dd class="tnum ml-auto text-caption text-label">{{ formatTokens(selected.tokens) }}</dd>
+            </div>
+            <div class="flex items-center gap-2">
+              <dt class="whitespace-nowrap text-caption text-label-secondary">尝试次数</dt>
+              <dd class="tnum ml-auto text-caption text-label">{{ selected.attemptCount }}</dd>
+            </div>
+            <div class="flex items-center gap-2">
+              <dt class="whitespace-nowrap text-caption text-label-secondary">开始执行时间</dt>
+              <dd class="tnum ml-auto whitespace-nowrap text-caption text-label">
+                {{ formatDateTime(store.detail?.startedAt ?? selected.startedAt) }}
+              </dd>
+            </div>
+            <div class="flex items-center gap-2">
+              <dt class="whitespace-nowrap text-caption text-label-secondary">完成时间</dt>
+              <dd class="tnum ml-auto whitespace-nowrap text-caption text-label">
+                {{ formatDateTime(store.detail?.finishedAt ?? selected.finishedAt) }}
+              </dd>
+            </div>
+            <div class="flex items-center gap-2">
+              <dt class="whitespace-nowrap text-caption text-label-secondary">创建时间</dt>
+              <dd class="tnum ml-auto whitespace-nowrap text-caption text-label">
+                {{ formatDateTime(store.detail?.createdAt ?? selected.createdAt) }}
+              </dd>
+            </div>
+          </dl>
 
         <div class="mt-4 rounded-panel border border-separator-soft bg-content p-3">
           <div class="flex items-center gap-2">
@@ -1274,15 +1319,15 @@ onUnmounted(() => {
         </div>
 
         <div
-          v-if="decision"
+          v-if="activeDecision"
           class="mt-4 rounded-panel border border-separator-soft bg-content p-2.5"
         >
           <p class="text-caption font-emphasis text-label-secondary">等待你的决定</p>
-          <p class="mt-1 text-caption text-label">{{ decision.question }}</p>
-          <p v-if="decision.matchedRuleName" class="mt-1 text-caption text-label-tertiary">
-            命中规则「{{ decision.matchedRuleName }}」
-            <template v-if="decision.levelEscalated">
-              · AI 自评 {{ decision.aiLevel }}，已升级到 {{ decision.effectiveLevel }}
+          <p class="mt-1 text-caption text-label">{{ activeDecision.question }}</p>
+          <p v-if="activeDecision.matchedRuleName" class="mt-1 text-caption text-label-tertiary">
+            命中规则「{{ activeDecision.matchedRuleName }}」
+            <template v-if="activeDecision.levelEscalated">
+              · AI 自评 {{ activeDecision.aiLevel }}，已升级到 {{ activeDecision.effectiveLevel }}
             </template>
           </p>
         </div>
@@ -1353,62 +1398,71 @@ onUnmounted(() => {
           </p>
         </div>
 
-        <div class="mt-4 flex flex-wrap items-center gap-2">
-          <Tooltip
-            v-if="store.detail"
-            :content="canEdit(selected.status) ? '编辑任务指令与优先级' : '已完成的任务不能编辑'"
-          >
-            <span class="inline-flex">
-              <Button
-                size="sm"
-                :disabled="!canEdit(selected.status)"
-                @click="openEdit"
-              >
-                <Icon :as="Pencil" size="inline" />编辑
-              </Button>
-            </span>
-          </Tooltip>
-          <Button
-            v-if="canResume(selected.status)"
-            variant="primary"
-            size="sm"
-            :disabled="decisionLoading"
-            @click="openReview('approve')"
-          >
-            <Icon :as="Play" size="inline" />批准并继续
-          </Button>
-          <Tooltip v-if="canDispatch(selected.status)" :content="dispatchHint">
-            <Button variant="primary" size="sm" @click="dispatch">
-              <Icon :as="Play" size="inline" />派发给 codex
+        </div>
+
+        <div class="shrink-0 border-t border-separator bg-window p-3 lg:p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            <Tooltip
+              v-if="store.detail"
+              :content="canEdit(selected.status) ? '编辑任务指令与优先级' : '已完成的任务不能编辑'"
+            >
+              <span class="inline-flex">
+                <Button
+                  size="sm"
+                  :disabled="!canEdit(selected.status)"
+                  @click="openEdit"
+                >
+                  <Icon :as="Pencil" size="inline" />编辑
+                </Button>
+              </span>
+            </Tooltip>
+            <Button
+              v-if="canResume(selected.status)"
+              variant="primary"
+              size="sm"
+              :disabled="decisionLoading"
+              @click="openReview('approve')"
+            >
+              <Icon :as="Play" size="inline" />批准并继续
             </Button>
-          </Tooltip>
-          <Button
-            v-if="canReject(selected.status)"
-            size="sm"
-            :disabled="decisionLoading"
-            @click="openReview('reject')"
-          >
-            <Icon :as="XCircle" size="inline" />驳回
-          </Button>
-          <Button v-if="canRetry(selected.status)" size="sm" @click="retry">
-            <Icon :as="RotateCcw" size="inline" />{{ retryActionLabel(selected.status) }}
-          </Button>
-          <Button v-if="canCancel(selected.status)" size="sm" @click="requestCancel">终止</Button>
-          <Button
-            v-if="canDelete(selected.status)"
-            variant="danger"
-            size="sm"
-            @click="requestDelete([selected.id])"
-          >
-            <Icon :as="Trash2" size="inline" />删除
-          </Button>
-          <Button v-if="runStore.runs.length > 0" size="sm" @click="openRun(runStore.runs[0].id)">
-            打开日志
-          </Button>
+            <Tooltip v-if="canDispatch(selected.status)" :content="dispatchHint">
+              <Button
+                variant="primary"
+                size="sm"
+                :disabled="dispatchingTask"
+                @click="dispatch"
+              >
+                <Icon :as="Play" size="inline" />{{ dispatchingTask ? '派发中…' : '派发给 codex' }}
+              </Button>
+            </Tooltip>
+            <Button
+              v-if="canReject(selected.status)"
+              size="sm"
+              :disabled="decisionLoading"
+              @click="openReview('reject')"
+            >
+              <Icon :as="XCircle" size="inline" />驳回
+            </Button>
+            <Button v-if="canRetry(selected.status)" size="sm" @click="retry">
+              <Icon :as="RotateCcw" size="inline" />{{ retryActionLabel(selected.status) }}
+            </Button>
+            <Button v-if="canCancel(selected.status)" size="sm" @click="requestCancel">终止</Button>
+            <Button
+              v-if="canDelete(selected.status)"
+              variant="danger"
+              size="sm"
+              @click="requestDelete([selected.id])"
+            >
+              <Icon :as="Trash2" size="inline" />删除
+            </Button>
+            <Button v-if="runStore.runs.length > 0" size="sm" @click="openRun(runStore.runs[0].id)">
+              打开日志
+            </Button>
+          </div>
         </div>
       </template>
 
-      <p v-else class="text-caption text-label-tertiary">选中一行查看详情</p>
+      <p v-else class="p-4 text-caption text-label-tertiary">选中一行查看详情</p>
     </aside>
 
     <NewTaskDialog v-model:open="createOpen" @created="onTaskCreated" @uploaded="onUploaded" />
@@ -1486,7 +1540,7 @@ onUnmounted(() => {
 
     <DecisionReviewDialog
       v-model:open="reviewOpen"
-      :decision="decision"
+      :decision="activeDecision"
       :mode="reviewMode"
       @done="onReviewed"
       @uploaded="onApprovalUploaded"

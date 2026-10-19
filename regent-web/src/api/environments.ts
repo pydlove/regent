@@ -4,10 +4,10 @@ import type { EnvironmentEntry, EnvironmentScope } from '@/types/api'
 export type SaveEnvironmentInput = {
   scope: EnvironmentScope
   projectId: number | null
-  key: string
   value: string
   tags: string[]
   description: string
+  secret: boolean
 }
 
 export const listEnvironments = () => get<EnvironmentEntry[]>('/environments')

@@ -1,6 +1,9 @@
 package com.pydlove.regent.project.infrastructure.persistence;
 
 import com.pydlove.regent.project.domain.model.Project;
+import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.project.domain.model.ProjectSummaryStatus;
+import com.pydlove.regent.shared.kernel.DecisionLevel;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -23,13 +26,38 @@ public final class ProjectDataMapper {
         data.setTechStack(project.getTechStack());
         data.setVerifyMethod(project.getVerifyMethod());
         data.setDefaultDecisionLevel(project.getDefaultDecisionLevel().name());
+        data.setSummaryStatus(project.getSummaryStatus().name());
+        data.setSummary(project.getSummary());
+        data.setSummaryError(project.getSummaryError());
+        data.setSummaryGeneratedAt(toDb(project.getSummaryGeneratedAt()));
         data.setCreatedAt(toDb(project.getCreatedAt()));
         data.setUpdatedAt(toDb(project.getUpdatedAt()));
         return data;
     }
 
+    public static Project toDomain(ProjectData data) {
+        return Project.restore(
+                ProjectId.of(data.getId()),
+                data.getCode(),
+                data.getName(),
+                data.getPath(),
+                data.getTechStack(),
+                data.getVerifyMethod(),
+                DecisionLevel.parse(data.getDefaultDecisionLevel()),
+                ProjectSummaryStatus.parse(data.getSummaryStatus()),
+                data.getSummary(),
+                data.getSummaryError(),
+                toInstant(data.getSummaryGeneratedAt()),
+                toInstant(data.getCreatedAt()),
+                toInstant(data.getUpdatedAt()));
+    }
+
     /** UTC 瞬时 → DATETIME 字面量。DATETIME 里没有时区，约定它存的一律是 UTC。 */
     private static LocalDateTime toDb(Instant instant) {
         return instant == null ? null : LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
+    }
+
+    private static Instant toInstant(LocalDateTime value) {
+        return value == null ? null : value.toInstant(ZoneOffset.UTC);
     }
 }

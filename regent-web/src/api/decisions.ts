@@ -32,6 +32,6 @@ export type DecisionReviewPayload = {
 export const approveDecision = (id: number, payload: DecisionReviewPayload = {}) =>
   postJson<DecisionSummary>(`/decisions/${id}/approve`, payload)
 
-/** 驳回。理由必填，空理由会被聚合守卫挡回来（400）。 */
+/** 驳回。理由可选，空理由会作为“没有留下说明”保存。 */
 export const rejectDecision = (id: number, payload: DecisionReviewPayload = {}) =>
   postJson<DecisionSummary>(`/decisions/${id}/reject`, payload)

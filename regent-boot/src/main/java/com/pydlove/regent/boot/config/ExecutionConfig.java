@@ -5,13 +5,17 @@ import com.pydlove.regent.execution.application.command.AgentRunService;
 import com.pydlove.regent.execution.application.command.BranchProvisioningService;
 import com.pydlove.regent.execution.application.command.ExecutionRecoveryService;
 import com.pydlove.regent.execution.application.command.ExecutionSettingsService;
+import com.pydlove.regent.execution.application.command.ExecutorInstallService;
 import com.pydlove.regent.execution.application.command.RunSettlementService;
 import com.pydlove.regent.execution.application.command.TaskAttachmentService;
 import com.pydlove.regent.execution.application.command.TaskDispatchService;
 import com.pydlove.regent.execution.application.command.TaskRunService;
 import com.pydlove.regent.execution.application.query.AgentContractService;
+import com.pydlove.regent.execution.application.query.ExecutorRuntimeQueryService;
 import com.pydlove.regent.execution.domain.model.ExecutionSettings;
 import com.pydlove.regent.execution.domain.port.AgentExecutor;
+import com.pydlove.regent.execution.domain.port.ExecutorInstaller;
+import com.pydlove.regent.execution.domain.port.ExecutorRuntimeProbe;
 import com.pydlove.regent.execution.domain.port.ExecutorContract;
 import com.pydlove.regent.execution.domain.port.BranchManager;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
@@ -24,6 +28,8 @@ import com.pydlove.regent.execution.infrastructure.agent.ClasspathExecutorContra
 import com.pydlove.regent.shared.domain.port.AttachmentStorage;
 import com.pydlove.regent.shared.infrastructure.attachment.LocalAttachmentStorage;
 import com.pydlove.regent.execution.infrastructure.codex.CodexCliAdapter;
+import com.pydlove.regent.execution.infrastructure.codex.CodexInstaller;
+import com.pydlove.regent.execution.infrastructure.codex.CodexRuntimeProbe;
 import com.pydlove.regent.execution.infrastructure.codex.SchemaFileProvider;
 import com.pydlove.regent.execution.infrastructure.git.GitBranchManager;
 import com.pydlove.regent.governance.application.command.DecisionRaiseService;
@@ -71,15 +77,36 @@ public class ExecutionConfig {
     }
 
     @Bean
+    public ExecutorRuntimeProbe executorRuntimeProbe(
+            @Value("${regent.execution.codex-command}") String command) {
+        return new CodexRuntimeProbe(command);
+    }
+
+    @Bean
+    public ExecutorRuntimeQueryService executorRuntimeQueryService(
+            ExecutorRuntimeProbe executorRuntimeProbe) {
+        return new ExecutorRuntimeQueryService(executorRuntimeProbe);
+    }
+
+    @Bean
+    public ExecutorInstaller executorInstaller(ExecutorRuntimeProbe executorRuntimeProbe) {
+        return new CodexInstaller(executorRuntimeProbe);
+    }
+
+    @Bean
+    public ExecutorInstallService executorInstallService(ExecutorInstaller executorInstaller) {
+        return new ExecutorInstallService(executorInstaller);
+    }
+
+    @Bean
     public BranchManager branchManager(@Value("${regent.execution.branch-enabled:true}") boolean enabled) {
         return new GitBranchManager(enabled);
     }
 
     /** 分支创建统一入口：需要新建时先建审批单，批准前不触碰 Git。 */
     @Bean
-    public BranchProvisioningService branchProvisioningService(BranchManager branchManager,
-                                                               DecisionRaiseService decisionRaiseService) {
-        return new BranchProvisioningService(branchManager, decisionRaiseService);
+    public BranchProvisioningService branchProvisioningService(BranchManager branchManager) {
+        return new BranchProvisioningService(branchManager);
     }
 
     /** 平台启动时收敛上次进程留下的内部执行，并把任务交回正常派发链路。 */
@@ -181,10 +208,11 @@ public class ExecutionConfig {
                                          TaskPluginRepository taskPluginRepository,
                                          RunSettlementService runSettlementService,
                                          AgentExecutor agentExecutor,
+                                         BranchManager branchManager,
                                          @Value("${regent.execution.timeout:PT30M}") Duration timeout) {
         return new TaskRunService(taskRepository, taskRunRepository, runEventRepository, attachmentRepository,
                 projectProfileRepository, environmentEntryRepository, taskPluginRepository,
-                runSettlementService, agentExecutor, timeout);
+                runSettlementService, agentExecutor, branchManager, timeout);
     }
 
     /**

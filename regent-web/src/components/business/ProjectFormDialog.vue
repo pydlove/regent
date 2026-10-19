@@ -14,6 +14,7 @@ import Select from '@/components/ui/select/Select.vue'
 import DirectoryPickerDialog from './DirectoryPickerDialog.vue'
 import { useToast } from '@/composables/useToast'
 import { useProjectDialog } from '@/composables/useProjectDialog'
+import { useExecutionRuntimeStore } from '@/stores/useExecutionRuntimeStore'
 import { useTaskStore } from '@/stores/useTaskStore'
 import type { Project } from '@/types/api'
 import type { DecisionLevel } from '@/types/task'
@@ -35,6 +36,7 @@ const open = defineModel<boolean>('open', { default: false })
 
 const toast = useToast()
 const store = useTaskStore()
+const executionRuntime = useExecutionRuntimeStore()
 // 同一个弹框只挂在 App 上，页面想「知道刚建了什么」得从这个共享位子上读
 const { lastRegistered } = useProjectDialog()
 
@@ -113,7 +115,14 @@ const save = async () => {
     lastRegistered.value = created
     open.value = false
     emit('registered', created)
-    toast.success(`项目「${created.name}」已注册`, '路径校验通过，可以接任务了')
+    if (executionRuntime.status?.available === false) {
+      toast.warning(
+        `项目「${created.name}」已注册`,
+        'Codex 尚未就绪，项目资料暂未生成；安装后可在项目页重新生成',
+      )
+    } else {
+      toast.success(`项目「${created.name}」已注册`, 'Codex 正在只读分析项目并生成项目资料')
+    }
   } catch (e) {
     // 失败原因留在表单里而不是弹 toast：人正对着这几行输入，改的就是它们
     error.value = e instanceof ApiError ? e.message : '无法连接后端，请确认服务已启动（默认 127.0.0.1:8787）'

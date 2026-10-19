@@ -58,6 +58,9 @@
   --label: rgba(0, 0, 0, 0.85);
   --label-secondary: rgba(0, 0, 0, 0.5);
   --label-tertiary: rgba(0, 0, 0, 0.25);
+  --selection-label: #ffffff;
+  --selection-label-secondary: rgba(255, 255, 255, 0.7);
+  --selection-label-tertiary: rgba(255, 255, 255, 0.6);
   --separator: rgba(0, 0, 0, 0.1);
   --separator-soft: rgba(0, 0, 0, 0.05);
 

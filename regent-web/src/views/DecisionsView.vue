@@ -114,7 +114,7 @@ const onReviewed = async (payload: { mode: 'approve' | 'reject'; note: string })
   if (payload.mode === 'approve') {
     toast.success(`任务 #${taskId} 已批准`, '任务已放行；已有执行会话时会从断点续跑')
   } else {
-    toast.show(`任务 #${taskId} 已驳回，任务终止`, { description: '理由已写入决策留痕' })
+    toast.show(`任务 #${taskId} 已驳回，任务终止`, { description: '决策已留痕' })
   }
 }
 

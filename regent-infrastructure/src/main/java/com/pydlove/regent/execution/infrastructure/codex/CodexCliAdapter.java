@@ -62,7 +62,8 @@ public class CodexCliAdapter implements AgentExecutor, AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(CodexCliAdapter.class);
 
-    private static final String SANDBOX_MODE = "workspace-write";
+    private static final String WORKSPACE_WRITE = "workspace-write";
+    private static final String READ_ONLY = "read-only";
     private static final int MAX_DIAGNOSTIC_CHARS = 2000;
 
     /** 等待子进程时的轮询间隔：够密，事件基本实时落到调用方手里；够疏，不会空转烧 CPU。 */
@@ -287,13 +288,16 @@ public class CodexCliAdapter implements AgentExecutor, AutoCloseable {
             args.add("resume");
             args.add(request.resumeThreadId());
             args.add("-c");
-            args.add("sandbox_mode=\"" + SANDBOX_MODE + "\"");
+            args.add("sandbox_mode=\"" + sandboxMode(request) + "\"");
         } else {
             args.add("-C");
             args.add(request.projectPath());
             args.add("-s");
-            args.add(SANDBOX_MODE);
+            args.add(sandboxMode(request));
         }
+        // 项目目录不一定是 Git 仓库：多仓库父目录、普通目录、空仓库都会触发 Codex 的仓库检查。
+        // 这个开关只跳过“必须在 Git 仓库内”的前置判断，不改变 read-only / workspace-write 沙箱。
+        args.add("--skip-git-repo-check");
         for (String image : request.imagePaths()) {
             args.add("-i");
             args.add(image);
@@ -309,6 +313,10 @@ public class CodexCliAdapter implements AgentExecutor, AutoCloseable {
 
     private String executor() {
         return executable == null ? command : executable.toString();
+    }
+
+    private static String sandboxMode(ExecRequest request) {
+        return request.isReadOnly() ? READ_ONLY : WORKSPACE_WRITE;
     }
 
     /**

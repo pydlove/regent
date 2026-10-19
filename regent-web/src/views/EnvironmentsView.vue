@@ -20,18 +20,24 @@ import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
 import { useToast } from '@/composables/useToast'
 import { useTaskStore } from '@/stores/useTaskStore'
 import type { EnvironmentEntry } from '@/types/api'
-import { nextEnvironmentCopyKey } from '@/utils/environmentCopy'
+import {
+  hasInlineUrlCredentials,
+  isHttpUrl,
+  isMaskedEnvironmentValue,
+  MASKED_ENVIRONMENT_VALUE,
+} from '@/utils/environmentValue'
 
 const store = useTaskStore()
 const toast = useToast()
 
 const columns: TableColumn[] = [
-  { key: 'scope', label: '归属', width: '150px' },
-  { key: 'key', label: '环境键', width: '220px' },
-  { key: 'value', label: '环境信息', width: '260px' },
-  { key: 'tags', label: '标签', width: '180px' },
-  { key: 'description', label: '描述' },
-  { key: 'actions', label: '', width: '132px' },
+  // 环境信息是主列，占剩余宽度；名称和其他辅助列使用固定宽度。
+  { key: 'scope', label: '归属项目', width: '128px', hideBelow: 'xl' },
+  { key: 'description', label: '名称', width: '160px' },
+  { key: 'value', label: '环境' },
+  { key: 'tags', label: '标签', width: '120px', hideBelow: 'xl' },
+  { key: 'key', label: '环境键', width: '96px', hideBelow: '2xl' },
+  { key: 'actions', label: '', width: '96px' },
 ]
 
 const entries = ref<EnvironmentEntry[]>([])
@@ -43,9 +49,6 @@ const revealed = ref(new Set<number>())
 const dialogOpen = ref(false)
 const editing = ref<EnvironmentEntry | null>(null)
 const copying = ref<EnvironmentEntry | null>(null)
-const copyKey = computed(() =>
-  copying.value ? nextEnvironmentCopyKey(copying.value, entries.value) : '',
-)
 
 const detailOpen = ref(false)
 const detailEntry = ref<EnvironmentEntry | null>(null)
@@ -126,7 +129,10 @@ const confirmDelete = async () => {
   deleting.value = true
   try {
     await deleteEnvironment(deleteTarget.value.id)
-    toast.success(`环境键「${deleteTarget.value.key}」已删除`, '后续任务不会再生效')
+    toast.success(
+      `环境信息「${deleteTarget.value.description || deleteTarget.value.key}」已删除`,
+      '后续任务不会再生效',
+    )
     deleteOpen.value = false
     deleteTarget.value = null
     await load()
@@ -155,6 +161,7 @@ const filteredEntries = computed(() => {
       entry.key,
       scopeLabel(entry),
       entry.description ?? '',
+      isMaskedEnvironmentValue(entry) ? '' : entry.value,
       entry.tags.join(' '),
     ].some((value) => value.toLocaleLowerCase('zh-CN').includes(query)),
   )
@@ -183,7 +190,7 @@ const entryCountLabel = computed(() =>
           <Input
             v-model="keyword"
             size="lg"
-            placeholder="搜索环境键、归属或标签"
+            placeholder="搜索名称、环境、归属项目或标签"
             aria-label="搜索环境信息"
             class="pl-7 pr-7"
           />
@@ -221,9 +228,19 @@ const entryCountLabel = computed(() =>
           <Badge
             v-if="column.key === 'scope'"
             :tone="row.scope === 'GLOBAL' ? 'accent' : 'neutral'"
+            class="max-w-full truncate"
+            :title="scopeLabel(row as EnvironmentEntry)"
           >
             {{ scopeLabel(row as EnvironmentEntry) }}
           </Badge>
+
+          <span
+            v-else-if="column.key === 'description'"
+            class="block min-w-0 truncate text-caption text-label"
+            :title="row.description || undefined"
+          >
+            {{ row.description || '未填写名称' }}
+          </span>
 
           <span
             v-else-if="column.key === 'key'"
@@ -234,12 +251,41 @@ const entryCountLabel = computed(() =>
 
           <div v-else-if="column.key === 'value'" class="flex min-w-0 items-center gap-1">
             <span
-              class="min-w-0 flex-1 truncate font-mono text-caption text-label-secondary"
-              :title="revealed.has(row.id as number) ? String(row.value) : undefined"
+              v-if="
+                isMaskedEnvironmentValue(row as EnvironmentEntry) &&
+                !revealed.has(row.id as number)
+              "
+              class="min-w-0 flex-1 truncate font-mono text-caption text-label-tertiary"
+              title="密码值已脱敏"
             >
-              {{ row.value === '' ? '空值' : revealed.has(row.id as number) ? row.value : '••••••••' }}
+              {{ MASKED_ENVIRONMENT_VALUE }}
+            </span>
+            <a
+              v-else-if="
+                isHttpUrl(String(row.value)) &&
+                !hasInlineUrlCredentials(String(row.value))
+              "
+              :href="String(row.value).trim()"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="min-w-0 flex-1 truncate font-mono text-caption text-accent hover:underline"
+              :title="String(row.value)"
+              @click.stop
+            >
+              {{ row.value }}
+            </a>
+            <span
+              v-else
+              class="min-w-0 flex-1 truncate font-mono text-caption text-label-secondary"
+              :title="String(row.value)"
+            >
+              {{ row.value === '' ? '空值' : row.value }}
             </span>
             <IconButton
+              v-if="
+                isMaskedEnvironmentValue(row as EnvironmentEntry) &&
+                String(row.value) !== ''
+              "
               :label="revealed.has(row.id as number) ? '隐藏环境信息' : '显示环境信息'"
               size="sm"
               @click.stop="toggleValue(row.id as number)"
@@ -257,13 +303,6 @@ const entryCountLabel = computed(() =>
             </span>
             <span v-if="(row.tags as string[]).length === 0" class="text-label-tertiary">—</span>
           </div>
-
-          <span
-            v-else-if="column.key === 'description'"
-            class="block truncate text-caption text-label-secondary"
-          >
-            {{ row.description || '—' }}
-          </span>
 
           <div v-else-if="column.key === 'actions'" class="flex justify-end gap-1">
             <Tooltip content="拷贝">
@@ -299,7 +338,7 @@ const entryCountLabel = computed(() =>
       <EmptyState
         v-else-if="filteredEntries.length === 0"
         title="没有匹配的环境信息"
-        description="换个环境键、归属、标签或描述关键词再试。"
+        description="换个名称、环境内容、归属项目或标签再试。"
       >
         <Button @click="keyword = ''">清除搜索</Button>
       </EmptyState>
@@ -321,14 +360,17 @@ const entryCountLabel = computed(() =>
       v-model:open="dialogOpen"
       :entry="editing"
       :copy-source="copying"
-      :copy-key="copyKey"
       @saved="saved"
     />
 
     <Dialog
       v-model:open="deleteOpen"
       title="删除环境信息？"
-      :description="deleteTarget ? `环境键「${deleteTarget.key}」后续任务将不再读取。` : ''"
+      :description="
+        deleteTarget
+          ? `「${deleteTarget.description || deleteTarget.key}」后续任务将不再读取。`
+          : ''
+      "
     >
       <p class="text-body text-label-secondary">
         删除只影响以后开始的执行，不会改动已经完成的任务。

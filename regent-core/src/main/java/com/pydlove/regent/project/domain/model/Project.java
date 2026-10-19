@@ -25,6 +25,8 @@ public class Project {
     private static final int MAX_PATH = 512;
     private static final int MAX_TECH_STACK = 128;
     private static final int MAX_VERIFY_METHOD = 512;
+    private static final int MAX_SUMMARY = 200_000;
+    private static final int MAX_SUMMARY_ERROR = 1000;
 
     /** 尚未持久化时为 null，由仓储 insert 后通过 {@link #assignIdentity} 回填。 */
     private ProjectId id;
@@ -35,11 +37,17 @@ public class Project {
     private final String verifyMethod;
     private final DecisionLevel defaultDecisionLevel;
     private final boolean enabled;
+    private ProjectSummaryStatus summaryStatus;
+    private String summary;
+    private String summaryError;
+    private Instant summaryGeneratedAt;
     private final Instant createdAt;
-    private final Instant updatedAt;
+    private Instant updatedAt;
 
     private Project(ProjectId id, String code, String name, String path, String techStack,
                     String verifyMethod, DecisionLevel defaultDecisionLevel,
+                    ProjectSummaryStatus summaryStatus, String summary, String summaryError,
+                    Instant summaryGeneratedAt,
                     Instant createdAt, Instant updatedAt) {
         this.id = id;
         this.code = requireCode(code);
@@ -49,6 +57,10 @@ public class Project {
         this.verifyMethod = optionalText(verifyMethod, MAX_VERIFY_METHOD, "验证方式");
         this.defaultDecisionLevel = requireNotNull(defaultDecisionLevel, "项目自动决策阈值");
         this.enabled = true;
+        this.summaryStatus = requireNotNull(summaryStatus, "项目资料状态");
+        this.summary = optionalText(summary, MAX_SUMMARY, "项目资料");
+        this.summaryError = optionalText(summaryError, MAX_SUMMARY_ERROR, "项目资料失败原因");
+        this.summaryGeneratedAt = summaryGeneratedAt;
         this.createdAt = requireNotNull(createdAt, "创建时间");
         this.updatedAt = requireNotNull(updatedAt, "更新时间");
     }
@@ -59,7 +71,19 @@ public class Project {
                                    DecisionLevel defaultDecisionLevel) {
         Instant now = Instant.now();
         return new Project(null, code, name, path, techStack, verifyMethod,
-                defaultDecisionLevel, now, now);
+                defaultDecisionLevel, ProjectSummaryStatus.NOT_GENERATED, null, null, null, now, now);
+    }
+
+    /** 从数据库恢复项目。只允许基础设施的数据转换调用。 */
+    public static Project restore(ProjectId id, String code, String name, String path,
+                                  String techStack, String verifyMethod,
+                                  DecisionLevel defaultDecisionLevel,
+                                  ProjectSummaryStatus summaryStatus, String summary,
+                                  String summaryError, Instant summaryGeneratedAt,
+                                  Instant createdAt, Instant updatedAt) {
+        return new Project(requireNotNull(id, "项目 ID"), code, name, path, techStack, verifyMethod,
+                defaultDecisionLevel, summaryStatus, summary, summaryError, summaryGeneratedAt,
+                createdAt, updatedAt);
     }
 
     /** 持久化后回填数据库生成的主键。重复分配直接报错，避免两行数据悄悄并成一行。 */
@@ -103,12 +127,62 @@ public class Project {
         return enabled;
     }
 
+    public ProjectSummaryStatus getSummaryStatus() {
+        return summaryStatus;
+    }
+
+    public String getSummary() {
+        return summary;
+    }
+
+    public String getSummaryError() {
+        return summaryError;
+    }
+
+    public Instant getSummaryGeneratedAt() {
+        return summaryGeneratedAt;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    /** 开始一次生成。失败重试会保留上一版资料，直到新版本成功覆盖。 */
+    public void startSummaryGeneration() {
+        if (summaryStatus == ProjectSummaryStatus.GENERATING) {
+            throw new DomainException("项目资料正在生成：" + code);
+        }
+        this.summaryStatus = ProjectSummaryStatus.GENERATING;
+        this.summaryError = null;
+        this.updatedAt = Instant.now();
+    }
+
+    public void completeSummary(String generatedSummary) {
+        requireSummaryState(ProjectSummaryStatus.GENERATING, "只有生成中的项目资料可以完成");
+        String normalized = optionalText(generatedSummary, MAX_SUMMARY, "项目资料");
+        if (normalized == null) {
+            throw new DomainException("生成的项目资料不能为空：" + code);
+        }
+        this.summary = normalized;
+        this.summaryError = null;
+        this.summaryStatus = ProjectSummaryStatus.READY;
+        this.summaryGeneratedAt = Instant.now();
+        this.updatedAt = this.summaryGeneratedAt;
+    }
+
+    public void failSummary(String reason) {
+        requireSummaryState(ProjectSummaryStatus.GENERATING, "只有生成中的项目资料可以标记失败");
+        String normalized = reason == null || reason.isBlank() ? null : reason.trim();
+        if (normalized != null && normalized.length() > MAX_SUMMARY_ERROR) {
+            normalized = normalized.substring(0, MAX_SUMMARY_ERROR);
+        }
+        this.summaryStatus = ProjectSummaryStatus.FAILED;
+        this.summaryError = normalized == null ? "项目资料生成失败，未返回具体原因" : normalized;
+        this.updatedAt = Instant.now();
     }
 
     private static String requireCode(String code) {
@@ -147,6 +221,12 @@ public class Project {
             throw new DomainException(field + "超长（上限 " + max + " 字符）：" + trimmed.length());
         }
         return trimmed;
+    }
+
+    private void requireSummaryState(ProjectSummaryStatus expected, String message) {
+        if (summaryStatus != expected) {
+            throw new DomainException(message + "：" + code + "（当前 " + summaryStatus + "）");
+        }
     }
 
     private static void requireText(String value, String field) {

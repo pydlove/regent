@@ -1,47 +1,13 @@
 import { onScopeDispose, ref } from 'vue'
 
+import { ApiError, postForm } from '@/api/http'
+
 export type SpeechLanguage = 'zh-CN' | 'en-US' | 'ja-JP' | 'ko-KR'
 
-type SpeechRecognitionAlternativeLike = {
-  transcript: string
+type TranscriptionResponse = {
+  text: string
+  language: string
 }
-
-type SpeechRecognitionResultLike = {
-  readonly isFinal: boolean
-  readonly length: number
-  readonly [index: number]: SpeechRecognitionAlternativeLike
-}
-
-type SpeechRecognitionResultListLike = {
-  readonly length: number
-  readonly [index: number]: SpeechRecognitionResultLike
-}
-
-type SpeechRecognitionEventLike = Event & {
-  readonly resultIndex: number
-  readonly results: SpeechRecognitionResultListLike
-}
-
-type SpeechRecognitionErrorEventLike = Event & {
-  readonly error: string
-  readonly message?: string
-}
-
-type SpeechRecognitionLike = EventTarget & {
-  lang: string
-  continuous: boolean
-  interimResults: boolean
-  maxAlternatives: number
-  onstart: ((event: Event) => void) | null
-  onend: ((event: Event) => void) | null
-  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null
-  onresult: ((event: SpeechRecognitionEventLike) => void) | null
-  start(): void
-  stop(): void
-  abort(): void
-}
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
 
 type TranslatorInstance = {
   translate(text: string): Promise<string>
@@ -52,39 +18,52 @@ type TranslatorApi = {
   create(options: { sourceLanguage: string; targetLanguage: string }): Promise<TranslatorInstance>
 }
 
-type SpeechWindow = Window & {
-  SpeechRecognition?: SpeechRecognitionConstructor
-  webkitSpeechRecognition?: SpeechRecognitionConstructor
-  Translator?: TranslatorApi
+type AudioWindow = Window & { Translator?: TranslatorApi }
+
+const SEGMENT_MILLIS = 2_500
+const MIME_CANDIDATES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/mp4',
+  'audio/ogg;codecs=opus',
+]
+
+function audioWindow(): AudioWindow | null {
+  return typeof window === 'undefined' ? null : (window as AudioWindow)
 }
 
-function speechWindow(): SpeechWindow | null {
-  return typeof window === 'undefined' ? null : (window as SpeechWindow)
+function preferredMimeType(): string {
+  if (typeof MediaRecorder === 'undefined') return ''
+  return MIME_CANDIDATES.find((type) => MediaRecorder.isTypeSupported(type)) ?? ''
 }
 
-function recognitionConstructor(): SpeechRecognitionConstructor | null {
-  const target = speechWindow()
-  return target?.SpeechRecognition ?? target?.webkitSpeechRecognition ?? null
+function extensionOf(mimeType: string): string {
+  if (mimeType.includes('mp4')) return 'm4a'
+  if (mimeType.includes('ogg')) return 'ogg'
+  return 'webm'
 }
 
-function friendlyError(code: string): string {
-  if (code === 'not-allowed' || code === 'service-not-allowed') {
-    return '麦克风权限被拒绝，请在浏览器设置中允许'
+function messageOf(error: unknown): string {
+  if (error instanceof ApiError) return error.message
+  if (error instanceof DOMException) {
+    if (error.name === 'NotAllowedError') return '麦克风权限被拒绝，请在浏览器设置中允许'
+    if (error.name === 'NotFoundError') return '没有检测到可用麦克风'
   }
-  if (code === 'audio-capture') return '没有检测到可用麦克风'
-  if (code === 'no-speech') return '没有听清，请再试一次'
-  if (code === 'network') return '语音识别服务网络不可用'
-  return '语音识别失败，请重试'
+  return error instanceof Error ? error.message : '语音转写失败，请重试'
 }
 
 /**
- * 浏览器语音输入。
+ * 浏览器录音 + 本机 Whisper 准实时转写。
  *
- * 中文直接用 Web Speech API 输出；其它语言在浏览器提供 Translator API 时翻译到中文。
- * 两套能力都只依赖浏览器，不把音频或文本上传到本平台后端。
+ * <p>每 2.5 秒结束一个自包含音频片段并顺序提交，前一段转写完成后立刻追加到指令框；
+ * 用户停止录音时再提交最后一段。它不是逐字流式，但不需要 WebSocket 或云端识别服务，
+ * 在本机 Whisper 上延迟通常只有几秒。
  */
 export function useSpeechToChinese() {
-  const supported = recognitionConstructor() !== null
+  const supported =
+    typeof navigator !== 'undefined' &&
+    Boolean(navigator.mediaDevices?.getUserMedia) &&
+    typeof MediaRecorder !== 'undefined'
   const secureContext = typeof window !== 'undefined' && window.isSecureContext
 
   const listening = ref(false)
@@ -93,69 +72,159 @@ export function useSpeechToChinese() {
   const error = ref<string | null>(null)
   const translationFallback = ref(false)
 
-  let recognition: SpeechRecognitionLike | null = null
-  let appendQueue = Promise.resolve()
+  let mediaStream: MediaStream | null = null
+  let segmentRecorder: MediaRecorder | null = null
+  let segmentTimer: number | undefined
+  let recordingActive = false
+  let discardRecording = false
+  let finishCallback: ((text: string) => void) | null = null
+  let language: SpeechLanguage = 'zh-CN'
   let session = 0
+  let pendingSegments = 0
+  let transcriptionChain = Promise.resolve()
   const translators = new Map<string, Promise<TranslatorInstance>>()
 
-  const stop = () => {
-    recognition?.stop()
+  const releaseStream = () => {
+    mediaStream?.getTracks().forEach((track) => track.stop())
+    mediaStream = null
+  }
+
+  const clearSegmentTimer = () => {
+    window.clearTimeout(segmentTimer)
+    segmentTimer = undefined
   }
 
   const abort = () => {
     session += 1
-    recognition?.abort()
-    recognition = null
+    recordingActive = false
+    discardRecording = true
+    clearSegmentTimer()
+    if (segmentRecorder && segmentRecorder.state !== 'inactive') {
+      segmentRecorder.stop()
+    }
+    segmentRecorder = null
+    finishCallback = null
     listening.value = false
     translating.value = false
+    pendingSegments = 0
     interim.value = ''
+    releaseStream()
   }
 
   const reset = () => {
     abort()
     error.value = null
-    translating.value = false
     translationFallback.value = false
   }
 
   const translatorFor = (sourceLanguage: string): Promise<TranslatorInstance> | null => {
-    const translatorApi = speechWindow()?.Translator
+    const translatorApi = audioWindow()?.Translator
     if (!translatorApi) return null
 
     const source = sourceLanguage.split('-')[0]
-    let pendingTranslator = translators.get(source)
-    if (!pendingTranslator) {
-      pendingTranslator = translatorApi.create({
+    let pending = translators.get(source)
+    if (!pending) {
+      pending = translatorApi.create({
         sourceLanguage: source,
         targetLanguage: 'zh',
       })
-      translators.set(source, pendingTranslator)
+      translators.set(source, pending)
     }
-    return pendingTranslator
+    return pending
   }
 
-  const translate = async (text: string, language: SpeechLanguage) => {
-    if (language === 'zh-CN') return { text, translated: true }
-
-    const pendingTranslator = translatorFor(language)
-    if (!pendingTranslator) return { text, translated: false }
-
+  const translate = async (text: string, sourceLanguage: SpeechLanguage) => {
+    if (sourceLanguage === 'zh-CN') return { text, translated: true }
+    const pending = translatorFor(sourceLanguage)
+    if (!pending) return { text, translated: false }
     try {
-      const translator = await pendingTranslator
+      const translator = await pending
       return { text: await translator.translate(text), translated: true }
     } catch {
-      translators.delete(language.split('-')[0])
+      translators.delete(sourceLanguage.split('-')[0])
       return { text, translated: false }
     }
   }
 
-  const start = (
-    language: SpeechLanguage,
+  const enqueueSegment = (
+    blob: Blob,
+    activeSession: number,
+    selectedLanguage: SpeechLanguage,
+    callback: (text: string) => void,
+  ) => {
+    pendingSegments += 1
+    translating.value = true
+    transcriptionChain = transcriptionChain
+      .then(async () => {
+        if (activeSession !== session) return
+        const form = new FormData()
+        form.append('file', blob, `speech.${extensionOf(blob.type)}`)
+        form.append('language', selectedLanguage)
+        const result = await postForm<TranscriptionResponse>('/speech/transcriptions', form)
+        if (activeSession !== session) return
+
+        const translated = await translate(result.text, selectedLanguage)
+        if (activeSession !== session) return
+        if (!translated.translated) translationFallback.value = true
+        if (translated.text.trim()) callback(translated.text.trim())
+      })
+      .catch((e) => {
+        if (activeSession === session) error.value = messageOf(e)
+      })
+      .finally(() => {
+        if (activeSession !== session) return
+        pendingSegments = Math.max(0, pendingSegments - 1)
+        translating.value = pendingSegments > 0
+      })
+  }
+
+  const startSegment = (activeSession: number) => {
+    if (!recordingActive || !mediaStream || activeSession !== session) return
+    const mimeType = preferredMimeType()
+    const chunks: Blob[] = []
+    const recorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined)
+    segmentRecorder = recorder
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) chunks.push(event.data)
+    }
+    recorder.onerror = () => {
+      if (activeSession === session) {
+        error.value = '录音失败，请重试'
+        listening.value = false
+      }
+    }
+    recorder.onstop = () => {
+      if (segmentRecorder === recorder) segmentRecorder = null
+      clearSegmentTimer()
+
+      const blob = new Blob(chunks, { type: mimeType || 'audio/webm' })
+      if (!discardRecording && activeSession === session && blob.size > 0) {
+        const callback = finishCallback
+        if (callback) enqueueSegment(blob, activeSession, language, callback)
+      }
+
+      if (recordingActive && activeSession === session) {
+        startSegment(activeSession)
+      } else {
+        releaseStream()
+      }
+    }
+
+    recorder.start()
+    segmentTimer = window.setTimeout(() => {
+      if (recordingActive && activeSession === session && recorder.state === 'recording') {
+        recorder.stop()
+      }
+    }, SEGMENT_MILLIS)
+  }
+
+  const start = async (
+    selectedLanguage: SpeechLanguage,
     onFinalText: (text: string) => void,
   ) => {
-    const Constructor = recognitionConstructor()
-    if (!Constructor) {
-      error.value = '当前浏览器不支持语音输入，请使用 Chrome、Edge 或 Safari'
+    if (!supported) {
+      error.value = '当前浏览器不支持录音，请使用 Chrome、Edge 或 Safari'
       return false
     }
     if (!secureContext) {
@@ -165,68 +234,51 @@ export function useSpeechToChinese() {
 
     abort()
     reset()
+    language = selectedLanguage
+    finishCallback = onFinalText
+    discardRecording = false
+    recordingActive = true
     const activeSession = session
 
-    const next = new Constructor()
-    next.lang = language
-    next.continuous = true
-    next.interimResults = true
-    next.maxAlternatives = 1
-    next.onstart = () => {
-      listening.value = true
-    }
-    next.onend = () => {
-      listening.value = false
-      interim.value = ''
-    }
-    next.onerror = (event) => {
-      listening.value = false
-      interim.value = ''
-      error.value = friendlyError(event.error)
-    }
-    next.onresult = (event) => {
-      let interimText = ''
-      const finals: string[] = []
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const result = event.results[index]
-        const transcript = result[0]?.transcript ?? ''
-        if (result.isFinal) finals.push(transcript)
-        else interimText += transcript
-      }
-      interim.value = interimText
-
-      for (const finalText of finals) {
-        appendQueue = appendQueue.then(async () => {
-          if (activeSession !== session) return
-          translating.value = true
-          try {
-            const result = await translate(finalText, language)
-            if (activeSession !== session) return
-            if (!result.translated) translationFallback.value = true
-            if (result.text.trim()) onFinalText(result.text.trim())
-          } finally {
-            if (activeSession === session) translating.value = false
-          }
-        }).catch(() => undefined)
-      }
-    }
-
-    recognition = next
     try {
-      next.start()
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      })
+      if (activeSession !== session || !recordingActive) {
+        releaseStream()
+        return false
+      }
+      startSegment(activeSession)
+      listening.value = true
       return true
-    } catch {
-      recognition = null
+    } catch (e) {
+      recordingActive = false
+      releaseStream()
       listening.value = false
-      error.value = '语音输入未能启动，请稍后重试'
+      error.value = messageOf(e)
       return false
+    }
+  }
+
+  const stop = () => {
+    recordingActive = false
+    listening.value = false
+    clearSegmentTimer()
+    if (segmentRecorder && segmentRecorder.state === 'recording') {
+      segmentRecorder.stop()
+    } else {
+      releaseStream()
     }
   }
 
   onScopeDispose(() => {
     abort()
-    for (const pendingTranslator of translators.values()) {
-      pendingTranslator.then((translator) => translator.destroy?.()).catch(() => undefined)
+    for (const pending of translators.values()) {
+      pending.then((translator) => translator.destroy?.()).catch(() => undefined)
     }
     translators.clear()
   })

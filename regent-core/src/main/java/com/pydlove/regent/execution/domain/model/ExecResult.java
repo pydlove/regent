@@ -34,7 +34,8 @@ public record ExecResult(
         boolean schemaValid,
         List<String> changedFiles,
         List<ReportedBug> bugs,
-        ExecDecision decision) {
+        ExecDecision decision,
+        BranchIntent branchIntent) {
 
     public ExecResult {
         Objects.requireNonNull(status, "执行状态不能为空");
@@ -49,6 +50,24 @@ public record ExecResult(
         }
     }
 
+    /** AI 自己决定是否需要为本任务创建隔离分支。 */
+    public record BranchIntent(boolean requested, String name, String reason) {
+    }
+
+    public ExecResult(RunStatus status,
+                      Integer exitCode,
+                      String threadId,
+                      TokenUsage tokens,
+                      String summary,
+                      String rawResult,
+                      boolean schemaValid,
+                      List<String> changedFiles,
+                      List<ReportedBug> bugs,
+                      ExecDecision decision) {
+        this(status, exitCode, threadId, tokens, summary, rawResult, schemaValid,
+                changedFiles, bugs, decision, null);
+    }
+
     /**
      * 出参不合法时的失败结果。
      *
@@ -58,6 +77,6 @@ public record ExecResult(
     public static ExecResult invalidOutput(Integer exitCode, String threadId, TokenUsage tokens,
                                            String reason, String rawResult) {
         return new ExecResult(RunStatus.FAILED, exitCode, threadId, tokens, reason, rawResult, false,
-                List.of(), List.of(), null);
+                List.of(), List.of(), null, null);
     }
 }

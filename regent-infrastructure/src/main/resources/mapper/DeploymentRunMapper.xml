@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentRunMapper">
+
+    <sql id="runColumns">
+        id, deployment_id, project_id, deployment_name, host, port, ssh_username, auth_type,
+        remote_directory, script_filename, script_content, script_hash, status, exit_code,
+        summary, queued_at, started_at, finished_at, created_at
+    </sql>
+
+    <select id="selectById"
+            resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentRunRow">
+        SELECT <include refid="runColumns"/>
+        FROM deployment_run
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByDeployment"
+            resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentRunRow">
+        SELECT <include refid="runColumns"/>
+        FROM deployment_run
+        WHERE deployment_id = #{deploymentId}
+        ORDER BY id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectLatestByDeploymentIds"
+            resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentRunRow">
+        SELECT <include refid="runColumns"/>
+        FROM (
+            SELECT r.*,
+                   ROW_NUMBER() OVER (PARTITION BY r.deployment_id ORDER BY r.id DESC) AS row_no
+            FROM deployment_run r
+            WHERE r.deployment_id IN
+            <foreach collection="deploymentIds" item="deploymentId" open="(" separator="," close=")">
+                #{deploymentId}
+            </foreach>
+        ) ranked
+        WHERE ranked.row_no = 1
+    </select>
+
+    <select id="selectActive"
+            resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentRunRow">
+        SELECT <include refid="runColumns"/>
+        FROM deployment_run
+        WHERE status IN ('QUEUED', 'RUNNING')
+        ORDER BY id
+    </select>
+
+    <select id="countActiveByDeployment" resultType="int">
+        SELECT COUNT(*)
+        FROM deployment_run
+        WHERE deployment_id = #{deploymentId}
+          AND status IN ('QUEUED', 'RUNNING')
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO deployment_run (
+            deployment_id, project_id, deployment_name, host, port, ssh_username, auth_type,
+            remote_directory, script_filename, script_content, script_hash, status, exit_code,
+            summary, queued_at, started_at, finished_at, created_at
+        ) VALUES (
+            #{deploymentId}, #{projectId}, #{deploymentName}, #{host}, #{port}, #{sshUsername}, #{authType},
+            #{remoteDirectory}, #{scriptFilename}, #{scriptContent}, #{scriptHash}, #{status}, #{exitCode},
+            #{summary}, #{queuedAt}, #{startedAt}, #{finishedAt}, #{createdAt}
+        )
+    </insert>
+
+    <update id="update">
+        UPDATE deployment_run
+        SET status = #{status},
+            exit_code = #{exitCode},
+            summary = #{summary},
+            started_at = #{startedAt},
+            finished_at = #{finishedAt}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

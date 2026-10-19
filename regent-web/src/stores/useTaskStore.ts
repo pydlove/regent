@@ -26,6 +26,7 @@ import type {
 import type { DecisionLevel, TaskStatus } from '@/types/task'
 import {
   readProjectSelection,
+  resolveProjectSelection,
   writeProjectSelection,
 } from '@/utils/projectSelectionStorage'
 
@@ -124,11 +125,16 @@ export const useTaskStore = defineStore('tasks', () => {
   const loadProjects = async () => {
     const loaded = await listProjects()
     projects.value = loaded
-    // 正在筛选的项目不在了（被删、或者换了库）就退回「全部」：
-    // 留着一个查不到东西的条件，界面会一直空着，而且看不出为什么
-    if (projectId.value !== null && !loaded.some((project) => project.id === projectId.value)) {
-      projectId.value = null
-    }
+    // 启动时下拉可能先于列表返回而瞬时空置选中值，项目列表到手后按持久化 ID 再恢复一次；
+    // 只有项目确实不在当前列表里（被删或换了库）才退回「全部」。
+    const resolved = resolveProjectSelection(
+      projectId.value,
+      readProjectSelection(),
+      loaded.map((project) => project.id),
+    )
+    projectId.value = resolved
+    // 列表为空或项目已失效时，显式清掉旧持久化值；正常的同值赋值不会触发上面的 watch。
+    writeProjectSelection(resolved)
   }
 
   const loadStats = async () => {
@@ -289,7 +295,15 @@ export const useTaskStore = defineStore('tasks', () => {
     page.value = 1
     void load()
   })
-  watch(projectId, (value) => writeProjectSelection(value), { flush: 'sync' })
+  watch(
+    projectId,
+    (value) => {
+      // 首屏项目列表还没回来时，下拉可能发出一次瞬时空值；不能拿它覆盖持久化选择。
+      if (projects.value.length === 0) return
+      writeProjectSelection(value)
+    },
+    { flush: 'sync' },
+  )
   watch([page, pageSize], () => {
     void load()
   })

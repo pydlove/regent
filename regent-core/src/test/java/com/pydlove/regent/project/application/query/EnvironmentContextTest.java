@@ -18,9 +18,9 @@ class EnvironmentContextTest {
     @DisplayName("项目级同键环境覆盖全局环境")
     void projectOverridesGlobal() {
         EnvironmentEntry global = EnvironmentEntry.create(
-                EnvironmentScope.GLOBAL, null, "DB_HOST", "global-db", List.of(), null);
+                EnvironmentScope.GLOBAL, null, "DB_HOST", "global-db", List.of(), "全局数据库");
         EnvironmentEntry project = EnvironmentEntry.create(
-                EnvironmentScope.PROJECT, ProjectId.of(1L), "DB_HOST", "project-db", List.of(), null);
+                EnvironmentScope.PROJECT, ProjectId.of(1L), "DB_HOST", "project-db", List.of(), "项目数据库");
 
         EnvironmentContext context = EnvironmentContext.resolve(List.of(project, global));
 

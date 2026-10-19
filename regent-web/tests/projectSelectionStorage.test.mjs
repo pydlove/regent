@@ -4,6 +4,7 @@ import test from 'node:test'
 const {
   PROJECT_SELECTION_STORAGE_KEY,
   readProjectSelection,
+  resolveProjectSelection,
   writeProjectSelection,
 } = await import('../src/utils/projectSelectionStorage.ts')
 
@@ -60,4 +61,11 @@ test('持久化写入失败不阻断当前筛选', () => {
 
   assert.doesNotThrow(() => writeProjectSelection(42, storage))
   assert.doesNotThrow(() => writeProjectSelection(null, storage))
+})
+
+test('项目列表加载后恢复持久化选择，项目失效时退回全部', () => {
+  assert.equal(resolveProjectSelection(null, 42, [7, 42]), 42)
+  assert.equal(resolveProjectSelection(7, 42, [7, 42]), 7)
+  assert.equal(resolveProjectSelection(null, 42, [7]), null)
+  assert.equal(resolveProjectSelection(null, null, [7]), null)
 })

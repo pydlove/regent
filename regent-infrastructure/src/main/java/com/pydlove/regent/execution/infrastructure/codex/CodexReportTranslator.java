@@ -26,7 +26,9 @@ final class CodexReportTranslator {
                                 TokenUsage tokens,
                                 String rawResult) {
         return ExecReport.of(report.status(), report.summary(), report.changedFiles(),
-                        decisionOf(report), bugsOf(report))
+                        decisionOf(report), bugsOf(report),
+                        new ExecReport.Branch(report.branchRequested(), report.branchName(),
+                                report.branchReason()))
                 .toResult(exitCode, threadId, tokens, rawResult);
     }
 

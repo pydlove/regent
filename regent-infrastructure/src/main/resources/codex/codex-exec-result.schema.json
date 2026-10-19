@@ -20,6 +20,26 @@
       "items": { "type": "string" },
       "description": "本次改动涉及的路径，相对项目根，用 / 分隔。没有改动就传空数组。"
     },
+    "branch": {
+      "type": ["object", "null"],
+      "description": "可选的分支意图；不需要隔离分支时传 null。",
+      "additionalProperties": false,
+      "required": ["requested", "name", "reason"],
+      "properties": {
+        "requested": {
+          "type": "boolean",
+          "description": "是否希望平台为本任务创建隔离分支。"
+        },
+        "name": {
+          "type": "string",
+          "description": "建议的分支名；为空时由平台按任务号生成。"
+        },
+        "reason": {
+          "type": "string",
+          "description": "做出该判断的原因。"
+        }
+      }
+    },
     "decision": {
       "type": ["object", "null"],
       "description": "只有 status=BLOCKED 时是对象，其余情况必须是 null。",

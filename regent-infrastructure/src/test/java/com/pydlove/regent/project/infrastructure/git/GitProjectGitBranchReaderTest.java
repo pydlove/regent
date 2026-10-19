@@ -27,15 +27,27 @@ class GitProjectGitBranchReaderTest {
     @DisplayName("Git 工作区返回真实当前分支")
     void returnsCurrentGitBranch(@TempDir Path repository) throws Exception {
         git(repository, "init");
-        git(repository, "symbolic-ref", "HEAD", "refs/heads/feature/project-detail");
+        git(repository, "-c", "user.name=Regent Test", "-c", "user.email=regent@example.test",
+                "commit", "--allow-empty", "-m", "initial");
+        git(repository, "checkout", "-b", "feature/project-detail");
 
         assertEquals(Optional.of("feature/project-detail"), reader.currentBranch(repository.toString()));
+    }
+
+    @Test
+    @DisplayName("空仓库还没有 HEAD，不编造分支名")
+    void returnsEmptyForEmptyGitRepository(@TempDir Path repository) throws Exception {
+        git(repository, "init");
+
+        assertEquals(Optional.empty(), reader.currentBranch(repository.toString()));
     }
 
     private static void git(Path repository, String... args) throws Exception {
         List<String> command = new ArrayList<>(List.of("git", "-C", repository.toString()));
         command.addAll(List.of(args));
-        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+        ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
+        clearInheritedGitConfig(builder);
+        Process process = builder.start();
         String output;
         try (var input = process.getInputStream()) {
             output = new String(input.readAllBytes(), StandardCharsets.UTF_8);
@@ -44,5 +56,16 @@ class GitProjectGitBranchReaderTest {
             process.destroyForcibly();
         }
         assertEquals(0, process.exitValue(), output);
+    }
+
+    private static void clearInheritedGitConfig(ProcessBuilder builder) {
+        var environment = builder.environment();
+        environment.remove("GIT_CONFIG_COUNT");
+        environment.remove("GIT_CONFIG_PARAMETERS");
+        environment.keySet().stream()
+                .filter(name -> name.startsWith("GIT_CONFIG_KEY_")
+                        || name.startsWith("GIT_CONFIG_VALUE_"))
+                .toList()
+                .forEach(environment::remove);
     }
 }

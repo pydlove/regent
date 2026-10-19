@@ -2,6 +2,8 @@ package com.pydlove.regent.project.interfaces.dto;
 
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
 
+import java.time.Instant;
+
 /**
  * 项目的对外契约。字段与 {@link ProjectProfile} 一一对应，不做改名 ——
  * 前端 {@code types/api.ts} 里的 ProjectResponse 逐字对齐这两个名字。
@@ -15,7 +17,11 @@ public record ProjectResponse(
         String name,
         String path,
         String defaultDecisionLevel,
-        boolean enabled) {
+        boolean enabled,
+        String summaryStatus,
+        String summary,
+        String summaryError,
+        Instant summaryGeneratedAt) {
 
     public static ProjectResponse from(ProjectProfile profile) {
         return new ProjectResponse(
@@ -24,6 +30,10 @@ public record ProjectResponse(
                 profile.name(),
                 profile.path(),
                 profile.defaultDecisionLevel().name(),
-                profile.enabled());
+                profile.enabled(),
+                profile.summaryStatus().name(),
+                profile.summary(),
+                profile.summaryError(),
+                profile.summaryGeneratedAt());
     }
 }

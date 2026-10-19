@@ -20,6 +20,7 @@ DDD 的第一步是回答「哪里值得投入最多精力」。这个平台的�
 | `project` | 支撑域 | 项目注册、项目画像（路径/验证方式/等级覆盖） | 中 |
 | `plugin` | 支撑域 | 可复用能力包、不可变版本、任务固定版本绑定 | 中 |
 | `testing` | 支撑域 | Web / 接口测试用例、任务完成后自动执行、独立测试记录 | 中 |
+| `deployment` | 支撑域 | 部署配置、服务器连接、部署脚本快照、远程执行与日志 | 中 |
 | `notification` | 通用域 | 邮件与推送投递、通道降级 | 低，能跑就行 |
 | `settings` | 通用域 | 平台设置、中继服务器连接与安装、状态监听 | 低 |
 | `shared` | 共享内核 | 值对象、领域事件基类、异常、ID | 低，但必须稳定 |
@@ -36,13 +37,16 @@ DDD 的第一步是回答「哪里值得投入最多精力」。这个平台的�
 
 | 聚合根 | 上下文 | 说明 |
 |---|---|---|
-| `Project` | `project` | 项目画像，含决策等级覆盖配置 |
-| `EnvironmentEntry` | `project` | 可全局或按项目归属的任务执行环境信息（键值、标签、描述） |
+| `Project` | `project` | 项目画像，含决策等级覆盖配置与 Codex 生成的项目资料 |
+| `EnvironmentEntry` | `project` | 可全局或按项目归属的任务执行环境信息（键值、标签、64 字名称、密码脱敏标记） |
 | `Plugin` | `plugin` | 可复用代码/说明能力包，保存当前版本与启停状态 |
 | `TestCase` | `testing` | Web / 接口测试用例，含执行命令、可选上传脚本与启停状态 |
 | `TestCaseRun` | `testing` | 任务完成后的一次测试执行事实：退出码、摘要、输出与终态 |
+| `Deployment` | `deployment` | 部署配置：归属项目、服务器地址、登录用户、认证方式、远程目录和脚本快照；密码由独立凭据端口加密保存，不在聚合内 |
+| `DeploymentRun` | `deployment` | 一次远程部署事实：配置快照、退出码、终态与日志文件标识 |
 | `Requirement` | `requirement` | 需求，持有 `List<TaskId>` **弱引用** |
 | `Task` | `execution` | 执行单元，含状态机与 `codex_thread_id` |
+| `TaskDraft` | `execution` | 任务录入草稿，按用户保存一份未提交表单，不参与派发 |
 | `TaskRun` | `execution` | 单次执行记录，token 消耗、分支名、退出码 |
 | `Decision` | `governance` | 决策单，含「谁做的决定」与依据规则 |
 | `DecisionRule` | `governance` | 分级规则（路径通配 / 关键词 / 项目级覆盖） |
@@ -86,8 +90,11 @@ PENDING ──queue──▶ QUEUED ──dispatch──▶ RUNNING ──succes
 
 平台重启后，内部 codex 进程已经不存在，普通 `RUNNING` 任务不能继续留在库里。启动恢复会把对应的
 `task_run` 收敛为 `INTERRUPTED`，再由 `Task.requeueAfterInterruption()` 把任务放回 `QUEUED`。
-恢复不绕过分支审批：原分支还在就直接复用，分支已不存在仍会生成 L2 审批；外部执行者的租约记录
-不会被平台重启改写。
+项目路径可以是普通目录、空 Git 仓库，或包含多个 Git 仓库的父目录。只有项目根目录本身是有效
+Git 工作区且 `HEAD` 能解析出提交时才记录分支；否则任务的 `branch_name` 为 `NULL`，直接在
+目录本身执行。只有 AI 在执行出参中主动给出 `branch.requested=true` 且根目录支持 Git 时，
+平台才在任务完成后创建 `feature/...` 隔离分支。平台不预建 `codex/task-N`，也不会因每个任务
+生成分支审批。
 
 ```java
 public class Task extends AggregateRoot<TaskId> {
@@ -101,11 +108,11 @@ public class Task extends AggregateRoot<TaskId> {
     }
 
     /** 派发执行。PENDING 与 QUEUED 都可派发。 */
-    public void dispatch(BranchName branch) {
+    public void dispatch(String branchName) {
         requireStateIn("只有待执行或排队中的任务可以派发", TaskStatus.PENDING, TaskStatus.QUEUED);
         this.status = TaskStatus.RUNNING;
-        this.branch = branch;
-        registerEvent(new TaskStarted(this.id, branch, Instant.now()));
+        this.branch = branchName;      // 非 Git 目录、空仓库或多仓库父目录时为 null
+        registerEvent(new TaskStarted(this.id, branchName, Instant.now()));
     }
 
     /** 执行中阻塞，等待人工决策。 */
@@ -469,7 +476,9 @@ public interface AgentExecutor {
 }
 
 public interface BranchManager {
-    BranchName createFor(TaskId taskId);
+    Optional<String> currentBranch(String projectPath);
+    Optional<String> createRequestedFeature(String projectPath, TaskId taskId, String requestedName);
+    void switchTo(String projectPath, String branchName);
 }
 
 public interface NotificationSender {
@@ -608,8 +617,9 @@ class ArchitectureTest {
      生命周期：建会话 → 事件流落库 → 翻译出参 → 阈值内自主决断并续跑 / 超阈值挂起 →
      人工批准后 `codex exec resume` 带结论续跑）、`TaskDispatchService`（认领 + 后台执行 +
      并发上限 + 失败冷却）、`CodexCliAdapter`（进程、超时、stdout/stderr 分流、JSONL、
-     末条消息）、`GitBranchManager`（一任务一分支，绝不直接改主干；分支不存在时先生成
-     `L2` 审批单，人工批准前不执行任何 Git 写操作，执行器进程另由 Git reference hook 禁止自建分支）、
+     末条消息）、`GitBranchManager`（根目录是有效 Git 仓库时才读取/切换分支；普通目录、
+     空仓库和多仓库父目录的分支为空。AI 通过结构化出参 `branch` 主动请求时，执行结束后再创建
+     `feature/...` 分支；非 Git 目录安静跳过，执行器进程由 Git reference hook 限制自行切分支）、
      `POST /api/tasks/{id}/dispatch`、`GET /api/tasks/{id}/runs`、`GET /api/runs/{id}`；
      前端派发按钮 + 运行记录面板 + 事件流弹框
 14. ✅ 决策规则从 `decision_rule` 表加载：`DecisionRuleRepository`（domain）+
@@ -698,7 +708,7 @@ token 四路用量、18 条事件、出参 JSON 全部落库，`changedFiles` �
 18. 决策规则的维护界面（规则已在表里，缺的是增删改与启停的入口）
 20. 项目的改名 / 暂停 / 删除入口（`project.enabled` 已在，缺操作入口；写侧仓储目前只支持新增，
     见 `ProjectRepository` 的注释）。**读侧已落地**（2026-10-16）：前端有了项目管理页
-    （`/projects`，项目画像 + 该项目的最近任务）与全站唯一的注册入口（工具栏 / 项目页 /
+    （`/projects`，项目画像、Codex 生成资料 + 该项目的最近任务）与全站唯一的注册入口（工具栏 / 项目页 /
     新建任务「一个项目都没有」时的死结出口）；页面上刻意不摆暂停、删除这类点了没反应的假开关
 21. 附件的删除入口（上传与查看有了，删还没有）：删行不难，难的是**两个存储要一起改** ——
     `task_attachment` / `bug_attachment` 行没了、`~/.regent/attachments` 下的文件还在，或者反过来。

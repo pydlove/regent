@@ -2,29 +2,32 @@ package com.pydlove.regent.execution.domain.port;
 
 import com.pydlove.regent.execution.domain.model.TaskId;
 
+import java.util.Optional;
+
 /**
- * 分支管理端口 —— 「绝不直接改主干」这条安全规则的落点。
+ * 分支管理端口 —— 在项目根目录本身是有效 Git 仓库时提供分支隔离能力。
  *
- * <p>命名策略（{@code codex/task-N}）属于这个端口的实现，不写死在聚合里：
- * 将来要改成「从某个基线切出来」或者「每个需求一个分支」，改的是适配器。
+ * <p>项目目录可以不是 Git 仓库，也可以是多个 Git 仓库的父目录。这两种情况下
+ * {@link #currentBranch(String)} 返回空，任务直接在目录本身执行；分支字段为空是合法状态，
+ * 不是派发失败。
  */
 public interface BranchManager {
 
     /**
-     * 只检查分支现状，不创建、不切换。
+     * 当前工作区所在分支。
      *
-     * <p>首次派发先用它判断是否真的需要新建分支；需要时先走人工审批，批准后再调用
-     * {@link #createFor(String, TaskId)}。检查与创建分开，审批才可能发生在 Git 副作用之前。
+     * <p>只在项目根目录本身是 Git 工作区、且 {@code HEAD} 能解析出一次提交时返回分支名。
+     * 非 Git 目录、多仓库父目录、空仓库和游离 {@code HEAD} 都返回空。
      */
-    BranchPlan plan(String projectPath, TaskId taskId);
+    Optional<String> currentBranch(String projectPath);
 
     /**
-     * 为任务准备一条独立分支并切过去。
+     * 任务执行完成后，AI 明确要求隔离时才创建功能分支；未提交改动会随工作区一起带过去。
      *
-     * @param projectPath 工作区绝对路径
-     * @return 实际使用的分支名 —— 关掉隔离时是当前分支名，也如实返回，绝不编一个没切过去的名字
+     * <p>非 Git 目录、多仓库父目录和空仓库无法在根目录创建分支，此时安静返回空，
+     * 不把「当前目录不支持分支」升级成任务失败。
      */
-    String createFor(String projectPath, TaskId taskId);
+    Optional<String> createRequestedFeature(String projectPath, TaskId taskId, String requestedName);
 
     /**
      * 切回任务既有分支，续跑前调用。
@@ -32,6 +35,9 @@ public interface BranchManager {
      * <p>决策可能挂起几小时甚至跨天，期间工作区完全可能被人切到别处。续跑时若不做这一步，
      * 上一轮的改动留在 {@code codex/task-N} 上，而新一轮却跑在别的分支上 ——
      * 两边都改、谁也没接着谁，最后合并时才发现。
+     *
+     * <p>没有分支名、项目根目录不是有效 Git 仓库或分支已不存在时跳过切换，
+     * 让任务继续在项目目录中执行。
      */
     void switchTo(String projectPath, String branchName);
 }

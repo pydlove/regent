@@ -9,7 +9,9 @@ import com.pydlove.regent.execution.domain.model.TaskAttachment;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskRunId;
+import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.execution.domain.port.AgentExecutor;
+import com.pydlove.regent.execution.domain.port.BranchManager;
 import com.pydlove.regent.execution.domain.port.RunEventListener;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
 import com.pydlove.regent.execution.domain.repository.TaskAttachmentRepository;
@@ -77,6 +79,7 @@ public class TaskRunService {
     private final TaskPluginRepository taskPluginRepository;
     private final RunSettlementService settlement;
     private final AgentExecutor agentExecutor;
+    private final BranchManager branchManager;
     private final Duration timeout;
 
     public TaskRunService(TaskRepository taskRepository,
@@ -88,6 +91,7 @@ public class TaskRunService {
                           TaskPluginRepository taskPluginRepository,
                           RunSettlementService settlement,
                           AgentExecutor agentExecutor,
+                          BranchManager branchManager,
                           Duration timeout) {
         this.taskRepository = taskRepository;
         this.taskRunRepository = taskRunRepository;
@@ -98,6 +102,7 @@ public class TaskRunService {
         this.taskPluginRepository = taskPluginRepository;
         this.settlement = settlement;
         this.agentExecutor = agentExecutor;
+        this.branchManager = branchManager;
         this.timeout = timeout;
     }
 
@@ -121,8 +126,7 @@ public class TaskRunService {
         Task task = loadTask(taskId);
         ProjectProfile project = projectProfileRepository.findById(task.getProjectId())
                 .orElseThrow(() -> new EntityNotFoundException("任务所属项目不存在：" + task.getProjectId()));
-        String branch = task.getBranchName()
-                .orElseThrow(() -> new DomainException("任务没有分支名，无法执行：" + taskId));
+        String branch = task.getBranchName().orElse(null);
 
         TaskRun previous = taskRunRepository.findLatestByTask(taskId).orElse(null);
 
@@ -169,12 +173,33 @@ public class TaskRunService {
                 execution.recorder);
         execution.threadId = settlement.adoptThreadId(
                 execution.task.getId(), result.threadId(), execution.threadId);
+        applyRequestedBranch(execution, result);
         settlement.recordReportedBugs(execution.task, result);
 
         if (result.status() == RunStatus.BLOCKED && settlement.stillRunning(execution.task.getId())) {
             return handleBlockedResult(execution, result);
         }
         return Optional.of(finishTerminal(execution, result));
+    }
+
+    private void applyRequestedBranch(Execution execution, ExecResult result) {
+        if (result.status() != RunStatus.SUCCESS || result.branchIntent() == null
+                || !result.branchIntent().requested()) {
+            return;
+        }
+        Task fresh = taskRepository.findById(execution.task.getId()).orElse(null);
+        if (fresh == null || fresh.getStatus() != TaskStatus.RUNNING) {
+            return;
+        }
+        branchManager.createRequestedFeature(
+                        execution.project.path(),
+                        fresh.getId(),
+                        result.branchIntent().name())
+                .ifPresent(branch -> {
+                    fresh.adoptBranch(branch);
+                    taskRepository.save(fresh);
+                    execution.task.adoptBranch(branch);
+                });
     }
 
     private Optional<TaskRun> handleBlockedResult(Execution execution, ExecResult result) {

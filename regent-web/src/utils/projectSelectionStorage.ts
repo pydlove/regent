@@ -45,3 +45,19 @@ export function writeProjectSelection(
     // 隐私模式或配额异常不能阻断项目切换。
   }
 }
+
+/**
+ * 项目列表异步加载完成后，决定最终应该选中哪个项目。
+ *
+ * <p>启动时顶栏下拉可能先于项目列表渲染，并把“没有匹配项”瞬时空置成全部；
+ * 因此不能用当时的空值覆盖持久化选择。只要持久化 ID 仍在当前项目列表里，就恢复它；
+ * 项目真的被删除或换了库时才退回全部。
+ */
+export function resolveProjectSelection(
+  current: number | null,
+  stored: number | null,
+  availableProjectIds: readonly number[],
+): number | null {
+  const candidate = current ?? stored
+  return candidate !== null && availableProjectIds.includes(candidate) ? candidate : null
+}

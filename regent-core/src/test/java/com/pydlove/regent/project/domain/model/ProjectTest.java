@@ -31,6 +31,7 @@ class ProjectTest {
         assertTrue(project.isEnabled(), "新注册的项目默认启用");
         assertEquals(DecisionLevel.L1, project.getDefaultDecisionLevel());
         assertEquals("Java 17 / Maven", project.getTechStack());
+        assertEquals(ProjectSummaryStatus.NOT_GENERATED, project.getSummaryStatus());
     }
 
     @Test
@@ -67,6 +68,46 @@ class ProjectTest {
         assertEquals(ProjectId.of(7L), project.getId());
         assertThrows(DomainException.class, () -> project.assignIdentity(ProjectId.of(8L)));
         assertEquals(ProjectId.of(7L), project.getId(), "重复分配不该改掉已有 ID");
+    }
+
+    @Test
+    @DisplayName("项目资料只能按生成中 → 可用推进，并记录生成时间")
+    void completesSummaryFromGeneratingState() {
+        Project project = register("app_audit", "审计平台", "/tmp/x");
+
+        project.startSummaryGeneration();
+        assertEquals(ProjectSummaryStatus.GENERATING, project.getSummaryStatus());
+        project.completeSummary("# 项目资料\n\nJava 17 / Maven");
+
+        assertEquals(ProjectSummaryStatus.READY, project.getSummaryStatus());
+        assertTrue(project.getSummary().contains("Java 17"));
+        assertNull(project.getSummaryError());
+        assertTrue(project.getSummaryGeneratedAt() != null);
+        assertThrows(DomainException.class, () -> project.failSummary("迟到的失败"));
+    }
+
+    @Test
+    @DisplayName("生成失败保留上一版资料，并给出可重试状态")
+    void keepsPreviousSummaryWhenRegenerationFails() {
+        Project project = register("app_audit", "审计平台", "/tmp/x");
+        project.startSummaryGeneration();
+        project.completeSummary("上一版");
+
+        project.startSummaryGeneration();
+        project.failSummary("Codex 超时");
+
+        assertEquals(ProjectSummaryStatus.FAILED, project.getSummaryStatus());
+        assertEquals("上一版", project.getSummary(), "失败不应抹掉已知可用的旧资料");
+        assertEquals("Codex 超时", project.getSummaryError());
+    }
+
+    @Test
+    @DisplayName("未进入生成中时不能写入结果")
+    void rejectsSummaryCompletionWithoutGeneration() {
+        Project project = register("app_audit", "审计平台", "/tmp/x");
+
+        assertThrows(DomainException.class, () -> project.completeSummary("凭空出现"));
+        assertThrows(DomainException.class, () -> project.failSummary("凭空失败"));
     }
 
     @Nested

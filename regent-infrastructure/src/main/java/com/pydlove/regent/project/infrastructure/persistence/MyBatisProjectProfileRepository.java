@@ -1,11 +1,13 @@
 package com.pydlove.regent.project.infrastructure.persistence;
 
 import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.project.domain.model.ProjectSummaryStatus;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 import org.springframework.stereotype.Repository;
 
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -44,6 +46,11 @@ public class MyBatisProjectProfileRepository implements ProjectProfileRepository
                 row.getName(),
                 row.getPath(),
                 DecisionLevel.parse(row.getDefaultDecisionLevel()),
-                Boolean.TRUE.equals(row.getEnabled()));
+                Boolean.TRUE.equals(row.getEnabled()),
+                ProjectSummaryStatus.parse(row.getSummaryStatus()),
+                row.getSummary(),
+                row.getSummaryError(),
+                row.getSummaryGeneratedAt() == null
+                        ? null : row.getSummaryGeneratedAt().toInstant(ZoneOffset.UTC));
     }
 }

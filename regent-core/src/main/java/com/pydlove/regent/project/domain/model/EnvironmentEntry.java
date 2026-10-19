@@ -18,7 +18,7 @@ public class EnvironmentEntry {
 
     private static final Pattern KEY_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{0,127}");
     private static final int MAX_VALUE = 65_535;
-    private static final int MAX_DESCRIPTION = 1_024;
+    private static final int MAX_NAME_LENGTH = 64;
     private static final int MAX_TAGS = 8;
     private static final int MAX_TAG_LENGTH = 32;
 
@@ -29,6 +29,7 @@ public class EnvironmentEntry {
     private String value;
     private List<String> tags;
     private String description;
+    private boolean secret;
     private final Instant createdAt;
     private Instant updatedAt;
 
@@ -39,10 +40,11 @@ public class EnvironmentEntry {
                              String value,
                              List<String> tags,
                              String description,
+                             boolean secret,
                              Instant createdAt,
                              Instant updatedAt) {
         this.id = id;
-        apply(scope, projectId, key, value, tags, description);
+        apply(scope, projectId, key, value, tags, description, secret);
         this.createdAt = requireNotNull(createdAt, "创建时间");
         this.updatedAt = requireNotNull(updatedAt, "更新时间");
     }
@@ -53,8 +55,19 @@ public class EnvironmentEntry {
                                           String value,
                                           List<String> tags,
                                           String description) {
+        return create(scope, projectId, key, value, tags, description, false);
+    }
+
+    public static EnvironmentEntry create(EnvironmentScope scope,
+                                          ProjectId projectId,
+                                          String key,
+                                          String value,
+                                          List<String> tags,
+                                          String description,
+                                          boolean secret) {
         Instant now = Instant.now();
-        return new EnvironmentEntry(null, scope, projectId, key, value, tags, description, now, now);
+        return new EnvironmentEntry(
+                null, scope, projectId, key, value, tags, description, secret, now, now);
     }
 
     /** 从持久化数据重建，保留原始创建与更新时间。 */
@@ -65,9 +78,11 @@ public class EnvironmentEntry {
                                            String value,
                                            List<String> tags,
                                            String description,
+                                           boolean secret,
                                            Instant createdAt,
                                            Instant updatedAt) {
-        return new EnvironmentEntry(id, scope, projectId, key, value, tags, description, createdAt, updatedAt);
+        return new EnvironmentEntry(
+                id, scope, projectId, key, value, tags, description, secret, createdAt, updatedAt);
     }
 
     public void update(EnvironmentScope scope,
@@ -75,8 +90,9 @@ public class EnvironmentEntry {
                        String key,
                        String value,
                        List<String> tags,
-                       String description) {
-        apply(scope, projectId, key, value, tags, description);
+                       String description,
+                       boolean secret) {
+        apply(scope, projectId, key, value, tags, description, secret);
         this.updatedAt = Instant.now();
     }
 
@@ -92,7 +108,8 @@ public class EnvironmentEntry {
                        String key,
                        String value,
                        List<String> tags,
-                       String description) {
+                       String description,
+                       boolean secret) {
         this.scope = requireNotNull(scope, "环境归属");
         if (scope == EnvironmentScope.GLOBAL && projectId != null) {
             throw new DomainException("全局环境不能绑定项目");
@@ -104,7 +121,8 @@ public class EnvironmentEntry {
         this.key = requireKey(key);
         this.value = requireValue(value);
         this.tags = normalizeTags(tags);
-        this.description = optionalText(description, MAX_DESCRIPTION, "描述");
+        this.description = requireName(description);
+        this.secret = secret;
     }
 
     public EnvironmentId getId() {
@@ -133,6 +151,10 @@ public class EnvironmentEntry {
 
     public String getDescription() {
         return description;
+    }
+
+    public boolean isSecret() {
+        return secret;
     }
 
     public Instant getCreatedAt() {
@@ -189,13 +211,14 @@ public class EnvironmentEntry {
         return List.copyOf(new ArrayList<>(normalized));
     }
 
-    private static String optionalText(String value, int max, String field) {
+    private static String requireName(String value) {
         if (value == null || value.isBlank()) {
-            return null;
+            throw new DomainException("请填写环境信息名称");
         }
         String trimmed = value.trim();
-        if (trimmed.length() > max) {
-            throw new DomainException(field + "超长（上限 " + max + " 字符）：" + trimmed.length());
+        if (trimmed.length() > MAX_NAME_LENGTH) {
+            throw new DomainException(
+                    "环境信息名称超长（上限 " + MAX_NAME_LENGTH + " 字符）：" + trimmed.length());
         }
         return trimmed;
     }

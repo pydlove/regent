@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.execution.infrastructure.persistence.TaskDraftMapper">
+
+    <select id="selectByUserId"
+            resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskDraftData">
+        SELECT id, user_id, project_id, prompt, priority, plugin_ids, created_at, updated_at
+        FROM task_draft
+        WHERE user_id = #{userId}
+    </select>
+
+    <!-- 一个用户只有一份当前草稿；多标签页同时保存时由唯一键合并到最后一次写入。 -->
+    <insert id="upsert">
+        INSERT INTO task_draft
+            (user_id, project_id, prompt, priority, plugin_ids, created_at, updated_at)
+        VALUES
+            (#{userId}, #{projectId}, #{prompt}, #{priority}, CAST(#{pluginIds} AS JSON),
+             #{createdAt}, #{updatedAt})
+        ON DUPLICATE KEY UPDATE
+            project_id = VALUES(project_id),
+            prompt = VALUES(prompt),
+            priority = VALUES(priority),
+            plugin_ids = VALUES(plugin_ids),
+            updated_at = VALUES(updated_at)
+    </insert>
+
+    <delete id="deleteByUserId">
+        DELETE FROM task_draft
+        WHERE user_id = #{userId}
+    </delete>
+
+</mapper>

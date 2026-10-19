@@ -54,12 +54,12 @@ class BugFixDispatchServiceTest {
                 new ExecutionFakes.TaskPlugins(),
                 new RunSettlementService(tasks, decisions, decisionRaiseService, bugs, taskId -> {
                 }),
-                executor, Duration.ofMinutes(30));
+                executor, branches, Duration.ofMinutes(30));
         TaskDispatchService dispatchService = new TaskDispatchService(
                 tasks,
                 projects,
                 branches,
-                new BranchProvisioningService(branches, decisionRaiseService),
+                new BranchProvisioningService(branches),
                 runService,
                 workers,
                 new ExecutionConcurrencyGate(1),

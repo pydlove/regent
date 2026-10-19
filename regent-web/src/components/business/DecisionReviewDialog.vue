@@ -19,7 +19,7 @@ import { formatBytes, formatRelative } from '@/utils/format'
  * 审批对话框。查看、批准、驳回共用同一个组件：
  *   查看 —— 展示判断所需的完整事实；待批记录可直接切换到批准或驳回
  *   批准 —— 可补充建议与图片，确认后放行任务继续处理
- *   驳回 —— 必须填理由，理由会进上下文带回给下一轮执行
+ *   驳回 —— 可补充理由，理由会随决策留痕
  *
  * 三种模式都只读传进来的 decision，调用点只管 open / decision / mode 三个东西。
  */
@@ -81,8 +81,6 @@ watch([open, () => props.mode, () => props.decision?.taskId], async ([value, mod
   }
 })
 
-const REJECT_MIN = 6
-const canReject = computed(() => note.value.trim().length >= REJECT_MIN)
 const canApprove = computed(() => !reviewing.value)
 const isPending = computed(() => props.decision?.status === 'PENDING')
 
@@ -96,7 +94,7 @@ const description = computed(() => {
   if (props.mode === 'approve') {
     return '批准后任务会继续处理；如果已有执行会话，执行器会带着当前上下文从断点续跑。'
   }
-  if (props.mode === 'reject') return '理由会写进决策留痕，也会作为上下文交给下一轮执行。'
+  if (props.mode === 'reject') return '任务会终止；可以补充理由，填写后会写入决策留痕。'
   if (!isPending.value) return '这项决策已经处理，下面是当时的判断依据与处理结果。'
   return '先核对完整问题和影响范围，再决定是否放行。'
 })
@@ -114,7 +112,6 @@ const confirm = async () => {
   const decision = props.decision
   const mode = props.mode
   if (!decision || mode === 'view') return
-  if (mode === 'reject' && !canReject.value) return
   if (mode === 'approve' && !canApprove.value) return
 
   approvalError.value = null
@@ -247,7 +244,7 @@ const confirm = async () => {
         @paste="mode === 'approve' ? onPaste : undefined"
       >
         <p class="text-caption font-emphasis text-label-secondary">
-          {{ mode === 'approve' ? '补充建议（可选）' : '驳回理由' }}
+          {{ mode === 'approve' ? '补充建议（可选）' : '驳回理由（可选）' }}
         </p>
         <Textarea
           v-model="note"
@@ -344,10 +341,6 @@ const confirm = async () => {
         </div>
       </div>
 
-      <!-- 提示只在人开始写之后才出现：一打开就飘红，等于先把人骂一顿 -->
-      <p v-if="mode === 'reject' && note.length > 0 && !canReject" class="mt-1.5 text-caption text-danger">
-        至少 {{ REJECT_MIN }} 个字，否则下一轮执行拿不到可用的信息
-      </p>
       <p v-if="approvalError" class="mt-1.5 text-caption text-danger">{{ approvalError }}</p>
     </template>
     <div v-else class="py-8 text-center">
@@ -374,7 +367,6 @@ const confirm = async () => {
       <Button
         v-else-if="decision && mode === 'reject'"
         variant="danger"
-        :disabled="!canReject"
         @click="confirm"
       >
         确认驳回

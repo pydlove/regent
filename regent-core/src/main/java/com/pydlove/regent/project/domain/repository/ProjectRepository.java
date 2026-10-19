@@ -1,12 +1,17 @@
 package com.pydlove.regent.project.domain.repository;
 
 import com.pydlove.regent.project.domain.model.Project;
+import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.project.domain.model.ProjectSummaryStatus;
+
+import java.util.List;
+import java.util.Optional;
 
 /**
  * 项目聚合的写侧仓储。接口在领域层，MyBatis 实现在基础设施层。
  *
- * <p>只有注册需要的两个动作。不提供 findById —— 读画像走
- * {@link ProjectProfileRepository}，那是执行链路的读模型；等真有「取项目来改」的用例时再加。
+ * <p>普通读画像仍走 {@link ProjectProfileRepository}；写侧只为项目资料生成状态提供
+ * 按 ID 恢复与更新，避免把状态机的持久化责任放到查询投影上。
  */
 public interface ProjectRepository {
 
@@ -20,4 +25,11 @@ public interface ProjectRepository {
 
     /** 新增项目，insert 后由实现回填主键（{@code Project.assignIdentity}）。 */
     void save(Project project);
+
+    Optional<Project> findById(ProjectId id);
+
+    List<Project> findBySummaryStatus(ProjectSummaryStatus status);
+
+    /** 持久化聚合中受守卫的变更（当前用于项目资料生成状态）。 */
+    void update(Project project);
 }

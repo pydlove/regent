@@ -29,6 +29,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -71,7 +72,7 @@ class AgentRunServiceTest {
     private AgentRunService serviceWithLease(Duration lease) {
         DecisionRaiseService decisionRaiseService = new DecisionRaiseService(rules, decisions);
         return new AgentRunService(tasks, runs, events, attachments, projects, environments, plugins,
-                decisions, branches, new BranchProvisioningService(branches, decisionRaiseService),
+                decisions, branches, new BranchProvisioningService(branches),
                 new RunSettlementService(tasks, decisions, decisionRaiseService, bugs, taskId -> {
                 }),
                 contract(), concurrencyGate, lease, "http://127.0.0.1:8787/api/agent/contract");
@@ -107,7 +108,7 @@ class AgentRunServiceTest {
         assertEquals(1, work.attemptNo());
         assertEquals(TaskStatus.RUNNING.name(), tasks.get(7L).getStatus().name());
         assertEquals("/tmp/regent-project-1", work.workdir());
-        assertEquals("codex/task-7", work.branch());
+        assertEquals("main", work.branch());
         assertTrue(work.instruction().startsWith("把这件事做完"), work.instruction());
         assertTrue(work.instruction().contains("上报约定"), "指令末尾必须带上上报约定");
         assertEquals(900, work.leaseSeconds());
@@ -128,7 +129,7 @@ class AgentRunServiceTest {
         environments.add(EnvironmentEntry.create(
                 EnvironmentScope.PROJECT, PROJECT, "DB_HOST", "project-db", List.of(), "项目"));
         environments.add(EnvironmentEntry.create(
-                EnvironmentScope.PROJECT, PROJECT, "DB_PASSWORD", "secret", List.of(), null));
+                EnvironmentScope.PROJECT, PROJECT, "DB_PASSWORD", "secret", List.of(), "数据库密码", true));
 
         AgentWorkPackage work = service.claim(AGENT, "sess-1", "p1", null).orElseThrow();
 
@@ -172,22 +173,29 @@ class AgentRunServiceTest {
     }
 
     @Test
-    @DisplayName("首次创建分支先等人工批准，批准前不发出工作包")
-    void 分支审批前不认领() {
-        branches.requiresCreation = true;
-        Task task = ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING);
-        tasks.add(task);
+    @DisplayName("默认在当前分支认领，不预建任务分支")
+    void 默认使用当前分支() {
+        tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
 
-        assertTrue(service.claim(AGENT, "sess-1", "p1", null).isEmpty());
-        assertEquals(TaskStatus.BLOCKED.name(), tasks.get(7L).getStatus().name());
-        assertTrue(runs.all().isEmpty(), "没有执行尝试，就不该出现执行记录");
-        assertTrue(branches.created.isEmpty());
-
-        task.approveBranchCreation();
         AgentWorkPackage work = service.claim(AGENT, "sess-1", "p1", null).orElseThrow();
 
         assertEquals(7L, work.taskId());
-        assertEquals(List.of("codex/task-7"), branches.created);
+        assertEquals("main", work.branch());
+        assertTrue(branches.created.isEmpty());
+    }
+
+    @Test
+    @DisplayName("非 Git 目录也能认领，工作包与执行记录都不带分支")
+    void 非Git目录认领不带分支() {
+        branches.current = null;
+        tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
+
+        AgentWorkPackage work = service.claim(AGENT, "sess-1", "p1", null).orElseThrow();
+
+        assertNull(work.branch());
+        assertTrue(tasks.get(7L).getBranchName().isEmpty());
+        assertNull(runs.get(work.runId()).getBranchName());
+        assertEquals(TaskStatus.RUNNING.name(), tasks.get(7L).getStatus().name());
     }
 
     @Test

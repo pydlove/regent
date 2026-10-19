@@ -236,10 +236,9 @@ public class TaskDispatchService {
         }
         if (task.getStatus() == TaskStatus.RUNNING) {
             // 续跑：批准之后工作区可能已经切到别的分支上了，先切回去再接着跑
-            branchManager.switchTo(project.path(), task.getBranchName().orElseThrow(
-                    () -> new DomainException("任务没有分支名，无法续跑：" + task.getId())));
+            task.getBranchName().ifPresent(branch -> branchManager.switchTo(project.path(), branch));
             task.beginContinuation();
-            return BranchPreparation.started(task.getBranchName().orElseThrow());
+            return BranchPreparation.started(task.getBranchName().orElse(null));
         }
         throw new DomainException("任务当前状态不可派发：" + task.getId() + "，状态：" + task.getStatus());
     }

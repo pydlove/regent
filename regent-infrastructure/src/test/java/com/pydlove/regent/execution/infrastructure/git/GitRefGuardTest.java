@@ -72,6 +72,7 @@ class GitRefGuardTest {
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.directory(repo.toFile());
         builder.redirectErrorStream(true);
+        clearInheritedGitConfig(builder);
         if (extraEnvironment != null) {
             builder.environment().putAll(new HashMap<>(extraEnvironment));
         }
@@ -85,6 +86,21 @@ class GitRefGuardTest {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(e);
         }
+    }
+
+    /**
+     * 平台会在执行器进程外再挂一层 Git 守卫。临时仓库必须从干净的命令级配置启动，
+     * 需要验证守卫的用例再由 {@code extraEnvironment} 显式注入。
+     */
+    private static void clearInheritedGitConfig(ProcessBuilder builder) {
+        Map<String, String> environment = builder.environment();
+        environment.remove("GIT_CONFIG_COUNT");
+        environment.remove("GIT_CONFIG_PARAMETERS");
+        environment.keySet().stream()
+                .filter(name -> name.startsWith("GIT_CONFIG_KEY_")
+                        || name.startsWith("GIT_CONFIG_VALUE_"))
+                .toList()
+                .forEach(environment::remove);
     }
 
     private boolean 命令成功(Map<String, String> extraEnvironment, String... command) {

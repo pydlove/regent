@@ -151,6 +151,27 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     },
   },
   {
+    id: 'install-codex',
+    category: 'start',
+    question: '新用户没有安装 Codex 怎么办？',
+    keywords: ['Codex', '安装', '新用户', '未安装', '执行器', 'npm', 'brew'],
+    answer: {
+      paragraphs: [
+        '没有安装 Codex 不影响注册、项目录入和浏览。平台只会在需要执行任务或生成项目资料时提示执行器未就绪，不会把整个系统锁死。',
+        '登录后平台会持续检测 Codex。顶部提示条可以直接打开安装弹框，选择 npm 或 Homebrew 一键安装，也可以复制命令到终端自行安装。',
+        '安装后回到「设置 → 执行」重新检测即可。如果 Codex 不在系统 PATH 或常见安装目录里，可以在后端 application-local.yml 的 regent.execution.codex-command 中填写绝对路径。',
+      ],
+      steps: [
+        '在本机执行 npm install -g @openai/codex，或使用 brew install codex。',
+        '确认终端里可以直接运行 codex --version。',
+        '打开「设置 → 执行」，点击「重新检测」。',
+        '状态变为可用后，再派发任务或生成项目资料。',
+      ],
+      note: 'npm 和 GitHub 位于国外，国内网络通常需要代理或“魔法”才能稳定安装。检测只验证 codex 可执行文件和版本命令，不验证 OpenAI 登录状态；首次使用还需要按 Codex 官方方式完成登录。',
+      links: [{ label: '打开执行设置', to: '/settings/execution' }],
+    },
+  },
+  {
     id: 'why-not-started',
     category: 'tasks',
     question: '任务创建后为什么一直显示“待执行”？',
@@ -161,6 +182,33 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         '如果部署开启了自动调度，平台也会领取符合条件且尚有执行位的任务。本地开发环境可能出于安全考虑关闭了自动派发。',
       ],
       links: [{ label: '前往任务页', to: '/tasks' }],
+    },
+  },
+  {
+    id: 'task-draft',
+    category: 'tasks',
+    question: '新建任务写了一半，内容会自动保存吗？',
+    keywords: ['草稿', '自动保存', '恢复', '关闭', '清除'],
+    answer: {
+      paragraphs: [
+        '会。项目、指令、优先级和已选插件会在输入停顿后自动保存；即使连续输入，也会按最长等待时间定期落一次草稿。',
+        '关闭弹框后再次打开会恢复上次内容。点“清除草稿”会删除当前登录用户的草稿，不会影响已经创建的任务。',
+      ],
+      note: '待上传图片不会进入草稿。图片必须在任务创建后上传，因此关掉弹框时尚未提交的图片不会被保留。',
+    },
+  },
+  {
+    id: 'task-branch',
+    category: 'tasks',
+    question: '任务会在哪个 Git 分支上执行？没有 Git 怎么办？',
+    keywords: ['分支', 'Git', '当前分支', 'feature', '隔离', '切换分支', 'branch', '多仓库', '总目录'],
+    answer: {
+      paragraphs: [
+        '如果项目根目录本身是有效 Git 仓库，任务默认直接在当前分支上执行；如果它是普通目录、空仓库，或包含多个 Git 仓库的父目录，任务直接在目录当前状态执行，分支字段为空。',
+        '派发前不会预建任务分支，也不会因为创建分支单独生成审批。',
+        '只有执行器在成功出参中主动请求隔离时，平台才会创建或切换到 feature/... 分支；未给出分支名时按任务号生成。运行记录会保留这次尝试实际使用的分支。',
+      ],
+      note: '多个任务共享同一个工作区时，要留意当前分支是否适合继续执行；需要完全隔离时，应在任务指令中明确要求使用独立分支。',
     },
   },
   {
@@ -188,10 +236,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     keywords: ['语音', '麦克风', '翻译', '中文', 'English', 'HTTPS'],
     answer: {
       paragraphs: [
-        '在新建任务的指令框上方点击“语音输入”，选择说话语言后开始听写，识别结果会追加到当前指令中，不会覆盖已经输入的文字。',
-        '普通话直接写入中文；English、日本語和 한국어 会尝试使用浏览器翻译能力转成中文。若浏览器不支持翻译，会保留识别原文并给出提示。',
+        '在新建任务的指令框上方点击“语音输入”，选择说话语言后开始录音。录音会每 2.5 秒切段并交给本机 Whisper 转写，文字会边录边追加到指令中；停止录音时再提交最后一段。',
+        '普通话由本机 Whisper 直接转为简体中文；English、日本語和 한국어 会尝试使用浏览器翻译能力转成中文。若浏览器不支持翻译，会保留识别原文并给出提示。',
       ],
-      note: '语音输入只在 HTTPS 或本机 localhost 下可用，推荐最新版 Chrome 或 Edge。音频不会上传给 Regent 后端，但浏览器自身的语音识别或翻译服务可能联网处理。',
+      note: '语音输入只在 HTTPS 或本机 localhost 下可用，推荐最新版 Chrome、Edge 或 Safari。录音只发送给本机 Regent 做离线转写，不写数据库；非中文翻译仍取决于浏览器 Translator 能力。',
       links: [{ label: '新建任务', to: '/tasks' }],
     },
   },
@@ -349,7 +397,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     answer: {
       paragraphs: [
         '批准后，任务会带着已有上下文从断点继续执行，不会从头重跑。你可以在批准时补充建议，或追加图片作为执行输入。',
-        '驳回后任务会终止。驳回理由必须填写，并会写入决策留痕，避免以后只看到“被否掉”却不知道原因。',
+        '驳回后任务会终止。理由可选，填写后会写入决策留痕，方便之后回看当时为何否掉。',
       ],
     },
   },
@@ -383,12 +431,13 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     id: 'environment-entries',
     category: 'configuration',
     question: '环境信息会在什么时候提供给执行器？',
-    keywords: ['环境', '环境变量', '全局', '项目', '数据库地址', '配置'],
+    keywords: ['环境', '环境变量', '全局', '项目', '数据库地址', '配置', '自动生成', '名称', '密码', '脱敏'],
     answer: {
       paragraphs: [
-        '环境信息可以全局维护，也可以绑定到单个项目。两者存在同名键时，项目级信息覆盖全局信息。',
-        '任务执行时，平台会把当前生效的环境信息交给执行器；可持久化的任务指令只记录键与说明，不写入具体值。',
+        '环境键由平台自动生成（ENV_001、ENV_002……），不需要也不要手工定义。名称最多 64 个字符，例如“生产 MySQL 主库只读连接”。',
+        '环境信息可以全局维护，也可以绑定到单个项目。标记为密码的值会在列表和详情中默认脱敏；普通 HTTP / HTTPS 地址可以直接点击访问。',
       ],
+      note: '密码值只应在可信项目和执行器中使用；点击眼睛可以临时查看。',
       links: [{ label: '管理环境信息', to: '/environments' }],
     },
   },
@@ -406,6 +455,21 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         { label: '查看插件库', to: '/plugins' },
         { label: '查看计划', to: '/plans' },
       ],
+    },
+  },
+  {
+    id: 'deployment-setup',
+    category: 'configuration',
+    question: '部署配置里的服务器、认证方式和脚本怎么填？',
+    keywords: ['部署', '项目', '服务器', 'SSH', '脚本', '密码', '密钥', '日志', '环境变量'],
+    answer: {
+      paragraphs: [
+        '部署配置归属于一个项目，并跟随顶栏选中的项目过滤。每条配置保存服务器地址、SSH 端口、登录用户、认证方式和一份 UTF-8 部署脚本。',
+        '脚本会在远程目录下通过 bash 执行，平台在本机拉起 OpenSSH，不会把脚本先上传到服务器。脚本通过 REGENT_DEPLOY_* 环境变量读取项目、服务器、目录与执行记录等上下文，不要重复实现连接参数。',
+        '密钥认证使用运行后端那台机器的 ssh-agent 或默认私钥；密码认证在保存配置时写入加密凭据库，点击「立即部署」后只需二次确认，密码不会通过查询接口回传，也不会写入执行日志。',
+      ],
+      note: '部署日志写入 ~/.regent/deployments/runs/，可在部署列表右侧的日志按钮中查看。',
+      links: [{ label: '打开部署', to: '/deployments' }],
     },
   },
   {

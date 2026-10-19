@@ -2,6 +2,7 @@ package com.pydlove.regent.execution.infrastructure.codex;
 
 import com.pydlove.regent.execution.domain.model.ExecRequest;
 import com.pydlove.regent.execution.domain.model.ExecResult;
+import com.pydlove.regent.execution.domain.model.AgentAccessMode;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import org.junit.jupiter.api.AfterEach;
@@ -108,6 +109,7 @@ class CodexCliAdapterTest {
         assertTrue(args.contains("exec"), args);
         assertFalse(args.contains("resume"), "新会话不该带 resume：" + args);
         assertTrue(args.contains("-s workspace-write"), args);
+        assertTrue(args.contains("--skip-git-repo-check"), "非 Git 项目目录也要能启动：" + args);
         assertTrue(args.contains("--json"), args);
         assertTrue(args.contains("--output-schema"), args);
     }
@@ -156,6 +158,7 @@ class CodexCliAdapterTest {
         assertTrue(args.contains("exec resume th-9"), args);
         assertFalse(args.contains("-C "), "resume 子命令没有 -C 参数：" + args);
         assertTrue(args.contains("sandbox_mode=\"workspace-write\""), args);
+        assertTrue(args.contains("--skip-git-repo-check"), "续跑同样要允许非 Git 目录：" + args);
     }
 
     @Test
@@ -187,6 +190,22 @@ class CodexCliAdapterTest {
         });
 
         assertFalse(参数().contains("-i "), 参数());
+    }
+
+    @Test
+    @DisplayName("只读任务使用 read-only 沙箱：项目资料分析不能改工作区")
+    void 只读任务使用只读沙箱() throws IOException {
+        写脚本(回放(DONE_REPORT) + 事件流 + "exit 0");
+        ExecRequest request = new ExecRequest(
+                ProjectId.of(1L), workspace.toString(), 指令原文, null,
+                Duration.ofSeconds(30), List.of(), Map.of(), null,
+                AgentAccessMode.READ_ONLY);
+
+        adapter().execute(request, (type, payload) -> {
+        });
+
+        assertTrue(参数().contains("-s read-only"), 参数());
+        assertFalse(参数().contains("workspace-write"), 参数());
     }
 
     @Test

@@ -30,6 +30,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -55,6 +56,7 @@ class TaskRunServiceTest {
     private final ExecutionFakes.Environments environments = new ExecutionFakes.Environments();
     private final ExecutionFakes.TaskPlugins plugins = new ExecutionFakes.TaskPlugins();
     private final ExecutionFakes.Executor executor = new ExecutionFakes.Executor();
+    private final ExecutionFakes.Branches branches = new ExecutionFakes.Branches();
 
     private TaskRunService service;
 
@@ -67,12 +69,20 @@ class TaskRunServiceTest {
                 new RunSettlementService(tasks, decisions, new DecisionRaiseService(rules, decisions), bugs,
                         taskId -> {
                         }),
-                executor, Duration.ofMinutes(30));
+                executor, branches, Duration.ofMinutes(30));
     }
 
     /** 已认领的任务：分支已切、等待第一次执行。 */
     private Task claimedTask() {
         Task task = ExecutionFakes.task(1L, PROJECT, TaskStatus.RUNNING);
+        tasks.add(task);
+        return task;
+    }
+
+    private Task claimedTaskWithoutBranch() {
+        Task task = Task.manual(PROJECT, "任务 1", "把这件事做完", 0);
+        task.assignIdentity(TaskId.of(1L));
+        task.dispatch(null);
         tasks.add(task);
         return task;
     }
@@ -94,6 +104,36 @@ class TaskRunServiceTest {
             assertEquals("改完了", run.getSummary());
             assertEquals("th-fake-1", tasks.get(1L).getCodexThreadId().orElseThrow());
             assertFalse(events.all().isEmpty(), "事件流要落在库里，运行日志面板就靠它");
+        }
+
+        @Test
+        void AI请求隔离分支时在执行后创建并记录() {
+            claimedTask();
+            executor.script(new ExecResult(RunStatus.SUCCESS, 0, "th-fake-1", TokenUsage.ZERO,
+                    "大功能完成", null, true, List.of("src/App.tsx"), List.of(), null,
+                    new ExecResult.BranchIntent(true, "feature/big-ui", "跨模块大改")));
+
+            service.execute(TASK);
+
+            assertEquals(List.of("feature/big-ui"), branches.created);
+            assertEquals("feature/big-ui", tasks.get(1L).getBranchName().orElseThrow());
+            assertEquals(TaskStatus.DONE, tasks.get(1L).getStatus());
+        }
+
+        @Test
+        void 非Git目录忽略AI分支请求且任务正常完成() {
+            branches.current = null;
+            claimedTaskWithoutBranch();
+            executor.script(new ExecResult(RunStatus.SUCCESS, 0, "th-fake-1", TokenUsage.ZERO,
+                    "大功能完成", null, true, List.of("src/App.tsx"), List.of(), null,
+                    new ExecResult.BranchIntent(true, "feature/big-ui", "跨模块大改")));
+
+            TaskRun run = service.execute(TASK);
+
+            assertTrue(branches.created.isEmpty());
+            assertTrue(tasks.get(1L).getBranchName().isEmpty());
+            assertNull(run.getBranchName());
+            assertEquals(TaskStatus.DONE, tasks.get(1L).getStatus());
         }
 
         @Test
@@ -225,7 +265,8 @@ class TaskRunServiceTest {
             environments.add(EnvironmentEntry.create(
                     EnvironmentScope.PROJECT, PROJECT, "DB_HOST", "project-db", List.of(), "项目数据库"));
             environments.add(EnvironmentEntry.create(
-                    EnvironmentScope.PROJECT, PROJECT, "DB_PASSWORD", "secret", List.of(), null));
+                    EnvironmentScope.PROJECT, PROJECT, "DB_PASSWORD", "secret",
+                    List.of(), "数据库密码", true));
             executor.script(ExecutionFakes.Executor.success("做完了"));
 
             service.execute(TASK);

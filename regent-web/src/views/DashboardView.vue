@@ -336,12 +336,12 @@ onMounted(() => void load())
 
 <template>
   <div class="min-h-full bg-dashboard">
-    <div class="mx-auto flex w-full max-w-[1480px] flex-col px-4 pb-10 pt-5 sm:px-6 lg:px-8 lg:pb-12 lg:pt-7">
-      <header class="rounded-card border border-separator-soft bg-content px-5 py-5 shadow-panel sm:px-6 lg:px-7 lg:py-6">
-        <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+    <div class="mx-auto flex w-full max-w-[1480px] flex-col px-4 pb-8 pt-4 sm:px-6 lg:px-8 lg:pb-10 lg:pt-6">
+      <header class="rounded-card border border-separator-soft bg-content px-4 py-4 shadow-panel sm:px-5 lg:px-6">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-3">
-              <span class="inline-flex items-center gap-1.5 rounded-full bg-accent/8 px-3 py-1.5 text-subhead font-emphasis text-accent">
+            <div class="flex flex-wrap items-center gap-2.5">
+              <span class="inline-flex items-center gap-1.5 rounded-full bg-accent/8 px-2.5 py-1 text-subhead font-emphasis text-accent">
                 <span
                   class="size-1.5 rounded-full"
                   :class="error ? 'bg-danger' : snapshot ? 'bg-success' : 'bg-neutral'"
@@ -352,18 +352,18 @@ onMounted(() => void load())
                 更新于 <span class="tnum">{{ updatedAt }}</span>
               </span>
             </div>
-            <h1 class="mt-4 max-w-4xl text-display font-bold tracking-[-0.025em] text-label">{{ focusTitle }}</h1>
-            <p class="mt-2 max-w-3xl text-title leading-7 text-label-secondary">{{ focusDescription }}</p>
+            <h1 class="mt-3 max-w-4xl text-metric font-bold tracking-[-0.015em] text-label">{{ focusTitle }}</h1>
+            <p class="mt-1 max-w-3xl text-body leading-5 text-label-secondary">{{ focusDescription }}</p>
           </div>
 
-          <div class="flex shrink-0 flex-wrap items-center gap-2.5">
-            <Button variant="primary" size="lg" @click="goPrimaryAction">
+          <div class="flex shrink-0 flex-wrap items-center gap-2">
+            <Button variant="primary" @click="goPrimaryAction">
               {{ primaryAction.label }}
               <Icon :as="ArrowRight" size="inline" />
             </Button>
             <Tooltip content="刷新工作台数据">
-              <IconButton label="刷新工作台数据" variant="default" size="lg" :disabled="loading" @click="load">
-                <Icon :as="RefreshCw" size="large" :class="{ 'animate-spin': loading }" />
+              <IconButton label="刷新工作台数据" variant="default" :disabled="loading" @click="load">
+                <Icon :as="RefreshCw" :class="{ 'animate-spin': loading }" />
               </IconButton>
             </Tooltip>
           </div>
@@ -373,57 +373,69 @@ onMounted(() => void load())
       <div
         v-if="error && snapshot"
         role="alert"
-        class="mt-5 flex items-center gap-2 rounded-panel bg-danger/8 px-4 py-2.5 text-subhead text-danger"
+        class="mt-3 flex items-center gap-2 rounded-panel bg-danger/8 px-4 py-2 text-subhead text-danger"
       >
         <Icon :as="AlertTriangle" size="inline" />
         <span class="min-w-0 flex-1">{{ error }}</span>
         <button class="font-emphasis underline underline-offset-2" @click="load">重试</button>
       </div>
 
+      <div
+        v-if="snapshot && snapshot.unavailableSections.length > 0"
+        role="status"
+        class="mt-3 flex items-center gap-2 rounded-panel bg-warning/8 px-4 py-2 text-subhead text-warning"
+      >
+        <Icon :as="AlertTriangle" size="inline" />
+        <span class="min-w-0 flex-1">
+          部分数据暂未加载：{{ snapshot.unavailableSections.join('、') }}
+        </span>
+        <button class="font-emphasis underline underline-offset-2" @click="load">重新加载</button>
+      </div>
+
       <template v-if="snapshot">
         <section
           aria-label="核心指标"
-          class="mt-5 grid grid-cols-2 gap-3 md:grid-cols-5"
+          class="mt-4 grid grid-cols-2 gap-2.5 md:grid-cols-5"
         >
           <RouterLink
             v-for="metric in metrics"
             :key="metric.key"
             :to="metric.to"
-            class="group relative flex min-h-[148px] min-w-0 flex-col overflow-hidden rounded-card border border-separator-soft bg-content px-5 py-5 shadow-panel transition duration-200 ease-apple hover:-translate-y-0.5 hover:border-accent/20 hover:shadow-popover"
+            class="group relative flex min-h-[120px] min-w-0 flex-col overflow-hidden rounded-card border border-separator-soft bg-content px-4 py-3.5 shadow-panel transition duration-200 ease-apple hover:-translate-y-0.5 hover:border-accent/20 hover:shadow-popover"
             :class="{ 'col-span-2 md:col-span-1': metric.key === 'tokens' }"
           >
             <div class="relative flex items-center gap-2">
-              <span class="grid size-9 shrink-0 place-items-center rounded-panel" :class="metric.iconClass">
+              <span class="grid size-8 shrink-0 place-items-center rounded-panel" :class="metric.iconClass">
                 <Icon :as="metric.icon" size="inline" />
               </span>
-              <span class="truncate text-body font-emphasis text-label-secondary">{{ metric.label }}</span>
+              <span class="truncate text-subhead font-emphasis text-label-secondary">{{ metric.label }}</span>
               <Icon
                 :as="ArrowRight"
                 size="inline"
                 class="absolute right-0 top-1/2 -translate-y-1/2 text-label-tertiary opacity-0 transition-opacity duration-[120ms] ease-apple group-hover:opacity-100"
               />
             </div>
-            <div class="relative mt-5 flex min-w-0 items-baseline gap-1.5">
-              <span class="tnum truncate text-display font-bold" :class="metric.valueClass">
+            <div class="relative mt-3 flex min-w-0 items-baseline gap-1.5">
+              <span class="tnum truncate text-metric font-bold" :class="metric.valueClass">
                 {{ metric.valueText }}
               </span>
               <span v-if="metric.unit" class="shrink-0 text-subhead text-label-tertiary">
                 {{ metric.unit }}
               </span>
             </div>
-            <p class="relative mt-1.5 line-clamp-2 text-subhead text-label-tertiary">{{ metric.caption }}</p>
+            <p class="relative mt-1 line-clamp-1 text-subhead text-label-tertiary md:line-clamp-2">{{ metric.caption }}</p>
           </RouterLink>
         </section>
 
         <section
-          class="mt-5 grid items-start gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(380px,1fr)]"
+          class="mt-4 grid items-start gap-3 xl:grid-cols-[minmax(0,1.55fr)_minmax(380px,1fr)]"
         >
-          <div class="contents xl:order-1 xl:flex xl:min-w-0 xl:flex-col xl:gap-4">
+          <div class="contents xl:order-1 xl:flex xl:min-w-0 xl:flex-col xl:gap-3">
           <section class="order-1 flex min-w-0 flex-col overflow-hidden rounded-card border border-separator-soft bg-content shadow-panel">
-            <div class="flex flex-wrap items-start gap-x-6 gap-y-3 px-6 pt-6">
+            <div class="flex flex-wrap items-start gap-x-6 gap-y-2 px-5 pt-5">
               <div class="flex min-w-0 items-center gap-3">
-                <span class="grid size-9 shrink-0 place-items-center rounded-panel bg-accent/12 text-accent">
-                  <Icon :as="TrendingUp" size="large" />
+                <span class="grid size-8 shrink-0 place-items-center rounded-panel bg-accent/12 text-accent">
+                  <Icon :as="TrendingUp" />
                 </span>
                 <div class="min-w-0">
                   <h2 class="text-title font-emphasis text-label">执行趋势</h2>
@@ -442,8 +454,8 @@ onMounted(() => void load())
               </div>
             </div>
 
-            <div class="px-6 pb-3 pt-5">
-              <TrendArea :points="trendPoints" :height="148" />
+            <div class="px-5 pb-2 pt-4">
+              <TrendArea :points="trendPoints" :height="128" />
               <p
                 v-if="trendEmpty"
                 class="mt-2 flex items-center gap-1.5 text-subhead text-label-tertiary"
@@ -454,7 +466,7 @@ onMounted(() => void load())
             </div>
 
             <div class="mt-auto border-t border-separator-soft">
-              <div class="flex min-h-16 items-center gap-3 px-6 py-5">
+              <div class="flex items-center gap-3 px-5 py-4">
                 <div class="min-w-0">
                   <h3 class="text-title font-emphasis text-label">执行队列</h3>
                   <p class="mt-1 text-subhead text-label-tertiary">运行中与排队任务</p>
@@ -480,7 +492,7 @@ onMounted(() => void load())
                   v-for="task in snapshot.activeTasks"
                   :key="task.id"
                   to="/tasks"
-                  class="group flex min-w-0 items-center gap-4 border-t border-separator-soft px-6 py-5 hover:bg-hover"
+                  class="group flex min-w-0 items-center gap-3 border-t border-separator-soft px-5 py-3.5 hover:bg-hover"
                 >
                   <TaskStatusBadge :status="task.status" />
                   <div class="min-w-0 flex-1">
@@ -504,7 +516,7 @@ onMounted(() => void load())
                 </RouterLink>
               </div>
 
-              <div v-else class="flex items-center gap-4 border-t border-separator-soft px-6 py-9">
+              <div v-else class="flex items-center gap-3 border-t border-separator-soft px-5 py-6">
                 <span class="grid size-8 shrink-0 place-items-center rounded-[8px] bg-success/10">
                   <Icon :as="CircleCheck" size="large" class="text-success" />
                 </span>
@@ -517,9 +529,9 @@ onMounted(() => void load())
           </section>
 
           <article class="order-3 overflow-hidden rounded-card border border-separator-soft bg-content shadow-panel">
-            <div class="flex items-center gap-3 px-6 pt-6">
-              <span class="grid size-9 shrink-0 place-items-center rounded-panel bg-accent/12 text-accent">
-                <Icon :as="ListChecks" size="large" />
+            <div class="flex items-center gap-3 px-5 pt-5">
+              <span class="grid size-8 shrink-0 place-items-center rounded-panel bg-accent/12 text-accent">
+                <Icon :as="ListChecks" />
               </span>
               <div class="min-w-0">
                 <h2 class="text-title font-emphasis text-label">任务构成</h2>
@@ -530,12 +542,12 @@ onMounted(() => void load())
               </span>
             </div>
 
-            <div class="grid items-center gap-6 px-6 pb-6 pt-5 md:grid-cols-[156px_minmax(0,1fr)]">
+            <div class="grid items-center gap-5 px-5 pb-5 pt-4 md:grid-cols-[132px_minmax(0,1fr)]">
               <div class="flex flex-col items-center justify-center">
                 <DonutChart
                   :segments="donutSegments"
-                  :size="148"
-                  :thickness="12"
+                  :size="124"
+                  :thickness="11"
                   :center-value="formatInteger(totalTasks)"
                   center-label="任务"
                 />
@@ -544,7 +556,7 @@ onMounted(() => void load())
                 </p>
               </div>
 
-              <dl class="grid min-w-0 content-center gap-3">
+              <dl class="grid min-w-0 content-center gap-2.5">
                 <div
                   v-for="row in statusRows"
                   :key="row.status"
@@ -575,14 +587,14 @@ onMounted(() => void load())
           </article>
           </div>
 
-          <div class="contents xl:order-2 xl:flex xl:min-w-0 xl:flex-col xl:gap-4">
+          <div class="contents xl:order-2 xl:flex xl:min-w-0 xl:flex-col xl:gap-3">
           <aside class="order-2 flex min-w-0 flex-col overflow-hidden rounded-card border border-separator-soft bg-content shadow-panel">
-            <div class="flex items-center gap-3 border-b border-separator-soft px-6 py-5">
+            <div class="flex items-center gap-3 border-b border-separator-soft px-5 py-4">
               <span
-                class="grid size-10 shrink-0 place-items-center rounded-panel"
+                class="grid size-9 shrink-0 place-items-center rounded-panel"
                 :class="attentionCount > 0 ? 'bg-warning/15 text-warning' : 'bg-success/12 text-success'"
               >
-                <Icon :as="attentionCount > 0 ? CircleAlert : ShieldCheck" size="large" />
+                <Icon :as="attentionCount > 0 ? CircleAlert : ShieldCheck" />
               </span>
               <div class="min-w-0">
                 <h2 class="text-title font-emphasis text-label">待办中心</h2>
@@ -597,44 +609,44 @@ onMounted(() => void load())
             </div>
 
             <template v-if="attentionCount > 0">
-              <div class="grid grid-cols-3 gap-2.5 border-b border-separator-soft px-4 py-4">
-                <RouterLink to="/decisions" class="group min-w-0 rounded-panel border border-separator-soft bg-dashboard px-3 py-3 transition-colors duration-150 ease-apple hover:border-accent/20 hover:bg-accent/4">
-                  <span class="mb-2 flex items-center justify-between text-warning">
-                    <span class="grid size-8 place-items-center rounded-[8px] bg-warning/12">
+              <div class="grid grid-cols-3 gap-2 border-b border-separator-soft px-4 py-3">
+                <RouterLink to="/decisions" class="group min-w-0 rounded-panel border border-separator-soft bg-dashboard px-2.5 py-2.5 transition-colors duration-150 ease-apple hover:border-accent/20 hover:bg-accent/4">
+                  <span class="mb-1.5 flex items-center justify-between text-warning">
+                    <span class="grid size-7 place-items-center rounded-[8px] bg-warning/12">
                       <Icon :as="Workflow" size="inline" />
                     </span>
                     <Icon :as="ArrowRight" size="inline" class="opacity-45 transition-transform duration-150 ease-apple group-hover:translate-x-0.5" />
                   </span>
                   <p class="truncate text-subhead text-label-secondary">待批决策</p>
-                  <p class="tnum mt-1 text-metric font-bold text-warning">
+                  <p class="tnum mt-0.5 text-title font-bold text-warning">
                     {{ formatInteger(snapshot.pendingDecisions) }}
                   </p>
                   <p class="mt-1 truncate text-subhead text-label-tertiary">
                     L2 {{ snapshot.pendingL2Decisions }} · L3 {{ snapshot.pendingL3Decisions }}
                   </p>
                 </RouterLink>
-                <RouterLink to="/bugs" class="group min-w-0 rounded-panel border border-separator-soft bg-dashboard px-3 py-3 transition-colors duration-150 ease-apple hover:border-accent/20 hover:bg-accent/4">
-                  <span class="mb-2 flex items-center justify-between text-danger">
-                    <span class="grid size-8 place-items-center rounded-[8px] bg-danger/12">
+                <RouterLink to="/bugs" class="group min-w-0 rounded-panel border border-separator-soft bg-dashboard px-2.5 py-2.5 transition-colors duration-150 ease-apple hover:border-accent/20 hover:bg-accent/4">
+                  <span class="mb-1.5 flex items-center justify-between text-danger">
+                    <span class="grid size-7 place-items-center rounded-[8px] bg-danger/12">
                       <Icon :as="Bug" size="inline" />
                     </span>
                     <Icon :as="ArrowRight" size="inline" class="opacity-45 transition-transform duration-150 ease-apple group-hover:translate-x-0.5" />
                   </span>
                   <p class="truncate text-subhead text-label-secondary">开放缺陷</p>
-                  <p class="tnum mt-1 text-metric font-bold text-danger">
+                  <p class="tnum mt-0.5 text-title font-bold text-danger">
                     {{ formatInteger(snapshot.openBugs) }}
                   </p>
                   <p class="mt-1 truncate text-subhead text-label-tertiary">等待修复或验证</p>
                 </RouterLink>
-                <RouterLink to="/tasks" class="group min-w-0 rounded-panel border border-separator-soft bg-dashboard px-3 py-3 transition-colors duration-150 ease-apple hover:border-accent/20 hover:bg-accent/4">
-                  <span class="mb-2 flex items-center justify-between text-danger">
-                    <span class="grid size-8 place-items-center rounded-[8px] bg-danger/12">
+                <RouterLink to="/tasks" class="group min-w-0 rounded-panel border border-separator-soft bg-dashboard px-2.5 py-2.5 transition-colors duration-150 ease-apple hover:border-accent/20 hover:bg-accent/4">
+                  <span class="mb-1.5 flex items-center justify-between text-danger">
+                    <span class="grid size-7 place-items-center rounded-[8px] bg-danger/12">
                       <Icon :as="AlertTriangle" size="inline" />
                     </span>
                     <Icon :as="ArrowRight" size="inline" class="opacity-45 transition-transform duration-150 ease-apple group-hover:translate-x-0.5" />
                   </span>
                   <p class="truncate text-subhead text-label-secondary">失败任务</p>
-                  <p class="tnum mt-1 text-metric font-bold text-danger">
+                  <p class="tnum mt-0.5 text-title font-bold text-danger">
                     {{ formatInteger(snapshot.tasks.FAILED) }}
                   </p>
                   <p class="mt-1 truncate text-subhead text-label-tertiary">需要重试或终止</p>
@@ -646,9 +658,9 @@ onMounted(() => void load())
                   v-for="decision in snapshot.pendingDecisionItems.slice(0, 2)"
                   :key="`decision-${decision.id}`"
                   to="/decisions"
-                  class="group flex items-start gap-3 border-b border-separator-soft px-6 py-4 transition-colors duration-150 ease-apple hover:bg-hover"
+                  class="group flex items-start gap-3 border-b border-separator-soft px-5 py-3.5 transition-colors duration-150 ease-apple hover:bg-hover"
                 >
-                  <span class="mt-0.5 grid size-9 shrink-0 place-items-center rounded-panel bg-warning/14 text-warning">
+                  <span class="mt-0.5 grid size-8 shrink-0 place-items-center rounded-panel bg-warning/14 text-warning">
                     <Icon :as="Workflow" size="inline" />
                   </span>
                   <div class="min-w-0 flex-1">
@@ -658,8 +670,8 @@ onMounted(() => void load())
                         {{ formatRelative(decision.raisedAt) }}
                       </span>
                     </div>
-                    <p class="mt-2.5 line-clamp-2 text-body leading-6 text-label">{{ decision.question }}</p>
-                    <p class="mt-1.5 truncate text-subhead text-label-tertiary">
+                    <p class="mt-2 line-clamp-2 text-body leading-5 text-label">{{ decision.question }}</p>
+                    <p class="mt-1 truncate text-subhead text-label-tertiary">
                       #{{ decision.taskId }} · {{ decision.projectName }}
                     </p>
                   </div>
@@ -674,9 +686,9 @@ onMounted(() => void load())
                   v-for="bug in snapshot.openBugItems.slice(0, 1)"
                   :key="`bug-${bug.id}`"
                   to="/bugs"
-                  class="group flex items-start gap-3 border-b border-separator-soft px-6 py-4 transition-colors duration-150 ease-apple hover:bg-hover"
+                  class="group flex items-start gap-3 border-b border-separator-soft px-5 py-3.5 transition-colors duration-150 ease-apple hover:bg-hover"
                 >
-                  <span class="mt-0.5 grid size-9 shrink-0 place-items-center rounded-panel bg-danger/12 text-danger">
+                  <span class="mt-0.5 grid size-8 shrink-0 place-items-center rounded-panel bg-danger/12 text-danger">
                     <Icon :as="Bug" size="inline" />
                   </span>
                   <div class="min-w-0 flex-1">
@@ -686,8 +698,8 @@ onMounted(() => void load())
                         {{ formatRelative(bug.foundAt) }}
                       </span>
                     </div>
-                    <p class="mt-2.5 line-clamp-2 text-body leading-6 text-label">{{ bug.title }}</p>
-                    <p class="mt-1.5 truncate text-subhead text-label-tertiary">
+                    <p class="mt-2 line-clamp-2 text-body leading-5 text-label">{{ bug.title }}</p>
+                    <p class="mt-1 truncate text-subhead text-label-tertiary">
                       #{{ bug.id }} · {{ bug.projectName }}
                     </p>
                   </div>
@@ -705,9 +717,9 @@ onMounted(() => void load())
                     snapshot.openBugs === 0
                   "
                   to="/tasks"
-                  class="group flex items-center gap-3 px-6 py-4 hover:bg-hover"
+                  class="group flex items-center gap-3 px-5 py-3.5 hover:bg-hover"
                 >
-                  <span class="grid size-9 shrink-0 place-items-center rounded-panel bg-danger/12 text-danger">
+                  <span class="grid size-8 shrink-0 place-items-center rounded-panel bg-danger/12 text-danger">
                     <Icon :as="AlertTriangle" size="inline" />
                   </span>
                   <div class="min-w-0 flex-1">
@@ -726,7 +738,7 @@ onMounted(() => void load())
               </div>
             </template>
 
-            <div v-else class="flex flex-1 flex-col items-center justify-center px-6 py-12 text-center">
+            <div v-else class="flex flex-1 flex-col items-center justify-center px-5 py-8 text-center">
               <span class="grid size-10 place-items-center rounded-full bg-success/10">
                 <Icon :as="ShieldCheck" size="xlarge" class="text-success" />
               </span>
@@ -735,9 +747,9 @@ onMounted(() => void load())
             </div>
           </aside>
           <article class="order-4 overflow-hidden rounded-card border border-separator-soft bg-content shadow-panel">
-            <div class="flex items-center gap-3 px-6 pt-6">
-              <span class="grid size-9 shrink-0 place-items-center rounded-panel bg-success/12 text-success">
-                <Icon :as="Gauge" size="large" />
+            <div class="flex items-center gap-3 px-5 pt-5">
+              <span class="grid size-8 shrink-0 place-items-center rounded-panel bg-success/12 text-success">
+                <Icon :as="Gauge" />
               </span>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
@@ -755,7 +767,7 @@ onMounted(() => void load())
               </span>
             </div>
 
-            <div class="px-6 pb-6 pt-5">
+            <div class="px-5 pb-5 pt-4">
               <div class="flex items-end gap-2">
                 <span class="tnum text-display font-bold text-label">
                   {{ successRate === null ? '—' : `${successRate}%` }}
@@ -810,22 +822,22 @@ onMounted(() => void load())
       </template>
 
       <div v-else-if="loading" class="mt-5">
-        <div class="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <div class="grid grid-cols-2 gap-2.5 md:grid-cols-5">
           <Skeleton
             v-for="index in 5"
             :key="index"
-            class="h-[148px] rounded-card bg-content"
+            class="h-[120px] rounded-card bg-content"
             :class="{ 'col-span-2 md:col-span-1': index === 5 }"
           />
         </div>
-        <div class="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(380px,1fr)]">
-          <div class="contents xl:flex xl:flex-col xl:gap-4">
-            <Skeleton class="order-1 h-[430px] rounded-card" />
-            <Skeleton class="order-3 h-48 rounded-card" />
+        <div class="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.55fr)_minmax(380px,1fr)]">
+          <div class="contents xl:flex xl:flex-col xl:gap-3">
+            <Skeleton class="order-1 h-[360px] rounded-card" />
+            <Skeleton class="order-3 h-40 rounded-card" />
           </div>
-          <div class="contents xl:flex xl:flex-col xl:gap-4">
-            <Skeleton class="order-2 h-[430px] rounded-card" />
-            <Skeleton class="order-4 h-48 rounded-card" />
+          <div class="contents xl:flex xl:flex-col xl:gap-3">
+            <Skeleton class="order-2 h-[360px] rounded-card" />
+            <Skeleton class="order-4 h-40 rounded-card" />
           </div>
         </div>
       </div>

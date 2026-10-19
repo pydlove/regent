@@ -23,6 +23,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,20 +43,20 @@ class EnvironmentPersistenceIT {
     private EnvironmentEntryRepository environmentEntryRepository;
 
     @Test
-    @DisplayName("环境信息落库后可合并查询，项目级同键覆盖全局")
+    @DisplayName("历史显式环境键落库后，项目级同键仍覆盖全局")
     void persistsAndResolvesProjectOverride(@TempDir Path workspace) {
         Project project = projectRegistrationService.register(new RegisterProjectCommand(
                 "it_env_project", "环境集成项目", workspace.toString(), null, null, DecisionLevel.L1));
 
-        environmentEntryService.create(new SaveEnvironmentCommand(
+        environmentEntryRepository.save(EnvironmentEntry.create(
                 EnvironmentScope.GLOBAL, null, "IT_DB_HOST", "global-db",
                 List.of("数据库"), "全局数据库"));
-        environmentEntryService.create(new SaveEnvironmentCommand(
+        environmentEntryRepository.save(EnvironmentEntry.create(
                 EnvironmentScope.PROJECT, project.getId(), "IT_DB_HOST", "project-db",
                 List.of("数据库"), "项目数据库"));
-        environmentEntryService.create(new SaveEnvironmentCommand(
+        environmentEntryRepository.save(EnvironmentEntry.create(
                 EnvironmentScope.PROJECT, project.getId(), "IT_DB_TOKEN", "secret",
-                List.of("凭据"), null));
+                List.of("凭据"), "项目凭据"));
 
         List<EnvironmentEntry> applicable = environmentEntryRepository.findApplicableTo(project.getId());
         EnvironmentContext context = EnvironmentContext.resolve(applicable);
@@ -67,17 +68,25 @@ class EnvironmentPersistenceIT {
     }
 
     @Test
-    @DisplayName("同一归属内重复键被业务规则拒绝")
-    void rejectsDuplicateKeyInSameScope() {
-        EnvironmentEntry first = environmentEntryService.create(new SaveEnvironmentCommand(
-                EnvironmentScope.GLOBAL, null, "IT_UNIQUE_KEY", "one", List.of(), null));
+    @DisplayName("菜单创建环境信息时自动生成唯一键，名称必填")
+    void generatesKeysAndRequiresName(@TempDir Path workspace) {
+        Project project = projectRegistrationService.register(new RegisterProjectCommand(
+                "it_env_auto_project", "自动环境项目", workspace.toString(), null, null, DecisionLevel.L1));
 
+        EnvironmentEntry global = environmentEntryService.create(new SaveEnvironmentCommand(
+                EnvironmentScope.GLOBAL, null, "global-db", List.of("数据库"),
+                "全局数据库只读连接串", false));
+        EnvironmentEntry scoped = environmentEntryService.create(new SaveEnvironmentCommand(
+                EnvironmentScope.PROJECT, project.getId(), "project-db", List.of(),
+                "项目数据库连接串", true));
+
+        assertTrue(global.getKey().startsWith("ENV_"), global.getKey());
+        assertTrue(scoped.getKey().startsWith("ENV_"), scoped.getKey());
+        assertNotEquals(global.getKey(), scoped.getKey());
+        assertEquals("全局数据库只读连接串", global.getDescription());
+        assertTrue(scoped.isSecret());
         assertThrows(DomainException.class, () -> environmentEntryService.create(
                 new SaveEnvironmentCommand(
-                        EnvironmentScope.GLOBAL, null, "IT_UNIQUE_KEY", "two", List.of(), null)));
-
-        environmentEntryService.delete(first.getId());
-        environmentEntryService.create(new SaveEnvironmentCommand(
-                EnvironmentScope.GLOBAL, null, "IT_UNIQUE_KEY", "three", List.of(), null));
+                        EnvironmentScope.GLOBAL, null, "x", List.of(), "  ", false)));
     }
 }

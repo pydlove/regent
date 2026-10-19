@@ -123,6 +123,22 @@ export type TaskDetail = {
   updatedAt: string
 }
 
+/** 当前登录用户尚未提交的任务录入草稿。 */
+export type TaskDraft = {
+  id: number
+  projectId: number | null
+  prompt: string
+  priority: number
+  pluginIds: number[]
+  createdAt: string
+  updatedAt: string
+}
+
+/** 当前草稿查询结果；draft 为 null 表示还没有草稿。 */
+export type CurrentTaskDraft = {
+  draft: TaskDraft | null
+}
+
 /** 一次尝试的列表行。token 三个分量分开给，界面上要回答「这次为什么这么贵」。 */
 export type TaskRunSummary = {
   id: number
@@ -134,7 +150,7 @@ export type TaskRunSummary = {
   tokenCachedInput: number
   tokenOutput: number
   tokens: number
-  branchName: string
+  branchName: string | null
   /** 谁在跑这次尝试：`codex-cli` = 平台自己拉起的本机 codex；`agent` = 外部执行者 */
   executor: string
   /** 外部执行者的自称；平台自己拉起的执行器为 null */
@@ -262,6 +278,14 @@ export type Project = {
   defaultDecisionLevel: DecisionLevel
   /** 暂停开关；关掉之后不再派发新任务，但录入不受影响 */
   enabled: boolean
+  /** Codex 生成的项目资料状态 */
+  summaryStatus: 'NOT_GENERATED' | 'GENERATING' | 'READY' | 'FAILED'
+  /** Codex 只读分析项目后生成的 Markdown 资料 */
+  summary: string | null
+  /** 最近一次生成失败原因；成功或未生成时为 null */
+  summaryError: string | null
+  /** 最近一次成功生成时间 */
+  summaryGeneratedAt: string | null
 }
 
 /** 项目工作区的当前 Git 分支；没有 Git 管理或处于游离 HEAD 时为 null。 */
@@ -281,6 +305,8 @@ export type EnvironmentEntry = {
   value: string
   tags: string[]
   description: string | null
+  /** 密码值：列表与详情默认脱敏 */
+  secret: boolean
   createdAt: string
   updatedAt: string
 }
@@ -391,10 +417,89 @@ export type TestCaseBatchRunResult = {
   failures: { testCaseId: number; message: string }[]
 }
 
+export type DeploymentAuthType = 'KEY' | 'PASSWORD'
+
+export type DeploymentRunStatus =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'TIMEOUT'
+  | 'INTERRUPTED'
+
+/** 部署配置列表项；脚本正文只在详情接口返回。 */
+export type DeploymentSummary = {
+  id: number
+  projectId: number
+  projectName: string
+  name: string
+  host: string
+  port: number
+  username: string
+  authType: DeploymentAuthType
+  remoteDirectory: string
+  scriptFilename: string
+  scriptHash: string
+  scriptSize: number
+  latestRunStatus: DeploymentRunStatus | null
+  latestRunAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type DeploymentDetail = DeploymentSummary & {
+  scriptContent: string
+  credentialConfigured: boolean
+}
+
+export type DeploymentRunSummary = {
+  id: number
+  deploymentId: number
+  projectId: number
+  deploymentName: string
+  host: string
+  port: number
+  username: string
+  authType: DeploymentAuthType
+  status: DeploymentRunStatus
+  exitCode: number | null
+  summary: string | null
+  queuedAt: string
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export type DeploymentRunDetail = DeploymentRunSummary & {
+  remoteDirectory: string
+  scriptFilename: string
+  scriptHash: string
+  log: string
+}
+
 /** 平台级执行设置；修改后立即影响新任务的领取，不终止已经运行的任务。 */
 export type ExecutionSettings = {
   maxConcurrentTasks: number
   runningTaskCount: number
+}
+
+/** 设置页的 Codex 可执行文件检测结果；可通过不等于已登录。 */
+export type CodexRuntime = {
+  available: boolean
+  configuredCommand: string
+  executablePath: string | null
+  version: string | null
+  message: string
+  checkedAt: string
+}
+
+export type CodexInstallMethod = 'npm' | 'brew'
+
+export type CodexInstallResult = {
+  success: boolean
+  method: string
+  message: string
+  output: string
+  runtime: CodexRuntime
 }
 
 export type RelayState = 'UNCONFIGURED' | 'DISABLED' | 'ONLINE' | 'DEGRADED' | 'OFFLINE'
@@ -464,7 +569,7 @@ export type DecisionSummary = {
   blastRadius: string | null
   resolvedBy: string | null
   resolvedChoice: string | null
-  /** 决议时留下的说明。驳回时必填 —— 「为什么否掉」是复盘时唯一能读到的信息 */
+  /** 决议时留下的可选说明。 */
   resolutionNote: string | null
   raisedAt: string
   resolvedAt: string | null

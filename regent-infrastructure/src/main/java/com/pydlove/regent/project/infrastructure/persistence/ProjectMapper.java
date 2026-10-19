@@ -2,6 +2,8 @@ package com.pydlove.regent.project.infrastructure.persistence;
 
 import org.apache.ibatis.annotations.Param;
 
+import java.util.List;
+
 /** 项目写侧映射接口。SQL 在 {@code mapper/ProjectMapper.xml}。 */
 public interface ProjectMapper {
 
@@ -10,4 +12,10 @@ public interface ProjectMapper {
 
     /** 新增。主键由数据库生成，{@code useGeneratedKeys} 回填到 {@link ProjectData#getId()}。 */
     int insert(ProjectData data);
+
+    ProjectData selectById(@Param("id") long id);
+
+    List<ProjectData> selectBySummaryStatus(@Param("summaryStatus") String summaryStatus);
+
+    int updateSummary(ProjectData data);
 }

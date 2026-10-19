@@ -2,6 +2,8 @@ package com.pydlove.regent.project.infrastructure.persistence;
 
 import lombok.Data;
 
+import java.time.LocalDateTime;
+
 /**
  * {@code project} 表里执行链路真正需要的那些列。
  *
@@ -17,4 +19,8 @@ public class ProjectProfileRow {
     private String path;
     private String defaultDecisionLevel;
     private Boolean enabled;
+    private String summaryStatus;
+    private String summary;
+    private String summaryError;
+    private LocalDateTime summaryGeneratedAt;
 }

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ChevronLeft, ListChecks, Plus, RefreshCw, Search, X } from '@lucide/vue'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/http'
-import { getProjectGitBranch } from '@/api/projects'
+import { getProjectGitBranch, regenerateProjectSummary } from '@/api/projects'
 import { listTasks } from '@/api/tasks'
 import DecisionLevelBadge from '@/components/business/DecisionLevelBadge.vue'
 import TaskStatusBadge from '@/components/business/TaskStatusBadge.vue'
@@ -18,9 +18,12 @@ import StatusDot from '@/components/ui/status-dot/StatusDot.vue'
 import Table from '@/components/ui/table/Table.vue'
 import type { TableColumn } from '@/components/ui/table/table.types'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
+import { useCodexInstallDialog } from '@/composables/useCodexInstallDialog'
 import { useProjectDialog } from '@/composables/useProjectDialog'
+import { useToast } from '@/composables/useToast'
+import { useExecutionRuntimeStore } from '@/stores/useExecutionRuntimeStore'
 import { useTaskStore } from '@/stores/useTaskStore'
-import type { TaskSummary } from '@/types/api'
+import type { Project, TaskSummary } from '@/types/api'
 
 /*
  * 项目管理。
@@ -32,7 +35,10 @@ import type { TaskSummary } from '@/types/api'
  * 列表不分页：项目是平台里数量最少的东西（个位数），分页是照猫画虎。
  */
 const store = useTaskStore()
+const executionRuntime = useExecutionRuntimeStore()
 const router = useRouter()
+const toast = useToast()
+const { openDialog: openCodexInstallDialog } = useCodexInstallDialog()
 const { openDialog: openProjectDialog, lastRegistered } = useProjectDialog()
 
 const columns: TableColumn[] = [
@@ -80,6 +86,38 @@ const taskCounts = ref<Record<number, number>>({})
 const projectTasks = ref<TaskSummary[]>([])
 const projectBranches = ref<Record<number, string | null>>({})
 let branchRequestSequence = 0
+const summaryRegeneratingId = ref<number | null>(null)
+let summaryPollTimer: number | null = null
+
+const summaryStatusLabel = (project: Project | null) => {
+  if (!project) return ''
+  return {
+    NOT_GENERATED: '未生成',
+    GENERATING: '生成中',
+    READY: '已生成',
+    FAILED: '生成失败',
+  }[project.summaryStatus]
+}
+
+const stopSummaryPolling = () => {
+  if (summaryPollTimer !== null) {
+    window.clearTimeout(summaryPollTimer)
+    summaryPollTimer = null
+  }
+}
+
+const scheduleSummaryPolling = () => {
+  stopSummaryPolling()
+  if (!store.projects.some((project) => project.summaryStatus === 'GENERATING')) return
+  summaryPollTimer = window.setTimeout(async () => {
+    try {
+      await store.loadProjects()
+      scheduleSummaryPolling()
+    } catch {
+      // 下一轮由用户刷新或重新进入页面触发，不在后台无限重试。
+    }
+  }, 3000)
+}
 
 const loadProjectTasks = async () => {
   const id = selectedId.value
@@ -135,6 +173,7 @@ const load = async () => {
       selectedId.value = store.projects[0]?.id ?? null
     }
     await Promise.all([loadProjectTasks(), loadProjectBranches()])
+    scheduleSummaryPolling()
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : '无法连接后端，请确认服务已启动（默认 127.0.0.1:8787）'
   } finally {
@@ -143,6 +182,7 @@ const load = async () => {
 }
 
 onMounted(load)
+onBeforeUnmount(stopSummaryPolling)
 watch(selectedId, () => void loadProjectTasks())
 
 /** 注册成功后：整页刷新，并把新项目选中 —— 刚建的东西应该立刻是焦点 */
@@ -165,6 +205,34 @@ const openInTasks = (project = selected.value) => {
   selectedId.value = project.id
   store.projectId = project.id
   void router.push('/tasks')
+}
+
+const regenerateSummary = async () => {
+  if (!selected.value || selected.value.summaryStatus === 'GENERATING') return
+  if (!executionRuntime.status) await executionRuntime.check()
+  if (executionRuntime.status && !executionRuntime.status.available) {
+    openCodexInstallDialog()
+    toast.warning(
+      'Codex 未就绪，无法生成项目资料',
+      '请先到「设置 → 执行」安装或配置 Codex，再重新生成',
+    )
+    return
+  }
+  const project = selected.value
+  summaryRegeneratingId.value = project.id
+  try {
+    await regenerateProjectSummary(project.id)
+    await store.loadProjects()
+    scheduleSummaryPolling()
+    toast.success(`「${project.name}」开始生成项目资料`, 'Codex 以只读方式分析工作区，不会改动文件')
+  } catch (e) {
+    toast.failure(
+      '无法启动项目资料生成',
+      e instanceof ApiError ? e.message : '请确认后端与 Codex 可用',
+    )
+  } finally {
+    summaryRegeneratingId.value = null
+  }
 }
 </script>
 
@@ -322,6 +390,61 @@ const openInTasks = (project = selected.value) => {
           生效等级高于「{{ selected.defaultDecisionLevel }}」的决策一律升级人工。暂停的项目不再派发新任务，
           但录入不受影响。
         </p>
+
+        <div class="mt-4 border-t border-separator pt-3">
+          <div class="flex items-center gap-2">
+            <p class="text-caption font-emphasis text-label-secondary">项目资料</p>
+            <StatusDot
+              class="ml-auto"
+              :dot="selected.summaryStatus === 'GENERATING'
+                ? 'bg-accent'
+                : selected.summaryStatus === 'READY'
+                  ? 'bg-success'
+                  : selected.summaryStatus === 'FAILED'
+                    ? 'bg-danger'
+                    : 'bg-neutral'"
+            >
+              {{ summaryStatusLabel(selected) }}
+            </StatusDot>
+          </div>
+
+          <p v-if="selected.summaryStatus === 'GENERATING'" class="mt-2 text-caption text-label-tertiary">
+            Codex 正在只读分析工作区，完成后会自动刷新。
+          </p>
+          <template v-else>
+            <p v-if="selected.summaryStatus === 'FAILED'" class="mt-2 text-caption text-danger">
+              {{ selected.summaryError || '项目资料生成失败' }}
+            </p>
+            <div
+              v-if="selected.summary"
+              class="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-separator-soft pt-2 text-caption leading-5 text-label-secondary"
+            >
+              {{ selected.summary }}
+            </div>
+            <p
+              v-else-if="selected.summaryStatus === 'NOT_GENERATED'"
+              class="mt-2 text-caption text-label-tertiary"
+            >
+              尚未生成项目资料。Codex 会读项目结构与说明，只生成总结，不改文件。
+            </p>
+            <p
+              v-if="selected.summaryGeneratedAt"
+              class="mt-2 text-caption text-label-tertiary"
+            >
+              最近生成：{{ new Date(selected.summaryGeneratedAt).toLocaleString('zh-CN') }}
+            </p>
+            <Button
+              class="mt-3"
+              size="sm"
+              block
+              :disabled="summaryRegeneratingId === selected.id"
+              @click="regenerateSummary"
+            >
+              <Icon :as="RefreshCw" size="inline" />
+              {{ selected.summaryStatus === 'READY' ? '重新生成项目资料' : '生成项目资料' }}
+            </Button>
+          </template>
+        </div>
 
         <div class="mt-4 border-t border-separator pt-3">
           <div class="flex items-center gap-2">

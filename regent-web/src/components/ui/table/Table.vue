@@ -134,3 +134,15 @@ function isChecked(row: T): boolean {
     />
   </div>
 </template>
+
+<style scoped>
+/*
+ * 单元格里的 text-label-* 会直接读取这些变量。选中行只在行作用域内覆盖变量，
+ * 不再要求每个业务页面为标题、次要信息和辅助信息分别补一遍白字类。
+ */
+tbody tr[data-selected='true'] {
+  --label: var(--selection-label);
+  --label-secondary: var(--selection-label-secondary);
+  --label-tertiary: var(--selection-label-tertiary);
+}
+</style>

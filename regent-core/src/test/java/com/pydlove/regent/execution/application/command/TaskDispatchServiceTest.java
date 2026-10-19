@@ -59,9 +59,9 @@ class TaskDispatchServiceTest {
                 new ExecutionFakes.TaskPlugins(),
                 new RunSettlementService(tasks, decisions, decisionRaiseService, bugs, taskId -> {
                 }),
-                executor, Duration.ofMinutes(30));
+                executor, branches, Duration.ofMinutes(30));
         service = new TaskDispatchService(
-                tasks, projects, branches, new BranchProvisioningService(branches, decisionRaiseService),
+                tasks, projects, branches, new BranchProvisioningService(branches),
                 runService, workers, concurrencyGate, transactions);
     }
 
@@ -114,10 +114,23 @@ class TaskDispatchServiceTest {
             Task claimed = service.dispatch(TaskId.of(1L));
 
             assertEquals(TaskStatus.RUNNING, claimed.getStatus());
-            assertEquals("codex/task-1", claimed.getBranchName().orElseThrow());
-            assertEquals(List.of("codex/task-1"), branches.created);
+            assertEquals("main", claimed.getBranchName().orElseThrow());
+            assertTrue(branches.created.isEmpty());
             assertEquals(1, workers.size(), "执行必须交给工作线程，不能挂在调用线程上");
             assertEquals(TaskStatus.RUNNING, tasks.get(1L).getStatus());
+        }
+
+        @Test
+        void 非Git目录派发时分支为空() {
+            branches.current = null;
+            add(TaskStatus.PENDING);
+
+            Task claimed = service.dispatch(TaskId.of(1L));
+
+            assertEquals(TaskStatus.RUNNING, claimed.getStatus());
+            assertTrue(claimed.getBranchName().isEmpty());
+            assertTrue(branches.switched.isEmpty());
+            assertEquals(1, workers.size());
         }
 
         @Test
@@ -169,24 +182,15 @@ class TaskDispatchServiceTest {
         }
 
         @Test
-        void 首次需要新建分支时先生成审批单且不提交执行() {
-            branches.requiresCreation = true;
-            Task task = add(TaskStatus.PENDING);
+        void 默认在当前分支派发且不创建审批单() {
+            add(TaskStatus.PENDING);
 
-            Task waiting = service.dispatch(TaskId.of(1L));
+            Task claimed = service.dispatch(TaskId.of(1L));
 
-            assertEquals(TaskStatus.BLOCKED, waiting.getStatus());
-            assertTrue(waiting.getBranchName().isEmpty());
-            assertTrue(branches.created.isEmpty(), "审批前绝不能创建分支");
-            assertEquals(0, workers.size(), "挂起等人不是一次执行");
-            assertEquals(1, decisions.all().size());
-            assertTrue(decisions.all().get(0).isPending());
-
-            task.approveBranchCreation();
-            Task started = service.dispatch(TaskId.of(1L));
-
-            assertEquals(TaskStatus.RUNNING, started.getStatus());
-            assertEquals(List.of("codex/task-1"), branches.created);
+            assertEquals(TaskStatus.RUNNING, claimed.getStatus());
+            assertEquals("main", claimed.getBranchName().orElseThrow());
+            assertTrue(branches.created.isEmpty());
+            assertTrue(decisions.all().isEmpty());
             assertEquals(1, workers.size());
         }
 

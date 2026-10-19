@@ -56,8 +56,10 @@ class TaskRunTest {
         }
 
         @Test
-        void 分支名不能为空() {
-            assertThrows(DomainException.class, () -> TaskRun.start(TASK, 1, " "));
+        void 没有分支时用空值表示不阻断执行() {
+            TaskRun run = TaskRun.start(TASK, 1, null);
+
+            assertNull(run.getBranchName());
         }
 
         @Test

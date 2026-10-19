@@ -26,7 +26,11 @@ public record ExecReport(String status,
                          String summary,
                          List<String> changedFiles,
                          Decision decision,
-                         List<ReportedBug> bugs) {
+                         List<ReportedBug> bugs,
+                         Branch branch) {
+
+    public record Branch(boolean requested, String name, String reason) {
+    }
 
     /**
      * 上报里的决策块。字段与出参 JSON 一一对应，不在这里做二次包装。
@@ -48,7 +52,16 @@ public record ExecReport(String status,
                                 List<String> changedFiles,
                                 Decision decision,
                                 List<ReportedBug> bugs) {
-        return new ExecReport(status, summary, changedFiles, decision, bugs);
+        return new ExecReport(status, summary, changedFiles, decision, bugs, null);
+    }
+
+    public static ExecReport of(String status,
+                                String summary,
+                                List<String> changedFiles,
+                                Decision decision,
+                                List<ReportedBug> bugs,
+                                Branch branch) {
+        return new ExecReport(status, summary, changedFiles, decision, bugs, branch);
     }
 
     /**
@@ -74,7 +87,7 @@ public record ExecReport(String status,
     private ExecResult result(RunStatus status, Integer exitCode, String threadId,
                               TokenUsage tokens, String rawResult) {
         return new ExecResult(status, exitCode, threadId, tokens, summary, rawResult, true,
-                changedFiles, bugs, null);
+                changedFiles, bugs, null, branchResult());
     }
 
     private ExecResult blocked(Integer exitCode, String threadId, TokenUsage tokens, String rawResult) {
@@ -96,7 +109,12 @@ public record ExecReport(String status,
         ExecDecision parsed = new ExecDecision(level, decision.question(), decision.options(),
                 decision.recommendation(), decision.reversible(), decision.blastRadius());
         return new ExecResult(RunStatus.BLOCKED, exitCode, threadId, tokens, summary, rawResult, true,
-                changedFiles, bugs, parsed);
+                changedFiles, bugs, parsed, branchResult());
+    }
+
+    private ExecResult.BranchIntent branchResult() {
+        return branch == null ? null
+                : new ExecResult.BranchIntent(branch.requested(), branch.name(), branch.reason());
     }
 
     private boolean hasInvalidBug() {

@@ -1,4 +1,4 @@
-import { get, postJson } from '@/api/http'
+import { get, post, postJson } from '@/api/http'
 import type { DirectoryListing, Project, ProjectGitBranch } from '@/types/api'
 import type { DecisionLevel } from '@/types/task'
 
@@ -19,6 +19,10 @@ export const listProjects = () => get<Project[]>('/projects')
  * 而不是等到第一次派发。失败原因原样透传给用户。
  */
 export const createProject = (input: CreateProjectInput) => postJson<Project>('/projects', input)
+
+/** 重新调用 Codex 只读分析项目；生成过程本身异步进行。 */
+export const regenerateProjectSummary = (id: number) =>
+  post<Project>(`/projects/${id}/summary/regenerate`)
 
 /** 当前分支是工作区运行时状态，只在详情选中项目时查询。 */
 export const getProjectGitBranch = (id: number) =>

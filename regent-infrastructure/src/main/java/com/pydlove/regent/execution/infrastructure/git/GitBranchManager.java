@@ -2,7 +2,6 @@ package com.pydlove.regent.execution.infrastructure.git;
 
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.port.BranchManager;
-import com.pydlove.regent.execution.domain.port.BranchPlan;
 import com.pydlove.regent.shared.domain.DomainException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,18 +12,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Git 分支适配器 —— 「绝不直接改主干」的执行者。
+ * Git 分支适配器。
  *
- * <p>任务开跑前先切一条 {@code codex/task-N}，一切改动都落在那里。人在地板上看着的时候，
- * 这条纪律是「AI 会不会直接改坏主干」的唯一答案，所以它宁可失败也不将就：
- * 目录不是 Git 仓库、切分支失败、名下有未完成的 rebase —— 一律拒绝派发，而不是硬着头皮在
- * 当前分支上跑。
+ * <p>项目根目录可以不是 Git 仓库，也可以是多个 Git 仓库的父目录。只有根目录本身是有效
+ * Git 工作区且 {@code HEAD} 能解析出提交时才记录/切换分支；其他情况返回空并让任务在目录
+ * 本身执行，不能因为「没有分支」拒绝派发。
  *
- * <p>{@code enabled=false} 时返回<b>当前分支名</b>而不是编一个。这是刻意的：
- * 关掉隔离意味着「就在这条分支上跑」，那就如实记下是哪条分支，任务详情里才不会骗人。
+ * <p>{@code enabled=false} 时仍读取并记录当前分支，但不创建或切换分支。
  */
 public class GitBranchManager implements BranchManager {
 
@@ -38,59 +36,80 @@ public class GitBranchManager implements BranchManager {
     }
 
     @Override
-    public BranchPlan plan(String projectPath, TaskId taskId) {
-        Path workTree = requireWorkTree(projectPath);
-        if (!enabled) {
-            return new BranchPlan(currentBranch(workTree), false);
-        }
-        String branch = "codex/task-" + taskId.value();
-        return new BranchPlan(branch, !branchExists(workTree, branch));
+    public Optional<String> currentBranch(String projectPath) {
+        return repository(projectPath).flatMap(this::currentBranch);
     }
 
     @Override
-    public String createFor(String projectPath, TaskId taskId) {
-        Path workTree = requireWorkTree(projectPath);
+    public Optional<String> createRequestedFeature(String projectPath, TaskId taskId, String requestedName) {
+        Optional<Path> repository = repository(projectPath);
+        if (repository.isEmpty()) {
+            log.info("项目目录 {} 不是可用的 Git 仓库，忽略任务 {} 的分支请求", projectPath, taskId);
+            return Optional.empty();
+        }
+        Path workTree = repository.get();
         if (!enabled) {
-            log.info("分支隔离已关闭，任务 {} 将在当前分支上执行", taskId);
             return currentBranch(workTree);
         }
-        String branch = "codex/task-" + taskId.value();
-        if (branchExists(workTree, branch)) {
-            // 重试、重新派发都会走到这里：分支还在，切回去接着用，而不是把上一轮的改动丢掉重开
-            git(workTree, "checkout", branch);
-        } else {
-            git(workTree, "checkout", "-b", branch);
+        String name = requestedName == null || requestedName.isBlank()
+                ? "feature/task-" + taskId.value()
+                : requestedName.trim();
+        if (!name.startsWith("feature/")) {
+            name = "feature/" + name;
         }
-        log.info("任务 {} 已在分支 {} 上执行", taskId, branch);
-        return branch;
+        if (!name.matches("[A-Za-z0-9._/-]+") || name.contains("..")
+                || name.startsWith("/") || name.endsWith("/")) {
+            throw new DomainException("AI 建议的分支名不合法：" + requestedName);
+        }
+        if (branchExists(workTree, name)) {
+            git(workTree, "checkout", name);
+        } else {
+            git(workTree, "checkout", "-b", name);
+        }
+        return Optional.of(name);
     }
 
     @Override
     public void switchTo(String projectPath, String branchName) {
-        if (!enabled) {
+        if (!enabled || branchName == null || branchName.isBlank()) {
             return;
         }
-        Path workTree = requireWorkTree(projectPath);
-        if (branchName.equals(currentBranch(workTree))) {
+        Optional<Path> repository = repository(projectPath);
+        if (repository.isEmpty()) {
+            log.info("项目目录 {} 没有可用的 Git 分支，跳过切换 {}", projectPath, branchName);
+            return;
+        }
+        Path workTree = repository.get();
+        if (branchName.equals(currentBranch(workTree).orElse(null))) {
+            return;
+        }
+        if (!branchExists(workTree, branchName)) {
+            log.warn("任务记录的分支 {} 已不存在，继续在项目目录当前状态执行", branchName);
             return;
         }
         git(workTree, "checkout", branchName);
     }
 
-    private Path requireWorkTree(String projectPath) {
+    private Optional<Path> repository(String projectPath) {
         Path directory = Path.of(projectPath);
         if (!Files.isDirectory(directory)) {
             throw new DomainException("项目目录不存在：" + projectPath);
         }
-        String inside = gitOutput(directory, "rev-parse", "--is-inside-work-tree").strip();
-        if (!"true".equals(inside)) {
-            throw new DomainException("项目目录不是 Git 仓库，无法建立独立分支：" + projectPath);
+        ProcessResult inside = run(directory, "rev-parse", "--is-inside-work-tree");
+        if (inside.exitCode() != 0 || !"true".equals(inside.output().strip())) {
+            return Optional.empty();
         }
-        return directory;
+        ProcessResult head = run(directory, "rev-parse", "--verify", "--quiet", "HEAD");
+        return head.exitCode() == 0 ? Optional.of(directory) : Optional.empty();
     }
 
-    private String currentBranch(Path workTree) {
-        return gitOutput(workTree, "rev-parse", "--abbrev-ref", "HEAD").strip();
+    private Optional<String> currentBranch(Path workTree) {
+        ProcessResult result = run(workTree, "symbolic-ref", "--short", "-q", "HEAD");
+        if (result.exitCode() != 0) {
+            return Optional.empty();
+        }
+        String branch = result.output().strip();
+        return branch.isEmpty() ? Optional.empty() : Optional.of(branch);
     }
 
     private boolean branchExists(Path workTree, String branch) {
@@ -104,15 +123,6 @@ public class GitBranchManager implements BranchManager {
             throw new DomainException("git " + String.join(" ", args) + " 失败（退出码 " + result.exitCode()
                     + "）：" + firstLine(result.output()));
         }
-    }
-
-    private String gitOutput(Path workTree, String... args) {
-        ProcessResult result = run(workTree, args);
-        if (result.exitCode() != 0) {
-            throw new DomainException("git " + String.join(" ", args) + " 失败（退出码 " + result.exitCode()
-                    + "）：" + firstLine(result.output()));
-        }
-        return result.output();
     }
 
     private ProcessResult run(Path workTree, String... args) {

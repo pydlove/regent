@@ -116,6 +116,18 @@ regent:
       interval-ms: 15000
       initial-delay-ms: 20000
       batch-size: 10
+  deployment:
+    # 远程 SSH 命令。部署脚本通过 stdin 传给远端 bash -s，不先上传到服务器。
+    ssh-command: ${REGENT_SSH_COMMAND:ssh}
+    # 单次部署的墙钟上限。超时后只终止本机 ssh 进程，远端脚本是否继续取决于远端信号处理。
+    timeout: ${REGENT_DEPLOY_TIMEOUT:PT10M}
+    workers: ${REGENT_DEPLOY_WORKERS:2}
+    max-log-chars: ${REGENT_DEPLOY_MAX_LOG_CHARS:1048576}
+  project:
+    summary:
+      # 项目注册后异步分析工作区。独立于任务执行池，默认一次只生成一个，避免同时烧多份 token。
+      workers: ${REGENT_PROJECT_SUMMARY_WORKERS:1}
+      timeout: ${REGENT_PROJECT_SUMMARY_TIMEOUT:PT10M}
   agent:
     # 外部执行者（codex 桌面版、别的 CLI、别的模型工具）走 /api/agent/* 认领任务。
     # 契约全文：GET /api/agent/contract.md。要让它独占派发，把上面 dispatch.enabled 关掉 ——
@@ -136,6 +148,14 @@ regent:
     timeout: ${REGENT_TEST_TIMEOUT:PT10M}
     max-output-bytes: ${REGENT_TEST_MAX_OUTPUT_BYTES:262144}
     workers: ${REGENT_TEST_WORKERS:2}
+  speech:
+    # 新建任务弹框的语音转写。录音由浏览器采集，停止后上传到本机 Whisper 离线处理。
+    whisper-command: ${REGENT_WHISPER_COMMAND:whisper}
+    model: ${REGENT_WHISPER_MODEL:base}
+    timeout: ${REGENT_WHISPER_TIMEOUT:PT2M}
+    max-bytes: ${REGENT_SPEECH_MAX_BYTES:20971520}
+    # 图形化启动时 PATH 可能不含 Homebrew / conda，可在这里补目录。
+    path-prefix: ${REGENT_SPEECH_PATH_PREFIX:}
   relay:
     install:
       # 设置页点击安装时调用的远程部署脚本。脚本必须能访问项目构建产物。

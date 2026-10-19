@@ -29,7 +29,7 @@ test('分类与关键词同时生效', () => {
 
   assert.deepEqual(
     result.map((topic) => topic.id),
-    ['environment-entries'],
+    ['environment-entries', 'deployment-setup'],
   )
 })
 
@@ -57,6 +57,27 @@ test('语音输入说明可按麦克风与 HTTPS 检索', () => {
   )
   assert.ok(
     filterHelpTopics(HELP_TOPICS, 'HTTPS').some((topic) => topic.id === 'voice-input'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, 'Whisper').some((topic) => topic.id === 'voice-input'),
+  )
+})
+
+test('分支执行说明可按 Git 与隔离分支检索', () => {
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, 'Git').some((topic) => topic.id === 'task-branch'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, 'feature/').some((topic) => topic.id === 'task-branch'),
+  )
+})
+
+test('任务草稿说明可按自动保存与恢复检索', () => {
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '自动保存').some((topic) => topic.id === 'task-draft'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '恢复').some((topic) => topic.id === 'task-draft'),
   )
 })
 

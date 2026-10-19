@@ -17,6 +17,12 @@ npm run build       # 产出 dist/
 npm run preview     # 预览 dist/
 ```
 
+需要连临时后端或别的端口时，用 `REGENT_API_TARGET` 覆盖 `/api` 代理目标：
+
+```bash
+REGENT_API_TARGET=http://127.0.0.1:8788 npm run dev
+```
+
 ## 目录
 
 ```

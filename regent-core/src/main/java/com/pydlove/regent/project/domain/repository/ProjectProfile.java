@@ -1,9 +1,11 @@
 package com.pydlove.regent.project.domain.repository;
 
 import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.project.domain.model.ProjectSummaryStatus;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 
+import java.time.Instant;
 import java.util.Objects;
 
 /**
@@ -20,6 +22,10 @@ import java.util.Objects;
  * @param path                 工作区绝对路径
  * @param defaultDecisionLevel 项目级自动决策阈值；生效等级高于它就必须由人拍板
  * @param enabled              暂停开关；关掉之后不再派发新任务
+ * @param summaryStatus        Codex 项目资料的生成状态
+ * @param summary              Codex 生成的项目资料；尚未生成或首次生成失败时为空
+ * @param summaryError         最近一次生成失败原因
+ * @param summaryGeneratedAt   最近一次成功生成时间
  */
 public record ProjectProfile(
         ProjectId id,
@@ -27,7 +33,18 @@ public record ProjectProfile(
         String name,
         String path,
         DecisionLevel defaultDecisionLevel,
-        boolean enabled) {
+        boolean enabled,
+        ProjectSummaryStatus summaryStatus,
+        String summary,
+        String summaryError,
+        Instant summaryGeneratedAt) {
+
+    /** 兼容只关心执行所需字段的调用方。 */
+    public ProjectProfile(ProjectId id, String code, String name, String path,
+                          DecisionLevel defaultDecisionLevel, boolean enabled) {
+        this(id, code, name, path, defaultDecisionLevel, enabled,
+                ProjectSummaryStatus.NOT_GENERATED, null, null, null);
+    }
 
     public ProjectProfile {
         Objects.requireNonNull(id, "项目 ID 不能为空");
@@ -38,6 +55,9 @@ public record ProjectProfile(
             throw new DomainException("项目路径不能为空：" + code);
         }
         Objects.requireNonNull(defaultDecisionLevel, "项目自动决策阈值不能为空");
+        summaryStatus = summaryStatus == null ? ProjectSummaryStatus.NOT_GENERATED : summaryStatus;
+        summary = summary == null || summary.isBlank() ? null : summary;
+        summaryError = summaryError == null || summaryError.isBlank() ? null : summaryError;
     }
 
     /** 派发前的最后一道闸：项目被暂停时，任何新任务都不许起跑。 */

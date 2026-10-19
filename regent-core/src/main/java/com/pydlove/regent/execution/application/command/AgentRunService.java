@@ -371,9 +371,15 @@ public class AgentRunService {
                 null,
                 null,
                 null,
-                done ? "任务已完成。改动留在分支 " + run.getBranchName() + " 上，等人工验收。"
+                done ? completionMessage(run)
                         : "这次尝试判失败：" + (result.summary() == null ? "（执行器没有给出摘要）" : result.summary()),
                 MAX_DECISION_ROUNDS);
+    }
+
+    private static String completionMessage(TaskRun run) {
+        return run.getBranchName() == null
+                ? "任务已完成。改动留在项目目录中，等人工验收。"
+                : "任务已完成。改动留在分支 " + run.getBranchName() + " 上，等人工验收。";
     }
 
     private AgentReportOutcome settleAndRelease(TaskRun run, ExecResult result, int seq) {
@@ -416,8 +422,7 @@ public class AgentRunService {
                 return Optional.empty();
             }
         } else if (status == TaskStatus.RUNNING) {
-            branchManager.switchTo(project.path(), task.getBranchName().orElseThrow(
-                    () -> new DomainException("任务没有分支名，无法续跑：" + task.getId())));
+            task.getBranchName().ifPresent(branch -> branchManager.switchTo(project.path(), branch));
             task.beginContinuation();
         } else {
             throw new DomainException("任务当前状态不可认领：" + task.getId() + "，状态：" + status);
@@ -427,8 +432,7 @@ public class AgentRunService {
         }
         taskRepository.save(task);
 
-        String branch = task.getBranchName().orElseThrow(
-                () -> new DomainException("任务没有分支名，无法执行：" + task.getId()));
+        String branch = task.getBranchName().orElse(null);
         TaskRun run = TaskRun.start(task.getId(), task.getAttemptCount(), branch);
         run.claimBy(agentName, now.plus(lease));
         taskRunRepository.save(run);

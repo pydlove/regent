@@ -12,7 +12,8 @@ import java.util.concurrent.TimeUnit;
 /**
  * 通过 Git CLI 读取项目工作区当前分支。
  *
- * <p>{@code symbolic-ref} 在非 Git 仓库和游离 HEAD 上都返回非零，这两种情况都按“没有分支”处理。
+ * <p>先确认 {@code HEAD} 能解析出提交，再读取分支名。非 Git 目录、多仓库父目录、空仓库
+ * 和游离 HEAD 都按“没有分支”处理。
  */
 public class GitProjectGitBranchReader implements ProjectGitBranchReader {
 
@@ -20,6 +21,10 @@ public class GitProjectGitBranchReader implements ProjectGitBranchReader {
 
     @Override
     public Optional<String> currentBranch(String projectPath) {
+        ProcessResult head = run(projectPath, "rev-parse", "--verify", "--quiet", "HEAD");
+        if (head.exitCode() != 0) {
+            return Optional.empty();
+        }
         ProcessResult result = run(projectPath, "symbolic-ref", "--short", "-q", "HEAD");
         if (result.exitCode() != 0) {
             return Optional.empty();

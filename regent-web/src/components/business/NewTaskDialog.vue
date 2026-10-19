@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ImagePlus, Mic, Plus, Square, TriangleAlert, X } from '@lucide/vue'
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { ImagePlus, Mic, Plus, Square, Trash2, TriangleAlert, X } from '@lucide/vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 
 import { ACCEPTED_IMAGE_TYPES, MAX_IMAGE_BYTES, uploadTaskAttachment } from '@/api/attachments'
 import { ApiError } from '@/api/http'
@@ -17,6 +17,7 @@ import Progress from '@/components/ui/progress/Progress.vue'
 import Select from '@/components/ui/select/Select.vue'
 import { useProjectDialog } from '@/composables/useProjectDialog'
 import { useSpeechToChinese, type SpeechLanguage } from '@/composables/useSpeechToChinese'
+import { useTaskDraftAutosave } from '@/composables/useTaskDraftAutosave'
 import { useToast } from '@/composables/useToast'
 import { useTaskStore } from '@/stores/useTaskStore'
 import type { PluginSummary } from '@/types/api'
@@ -47,6 +48,9 @@ import { MAX_TASK_PLUGINS } from '@/utils/pluginCatalog'
  * 图片的时序：先建任务、关闭弹框，再在后台逐张上传。附件接口挂在任务下
  * （`POST /api/tasks/{id}/attachments`），所以「贴了图但任务没建出来」这种半成品状态
  * 在库里不可能出现。上传结果通过 toast 汇报，不让人守着弹框等完整个队列。
+ *
+ * 表单正文与选项走服务端草稿，关闭弹框后下次还会回到原处；图片仍只在本次弹框中保留，
+ * 因为附件必须挂在已创建的任务下。
  */
 const emit = defineEmits<{
   created: [{ id: number; title: string }]
@@ -76,11 +80,15 @@ const loadingProjects = ref(false)
 const pickedProjectId = ref<number | null>(null)
 
 const showProjectSelect = computed(
-  () => projects.value.length > 1 && store.projectId === null,
+  () =>
+    projects.value.length > 1 &&
+    (store.projectId === null ||
+      (pickedProjectId.value !== null && pickedProjectId.value !== store.projectId)),
 )
 
 const projectId = computed<number | null>(() => {
   if (showProjectSelect.value) return pickedProjectId.value
+  if (pickedProjectId.value !== null) return pickedProjectId.value
   if (store.projectId !== null) return store.projectId
   if (projects.value.length === 1) return projects.value[0].id
   return null
@@ -90,9 +98,12 @@ const fixedProject = computed(
   () => projects.value.find((project) => project.id === projectId.value) ?? null,
 )
 
-const projectHint = computed(() =>
-  store.projectId !== null ? '跟随工具栏的项目筛选' : '当前只有一个项目，已自动选上',
-)
+const projectHint = computed(() => {
+  if (store.projectId !== null && projectId.value !== store.projectId) {
+    return '已恢复草稿中的项目'
+  }
+  return store.projectId !== null ? '跟随工具栏的项目筛选' : '当前只有一个项目，已自动选上'
+})
 
 const projectItems = computed(() =>
   projects.value.map((project) => ({
@@ -121,18 +132,23 @@ const speechLanguageItems = [
 ]
 const speech = useSpeechToChinese()
 const canUseSpeech = computed(
-  () => speech.supported && speech.secureContext && phase.value === 'editing',
+  () =>
+    speech.supported &&
+    speech.secureContext &&
+    phase.value === 'editing' &&
+    autosaveReady.value,
 )
 const speechStatus = computed(() => {
   if (!speech.supported) return '当前浏览器不支持语音输入'
   if (!speech.secureContext) return '语音输入需要 HTTPS，或在本机 localhost 使用'
   if (speech.error.value) return speech.error.value
-  if (speech.translating.value) return '正在翻译成中文…'
-  if (speech.listening.value) {
-    return speech.interim.value ? `正在聆听：${speech.interim.value}` : '正在聆听，说完后点击停止'
-  }
+  if (speech.listening.value && speech.translating.value) return '正在录音并实时转写…'
+  if (speech.translating.value) return '正在用本机 Whisper 转写…'
+  if (speech.listening.value) return '正在录音，说完后点击停止'
   if (speech.translationFallback.value) return '翻译服务不可用，已保留识别原文'
-  return speechLanguage.value === 'zh-CN' ? '中文语音直接写入指令' : '识别后自动翻译成中文'
+  return speechLanguage.value === 'zh-CN'
+    ? '录音停止后由本机 Whisper 写入指令'
+    : '录音后转写，并尝试翻译成中文'
 })
 const plugins = ref<PluginSummary[]>([])
 const selectedPluginIds = ref<number[]>([])
@@ -143,6 +159,17 @@ const pluginsError = ref<string | null>(null)
 type Phase = 'editing' | 'creating'
 const phase = ref<Phase>('editing')
 const error = ref<string | null>(null)
+const autosaveReady = ref(false)
+let initializeSequence = 0
+
+const draftAutosave = useTaskDraftAutosave()
+const {
+  draft: savedDraft,
+  loading: loadingDraft,
+  state: draftState,
+  error: draftError,
+  savedAt: draftSavedAt,
+} = draftAutosave
 
 // —— 待上传的图片 ——
 type PendingImage = {
@@ -163,7 +190,14 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const pendingBytes = computed(() => pending.value.reduce((sum, item) => sum + item.file.size, 0))
 
 const canSubmit = computed(
-  () => phase.value === 'editing' && projectId.value !== null && prompt.value.trim().length > 0,
+  () =>
+    phase.value === 'editing' &&
+    projectId.value !== null &&
+    prompt.value.trim().length > 0 &&
+    !loadingDraft.value &&
+    autosaveReady.value &&
+    !speech.listening.value &&
+    !speech.translating.value,
 )
 
 function messageOf(e: unknown): string {
@@ -187,9 +221,6 @@ const loadProjects = async () => {
   loadingProjects.value = true
   try {
     await store.loadProjects()
-    // 打开时就把默认项目定下来：工具栏选着的优先，只有一个项目就直接用它
-    pickedProjectId.value =
-      store.projectId ?? (projects.value.length === 1 ? projects.value[0].id : null)
   } catch (e) {
     error.value = messageOf(e)
   } finally {
@@ -211,12 +242,46 @@ const loadPlugins = async () => {
   }
 }
 
-// 每次打开都从头开始：上次填了一半的指令留在框里，下次打开容易被当成占位文字直接提交
+const draftFields = () => ({
+  projectId: projectId.value,
+  prompt: prompt.value,
+  priority: Number(priority.value) || 0,
+  pluginIds: [...selectedPluginIds.value],
+})
+
+const defaultProjectId = () =>
+  store.projectId ?? (projects.value.length === 1 ? projects.value[0].id : null)
+
+const initializeDraft = async () => {
+  const sequence = ++initializeSequence
+  autosaveReady.value = false
+  await Promise.all([loadProjects(), loadPlugins(), draftAutosave.load()])
+  if (sequence !== initializeSequence || !open.value) return
+  const restored = savedDraft.value
+  prompt.value = restored?.prompt ?? ''
+  priority.value = String(restored?.priority ?? 0)
+  selectedPluginIds.value = restored?.pluginIds ?? []
+  const restoredProject = restored?.projectId ?? null
+  pickedProjectId.value =
+    restoredProject !== null && projects.value.some((project) => project.id === restoredProject)
+      ? restoredProject
+      : defaultProjectId()
+  await nextTick()
+  if (sequence === initializeSequence && open.value) autosaveReady.value = true
+}
+
+// 每次打开恢复当前草稿；空表单不会因为默认项目或初始化赋值而生成一份空草稿。
 watch(open, (value) => {
   if (!value) {
+    initializeSequence++
     speech.abort()
+    if (phase.value === 'editing' && autosaveReady.value) {
+      void draftAutosave.flush(draftFields())
+    }
+    autosaveReady.value = false
     return
   }
+  draftAutosave.resume()
   speech.reset()
   prompt.value = ''
   priority.value = '0'
@@ -227,9 +292,16 @@ watch(open, (value) => {
   pluginsError.value = null
   selectedPluginIds.value = []
   releasePreviews()
-  void loadProjects()
-  void loadPlugins()
+  void initializeDraft()
 })
+
+watch(
+  [() => projectId.value, prompt, priority, () => selectedPluginIds.value.join(',')],
+  () => {
+    if (!open.value || !autosaveReady.value || phase.value !== 'editing') return
+    draftAutosave.schedule(draftFields())
+  },
+)
 
 watch(speech.translationFallback, (fallback) => {
   if (fallback) {
@@ -240,16 +312,27 @@ watch(speech.translationFallback, (fallback) => {
   }
 })
 
+const appendSegment = (base: string, text: string) => {
+  const current = base.trimEnd()
+  if (!current) return text
+  const needsSpace = /[A-Za-z0-9]$/.test(current) && /^[A-Za-z0-9]/.test(text)
+  return `${current}${needsSpace ? ' ' : ''}${text}`
+}
+
+const displayedPrompt = computed({
+  get: () => {
+    const interim = speech.interim.value.trim()
+    return interim ? appendSegment(prompt.value, interim) : prompt.value
+  },
+  set: (value: string) => {
+    prompt.value = value
+  },
+})
+
 const appendSpeechText = (text: string) => {
   const normalized = text.trim()
   if (!normalized) return
-  const current = prompt.value.trimEnd()
-  if (!current) {
-    prompt.value = normalized
-    return
-  }
-  const needsSpace = /[A-Za-z0-9]$/.test(current) && /^[A-Za-z0-9]/.test(normalized)
-  prompt.value = `${current}${needsSpace ? ' ' : ''}${normalized}`
+  prompt.value = appendSegment(prompt.value, normalized)
 }
 
 const toggleSpeech = () => {
@@ -360,6 +443,44 @@ const close = () => {
   releasePreviews()
 }
 
+const clearDraft = async () => {
+  const sequence = initializeSequence
+  try {
+    await draftAutosave.remove()
+    if (sequence !== initializeSequence || !open.value) {
+      draftAutosave.resume()
+      return
+    }
+    autosaveReady.value = false
+    prompt.value = ''
+    priority.value = '0'
+    selectedPluginIds.value = []
+    pickedProjectId.value = defaultProjectId()
+    await nextTick()
+    autosaveReady.value = true
+    draftAutosave.resume()
+    toast.show('草稿已清除')
+  } catch (e) {
+    draftAutosave.resume()
+    toast.warning('草稿清除失败', messageOf(e))
+  }
+}
+
+const draftStatusText = computed(() => {
+  if (!autosaveReady.value || loadingDraft.value) return '正在恢复草稿…'
+  if (draftState.value === 'pending') return '草稿等待保存…'
+  if (draftState.value === 'saving') return '草稿保存中…'
+  if (draftState.value === 'saved' && draftSavedAt.value) {
+    const time = new Date(draftSavedAt.value).toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    return `草稿已保存 ${time}`
+  }
+  if (draftState.value === 'error') return '草稿自动保存失败'
+  return ''
+})
+
 const announceUploadResult = async (
   taskId: number,
   images: PendingImage[],
@@ -380,6 +501,7 @@ const submit = async () => {
   if (target === null) return
   error.value = null
   phase.value = 'creating'
+  draftAutosave.suspend()
   const images = [...pending.value]
   try {
     const task = await createTask({
@@ -394,6 +516,11 @@ const submit = async () => {
         toast.warning(`#${task.id} 插件绑定失败`, messageOf(e))
       }
     }
+    try {
+      await draftAutosave.remove()
+    } catch (e) {
+      toast.warning('任务已创建，但草稿未清除', messageOf(e))
+    }
     emit('created', { id: task.id, title: task.title })
     close()
     // 弹框关闭后继续用提交时的文件快照上传，不能被下一次打开时的清空逻辑截断
@@ -401,10 +528,16 @@ const submit = async () => {
   } catch (e) {
     error.value = messageOf(e)
     phase.value = 'editing'
+    draftAutosave.resume()
   }
 }
 
-onUnmounted(releasePreviews)
+onUnmounted(() => {
+  if (open.value && phase.value === 'editing' && autosaveReady.value) {
+    void draftAutosave.flush(draftFields())
+  }
+  releasePreviews()
+})
 </script>
 
 <template>
@@ -432,8 +565,15 @@ onUnmounted(releasePreviews)
           v-model="pickedProjectValue"
           :items="projectItems"
           placeholder="选择任务挂在哪个项目下"
+          :disabled="!autosaveReady"
           block
         />
+        <p
+          v-if="store.projectId !== null && projectId !== store.projectId"
+          class="mt-1 text-caption text-label-tertiary"
+        >
+          {{ projectHint }}
+        </p>
       </DialogField>
       <DialogField v-else-if="fixedProject" label="项目" :hint="projectHint">
         <div class="flex h-control items-center gap-1.5">
@@ -467,9 +607,9 @@ onUnmounted(releasePreviews)
             <Icon :as="speech.listening.value ? Square : Mic" size="inline" />
             {{
               speech.listening.value
-                ? '停止听写'
+                ? '停止录音'
                 : speech.translating.value
-                  ? '翻译中…'
+                  ? '转写中…'
                   : '语音输入'
             }}
           </Button>
@@ -491,9 +631,14 @@ onUnmounted(releasePreviews)
           </span>
         </div>
         <Textarea
-          v-model="prompt"
+          v-model="displayedPrompt"
           :rows="10"
-          :disabled="phase !== 'editing'"
+          :disabled="
+            phase !== 'editing' ||
+            !autosaveReady ||
+            speech.listening.value ||
+            speech.translating.value
+          "
           placeholder="交给 codex 的完整指令：要改哪里、验收标准是什么。截图可以直接按 ⌘V 贴进来"
           @paste="onPaste"
         />
@@ -542,7 +687,7 @@ onUnmounted(releasePreviews)
           <button
             type="button"
             class="flex size-20 flex-col items-center justify-center gap-1 rounded-panel border border-dashed border-separator text-label-secondary transition-colors duration-100 ease-apple hover:border-accent/60 hover:text-accent focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/35"
-            :disabled="phase !== 'editing'"
+            :disabled="phase !== 'editing' || !autosaveReady"
             @click="fileInput?.click()"
           >
             <Icon :as="ImagePlus" size="large" />
@@ -583,7 +728,7 @@ onUnmounted(releasePreviews)
           v-else
           v-model="selectedPluginIds"
           :plugins="plugins"
-          :disabled="phase !== 'editing'"
+          :disabled="phase !== 'editing' || !autosaveReady"
           :max="MAX_TASK_PLUGINS"
         />
       </DialogField>
@@ -592,14 +737,36 @@ onUnmounted(releasePreviews)
         <!-- 宽度包在外面：Input 的变体里有 w-full，直接给它挂 w-20 谁赢取决于 Tailwind
              产物里的顺序（实测 w-full 赢，于是优先级被拉成一整行） -->
         <div class="w-20">
-          <Input v-model="priority" type="number" :disabled="phase !== 'editing'" />
+          <Input
+            v-model="priority"
+            type="number"
+            :disabled="phase !== 'editing' || !autosaveReady"
+          />
         </div>
       </DialogField>
 
       <p v-if="error" class="text-caption text-danger">{{ error }}</p>
+      <p
+        v-if="draftStatusText"
+        class="text-caption"
+        :class="draftState === 'error' ? 'text-danger' : 'text-label-tertiary'"
+        :title="draftError ?? undefined"
+        role="status"
+        aria-live="polite"
+      >
+        {{ draftStatusText }}
+      </p>
     </div>
 
     <template #footer>
+      <Button
+        v-if="savedDraft && phase === 'editing'"
+        variant="danger"
+        :disabled="!autosaveReady"
+        @click="clearDraft"
+      >
+        <Icon :as="Trash2" size="inline" />清除草稿
+      </Button>
       <Button v-if="phase === 'editing'" @click="close">取消</Button>
       <Button v-if="phase === 'editing'" variant="primary" :disabled="!canSubmit" @click="submit">
         创建任务

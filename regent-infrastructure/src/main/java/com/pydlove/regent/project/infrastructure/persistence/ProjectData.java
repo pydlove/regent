@@ -20,6 +20,10 @@ public class ProjectData {
     private String techStack;
     private String verifyMethod;
     private String defaultDecisionLevel;
+    private String summaryStatus;
+    private String summary;
+    private String summaryError;
+    private LocalDateTime summaryGeneratedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

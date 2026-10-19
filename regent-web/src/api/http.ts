@@ -19,6 +19,34 @@ export class ApiError extends Error {
   }
 }
 
+const DEFAULT_TIMEOUT_MS = 15_000
+const UPLOAD_TIMEOUT_MS = 60_000
+
+/**
+ * 所有 JSON 请求都要有明确的墙钟上限。
+ *
+ * <p>浏览器默认不会给 fetch 设超时；代理断开、后端重启或连接半开时，请求可能一直挂着，
+ * 页面就会永远停在骨架屏。超时以后转成 ApiError，调用方才有机会展示失败态和重试入口。
+ */
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController()
+  const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new ApiError(0, 'TIMEOUT', `请求超时（${Math.round(timeoutMs / 1000)} 秒），请稍后重试`)
+    }
+    throw error
+  } finally {
+    globalThis.clearTimeout(timer)
+  }
+}
+
 /*
  * 公网中继用这个自定义头拦跨站表单写请求。
  * 同源请求不会触发预检；跨站表单又无法设置自定义头，因此中继可以把它当作轻量 CSRF 标记。
@@ -62,7 +90,7 @@ function withQuery(path: string, params?: Record<string, QueryValue>): string {
 }
 
 export async function get<T>(path: string, params?: Record<string, QueryValue>): Promise<T> {
-  const response = await fetch(withQuery(path, params), {
+  const response = await fetchWithTimeout(withQuery(path, params), {
     headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/json' },
   })
   if (!response.ok) await throwApiError(path, response)
@@ -70,7 +98,7 @@ export async function get<T>(path: string, params?: Record<string, QueryValue>):
 }
 
 export async function post<T>(path: string): Promise<T> {
-  const response = await fetch(`/api${path}`, {
+  const response = await fetchWithTimeout(`/api${path}`, {
     method: 'POST',
     headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/json' },
   })
@@ -80,7 +108,7 @@ export async function post<T>(path: string): Promise<T> {
 
 /** 无响应体的 POST。用于登出这类只改变 Cookie、没有业务数据返回的命令。 */
 export async function postNoContent(path: string): Promise<void> {
-  const response = await fetch(`/api${path}`, {
+  const response = await fetchWithTimeout(`/api${path}`, {
     method: 'POST',
     headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/json' },
   })
@@ -95,7 +123,7 @@ export async function postNoContent(path: string): Promise<void> {
  * （后者会覆盖默认值），合成一个参数后调用点很容易在两者之间飘。
  */
 export async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`/api${path}`, {
+  const response = await fetchWithTimeout(`/api${path}`, {
     method: 'POST',
     headers: {
       ...RELAY_REQUEST_HEADER,
@@ -108,9 +136,28 @@ export async function postJson<T>(path: string, body: unknown): Promise<T> {
   return (await response.json()) as T
 }
 
+/** 长耗时 JSON POST：一键安装这类操作需要比普通请求更长的墙钟上限。 */
+export async function postJsonWithTimeout<T>(
+  path: string,
+  body: unknown,
+  timeoutMs: number,
+): Promise<T> {
+  const response = await fetchWithTimeout(`/api${path}`, {
+    method: 'POST',
+    headers: {
+      ...RELAY_REQUEST_HEADER,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body ?? {}),
+  }, timeoutMs)
+  if (!response.ok) await throwApiError(path, response)
+  return (await response.json()) as T
+}
+
 /** 带 JSON 请求体、但成功响应没有响应体的 POST。 */
 export async function postJsonNoContent(path: string, body: unknown): Promise<void> {
-  const response = await fetch(`/api${path}`, {
+  const response = await fetchWithTimeout(`/api${path}`, {
     method: 'POST',
     headers: {
       ...RELAY_REQUEST_HEADER,
@@ -124,21 +171,21 @@ export async function postJsonNoContent(path: string, body: unknown): Promise<vo
 
 /** Multipart 上传。Content-Type 必须交给浏览器生成，才能带上 boundary。 */
 export async function postForm<T>(path: string, body: FormData): Promise<T> {
-  const response = await fetch(`/api${path}`, {
+  const response = await fetchWithTimeout(`/api${path}`, {
     method: 'POST',
     headers: {
       ...RELAY_REQUEST_HEADER,
       Accept: 'application/json',
     },
     body,
-  })
+  }, UPLOAD_TIMEOUT_MS)
   if (!response.ok) await throwApiError(path, response)
   return (await response.json()) as T
 }
 
 /** 带 JSON 请求体的 PUT：用于整体替换一组可编辑字段。 */
 export async function putJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`/api${path}`, {
+  const response = await fetchWithTimeout(`/api${path}`, {
     method: 'PUT',
     headers: {
       ...RELAY_REQUEST_HEADER,
@@ -153,7 +200,7 @@ export async function putJson<T>(path: string, body: unknown): Promise<T> {
 
 /** 无响应体的 DELETE。204 是删除接口的正常返回，不能按 JSON 解析。 */
 export async function deleteRequest(path: string): Promise<void> {
-  const response = await fetch(`/api${path}`, {
+  const response = await fetchWithTimeout(`/api${path}`, {
     method: 'DELETE',
     headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/json' },
   })

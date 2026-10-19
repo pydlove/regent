@@ -99,6 +99,21 @@ class TaskPersistenceIT {
     }
 
     @Test
+    @DisplayName("非 Git 目录派发后分支为空，状态正常进入执行中")
+    void 空分支往返() {
+        Task task = Task.manual(ProjectId.of(PROBE_PROJECT_ID), "IT 空分支任务", "验证空分支", 0);
+        taskRepository.save(task);
+
+        task.dispatch(null);
+        taskRepository.save(task);
+        Task loaded = taskRepository.findById(task.getId()).orElseThrow();
+
+        assertEquals(TaskStatus.RUNNING, loaded.getStatus());
+        assertTrue(loaded.getBranchName().isEmpty());
+        assertEquals(1, loaded.getAttemptCount());
+    }
+
+    @Test
     @DisplayName("分支创建审批状态可以持久化并重建")
     void 分支审批状态往返() {
         Task task = Task.manual(ProjectId.of(PROBE_PROJECT_ID), "IT 分支审批任务", "验证审批状态", 0);

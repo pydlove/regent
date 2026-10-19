@@ -11,6 +11,7 @@ import com.pydlove.regent.project.application.query.DirectoryListing;
 import com.pydlove.regent.project.application.query.DirectoryListingService;
 import com.pydlove.regent.project.domain.model.Project;
 import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.project.domain.model.ProjectSummaryStatus;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.project.domain.repository.ProjectRepository;
@@ -86,6 +87,7 @@ class ProjectRegistrationIT {
         assertEquals(workspace.toString(), profile.path());
         assertEquals(DecisionLevel.L2, profile.defaultDecisionLevel(), "阈值不能在路上被夹成 L1");
         assertTrue(profile.enabled());
+        assertEquals(ProjectSummaryStatus.NOT_GENERATED, profile.summaryStatus());
 
         String techStack = jdbcTemplate.queryForObject(
                 "SELECT tech_stack FROM project WHERE id = ?", String.class, project.getId().value());
@@ -93,6 +95,22 @@ class ProjectRegistrationIT {
 
         List<ProjectProfile> all = projectProfileRepository.findAll();
         assertTrue(all.stream().anyMatch(it -> it.id().equals(project.getId())), "列表接口要能看见它");
+    }
+
+    @Test
+    @DisplayName("项目资料状态、正文、失败原因与生成时间可以从数据库完整往返")
+    void storesProjectSummary(@TempDir Path workspace) {
+        Project project = projectRegistrationService.register(
+                command("it_reg_summary", workspace.toString()));
+
+        project.startSummaryGeneration();
+        project.completeSummary("# IT 项目资料\n\nJava 17 / Maven");
+        projectRepository.update(project);
+
+        ProjectProfile stored = projectProfileRepository.findById(project.getId()).orElseThrow();
+        assertEquals(ProjectSummaryStatus.READY, stored.summaryStatus());
+        assertTrue(stored.summary().contains("IT 项目资料"));
+        assertNotNull(stored.summaryGeneratedAt());
     }
 
     @Test

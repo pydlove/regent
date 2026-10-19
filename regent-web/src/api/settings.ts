@@ -1,10 +1,26 @@
-import { get, postJson, putJson } from '@/api/http'
-import type { ExecutionSettings, RelayInstallResult, RelaySettings } from '@/types/api'
+import { get, postJson, postJsonWithTimeout, putJson } from '@/api/http'
+import type {
+  CodexRuntime,
+  CodexInstallMethod,
+  CodexInstallResult,
+  ExecutionSettings,
+  RelayInstallResult,
+  RelaySettings,
+} from '@/types/api'
 
 export const getExecutionSettings = () => get<ExecutionSettings>('/execution/settings')
 
 export const updateExecutionSettings = (maxConcurrentTasks: number) =>
   putJson<ExecutionSettings>('/execution/settings', { maxConcurrentTasks })
+
+export const checkCodexRuntime = () => get<CodexRuntime>('/execution/codex')
+
+export const installCodex = (method: CodexInstallMethod) =>
+  postJsonWithTimeout<CodexInstallResult>(
+    '/execution/codex/install',
+    { method },
+    11 * 60 * 1000,
+  )
 
 export const getRelaySettings = () => get<RelaySettings>('/settings/relay')
 

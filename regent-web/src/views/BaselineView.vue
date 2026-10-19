@@ -543,14 +543,14 @@ const colorTokens = [
               <DropdownMenuItem>批准并续跑</DropdownMenuItem>
               <DropdownMenuItem>改为 L3 强阻塞</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem disabled>驳回（需填写理由）</DropdownMenuItem>
+              <DropdownMenuItem disabled>驳回（理由可选）</DropdownMenuItem>
             </DropdownMenu>
 
             <Dialog
               v-model:open="dialogOpen"
               layout="form"
               title="驳回并挂起"
-              description="理由会写进决策留痕，AI 下次执行时会读到。"
+              description="任务会终止；理由可选，填写后会写入决策留痕。"
             >
               <template #trigger>
                 <Button variant="primary">审批对话框（表单）</Button>
@@ -560,7 +560,6 @@ const colorTokens = [
                 <Button @click="dialogOpen = false">取消</Button>
                 <Button
                   variant="primary"
-                  :disabled="rejectReason.length < 6"
                   @click="dialogOpen = false"
                 >
                   确认驳回
@@ -634,23 +633,20 @@ const colorTokens = [
             </template>
           </DialogPanel>
 
-          <!-- form：驳回必须给理由。L2/L3 的审批走这一款 -->
+          <!-- form：驳回可补充理由。L2/L3 的审批走这一款 -->
           <DialogPanel layout="form">
             <template #header>
               <h3 :class="dialogTitleClass">驳回并挂起</h3>
-              <p :class="dialogDescriptionClass">理由会写进决策留痕，AI 下次执行时会读到。</p>
+              <p :class="dialogDescriptionClass">任务会终止；理由可选，填写后会写入决策留痕。</p>
             </template>
             <Textarea
               v-model="rejectReason"
               :rows="3"
               placeholder="这个改动会影响线上数据，需人工确认"
             />
-            <p v-if="rejectReason.length < 6" class="mt-1.5 text-caption text-danger">
-              至少 6 个字，否则 AI 无法据此调整
-            </p>
             <template #footer>
               <Button>取消</Button>
-              <Button variant="primary" :disabled="rejectReason.length < 6">确认驳回</Button>
+              <Button variant="primary">确认驳回</Button>
             </template>
           </DialogPanel>
 
@@ -669,7 +665,7 @@ const colorTokens = [
         </div>
 
         <p class="mt-4 text-caption text-label-tertiary">
-          宽度四档：alert 340px（问「要不要做」），form 384px（短表单，如「填个理由」），
+          宽度四档：alert 340px（问「要不要做」），form 384px（短表单，如「补充驳回理由」），
           form + large 640px（长表单：要写整段指令、要贴图、还要选项目），log 640px（放日志）。
           标题与说明一律左对齐、图标在左上角，这是 NSAlert 的样子，不是 iOS 的居中弹窗。
           弹层、下拉菜单、提示层靠 reka-ui 的定位渲染，没法静态平铺，只能点开看。
@@ -682,7 +678,7 @@ const colorTokens = [
       >
         <div class="flex flex-wrap items-center gap-2">
           <Button @click="toast.success('已批准 #1026', '执行器正从断点续跑')">成功</Button>
-          <Button @click="toast.show('已驳回 #1027', { description: '理由已写入决策留痕' })">
+          <Button @click="toast.show('已驳回 #1027', { description: '决策已留痕' })">
             默认
           </Button>
           <Button @click="toast.warning('日志流尚未接入', '实时推送就绪后这里会打开完整日志')">

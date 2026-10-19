@@ -8,7 +8,6 @@ import java.util.Optional;
  *
  * <p>{@code choice} 与 {@code note} 都允许为空，但含义不同：choice 为空表示「采纳 AI 的建议」
  * （邮件里点一下就该能办成事，不该逼人先选一个选项），note 为空表示没留额外说明。
- * 唯一的例外是驳回 —— 理由必填，见 {@link Decision#reject}。
  */
 public record DecisionOutcome(ResolvedBy by, String choice, String note) {
 

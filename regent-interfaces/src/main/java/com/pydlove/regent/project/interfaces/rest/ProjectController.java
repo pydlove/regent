@@ -1,6 +1,7 @@
 package com.pydlove.regent.project.interfaces.rest;
 
 import com.pydlove.regent.project.application.command.ProjectRegistrationService;
+import com.pydlove.regent.project.application.command.ProjectSummaryGenerationService;
 import com.pydlove.regent.project.application.command.RegisterProjectCommand;
 import com.pydlove.regent.project.application.query.DirectoryListingService;
 import com.pydlove.regent.project.application.query.ProjectGitBranchQueryService;
@@ -37,15 +38,18 @@ public class ProjectController {
     private final ProjectRegistrationService projectRegistrationService;
     private final DirectoryListingService directoryListingService;
     private final ProjectGitBranchQueryService projectGitBranchQueryService;
+    private final ProjectSummaryGenerationService projectSummaryGenerationService;
 
     public ProjectController(ProjectProfileRepository projectProfileRepository,
                              ProjectRegistrationService projectRegistrationService,
                              DirectoryListingService directoryListingService,
-                             ProjectGitBranchQueryService projectGitBranchQueryService) {
+                             ProjectGitBranchQueryService projectGitBranchQueryService,
+                             ProjectSummaryGenerationService projectSummaryGenerationService) {
         this.projectProfileRepository = projectProfileRepository;
         this.projectRegistrationService = projectRegistrationService;
         this.directoryListingService = directoryListingService;
         this.projectGitBranchQueryService = projectGitBranchQueryService;
+        this.projectSummaryGenerationService = projectSummaryGenerationService;
     }
 
     /**
@@ -94,5 +98,14 @@ public class ProjectController {
                 DecisionLevel.parse(request.defaultDecisionLevel())));
         return ProjectResponse.from(projectProfileRepository.findById(project.getId())
                 .orElseThrow(() -> new EntityNotFoundException("项目刚注册就查不到了：" + project.getId())));
+    }
+
+    /** 手动重新生成项目资料；同一项目生成中时调度器会忽略重复请求。 */
+    @PostMapping("/{id}/summary/regenerate")
+    public ProjectResponse regenerateSummary(@PathVariable long id) {
+        ProjectId projectId = ProjectId.of(id);
+        projectSummaryGenerationService.schedule(projectId);
+        return ProjectResponse.from(projectProfileRepository.findById(projectId)
+                .orElseThrow(() -> new EntityNotFoundException("项目不存在：" + id)));
     }
 }

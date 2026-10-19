@@ -14,6 +14,7 @@ public class EnvironmentData {
     private String itemValue;
     private String tags;
     private String description;
+    private Boolean secret;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

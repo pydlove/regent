@@ -14,9 +14,37 @@
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO project (code, name, path, tech_stack, verify_method, default_decision_level,
-                             enabled, deleted, created_at, updated_at)
+                             enabled, deleted, summary_status, summary, summary_error,
+                             summary_generated_at, created_at, updated_at)
         VALUES (#{code}, #{name}, #{path}, #{techStack}, #{verifyMethod}, #{defaultDecisionLevel},
-                1, 0, #{createdAt}, #{updatedAt})
+                1, 0, #{summaryStatus}, #{summary}, #{summaryError}, #{summaryGeneratedAt},
+                #{createdAt}, #{updatedAt})
     </insert>
+
+    <select id="selectById" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectData">
+        SELECT id, code, name, path, tech_stack, verify_method, default_decision_level,
+               summary_status, summary, summary_error, summary_generated_at, created_at, updated_at
+        FROM project
+        WHERE id = #{id} AND deleted = 0
+    </select>
+
+    <select id="selectBySummaryStatus"
+            resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectData">
+        SELECT id, code, name, path, tech_stack, verify_method, default_decision_level,
+               summary_status, summary, summary_error, summary_generated_at, created_at, updated_at
+        FROM project
+        WHERE summary_status = #{summaryStatus} AND deleted = 0
+        ORDER BY id
+    </select>
+
+    <update id="updateSummary">
+        UPDATE project
+        SET summary_status = #{summaryStatus},
+            summary = #{summary},
+            summary_error = #{summaryError},
+            summary_generated_at = #{summaryGeneratedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{id} AND deleted = 0
+    </update>
 
 </mapper>

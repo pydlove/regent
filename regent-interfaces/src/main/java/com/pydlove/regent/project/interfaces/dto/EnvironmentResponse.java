@@ -14,6 +14,7 @@ public record EnvironmentResponse(
         String value,
         List<String> tags,
         String description,
+        boolean secret,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -26,6 +27,7 @@ public record EnvironmentResponse(
                 entry.getValue(),
                 entry.getTags(),
                 entry.getDescription(),
+                entry.isSecret(),
                 entry.getCreatedAt(),
                 entry.getUpdatedAt());
     }

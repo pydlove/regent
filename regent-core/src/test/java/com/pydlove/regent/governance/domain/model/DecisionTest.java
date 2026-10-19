@@ -104,13 +104,13 @@ class DecisionTest {
         }
 
         @Test
-        void 驳回必须写明理由() {
+        void 驳回时理由可以留空() {
             Decision decision = pending();
 
-            DomainException e = assertThrows(DomainException.class, () -> decision.reject(null, "   "));
+            decision.reject(null, "   ");
 
-            assertTrue(e.getMessage().contains("理由"), e.getMessage());
-            assertEquals(DecisionStatus.PENDING, decision.getStatus(), "被拒的调用不该改状态");
+            assertEquals(DecisionStatus.REJECTED, decision.getStatus());
+            assertTrue(decision.getResolutionNote().isEmpty());
         }
 
         @Test

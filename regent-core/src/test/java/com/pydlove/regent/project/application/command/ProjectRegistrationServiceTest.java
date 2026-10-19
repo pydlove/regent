@@ -2,8 +2,10 @@ package com.pydlove.regent.project.application.command;
 
 import com.pydlove.regent.project.domain.model.Project;
 import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.project.domain.model.ProjectSummaryStatus;
 import com.pydlove.regent.project.domain.repository.ProjectRepository;
 import com.pydlove.regent.shared.domain.DomainException;
+import com.pydlove.regent.shared.domain.TransactionRunner;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -13,6 +15,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -40,6 +44,21 @@ class ProjectRegistrationServiceTest {
         public void save(Project project) {
             project.assignIdentity(ProjectId.of(saved.size() + 1L));
             saved.add(project);
+        }
+
+        @Override
+        public Optional<Project> findById(ProjectId id) {
+            return saved.stream().filter(project -> project.getId().equals(id)).findFirst();
+        }
+
+        @Override
+        public List<Project> findBySummaryStatus(ProjectSummaryStatus status) {
+            return saved.stream().filter(project -> project.getSummaryStatus() == status).toList();
+        }
+
+        @Override
+        public void update(Project project) {
+            // 替身保存的是同一个对象，状态已就地更新。
         }
     }
 
@@ -85,5 +104,49 @@ class ProjectRegistrationServiceTest {
 
         assertThrows(DomainException.class, () -> service.register(command("app_audit", file.toString())));
         assertTrue(projects.saved.isEmpty());
+    }
+
+    @Test
+    @DisplayName("注册保存成功后只调度一次项目资料生成")
+    void schedulesSummaryGenerationAfterSave(@TempDir Path workspace) {
+        List<ProjectId> scheduled = new ArrayList<>();
+        TransactionRunner direct = new TransactionRunner() {
+            @Override
+            public <T> T inTransaction(Supplier<T> action) {
+                return action.get();
+            }
+        };
+        ProjectRegistrationService orchestrating = new ProjectRegistrationService(
+                projects, scheduled::add, direct);
+
+        Project project = orchestrating.register(command("app_audit", workspace.toString()));
+
+        assertEquals(List.of(project.getId()), scheduled);
+    }
+
+    @Test
+    @DisplayName("资料生成在事务提交后才启动，回滚不会误触发 Codex")
+    void schedulesSummaryOnlyAfterCommit(@TempDir Path workspace) {
+        List<ProjectId> scheduled = new ArrayList<>();
+        List<Runnable> commits = new ArrayList<>();
+        TransactionRunner deferred = new TransactionRunner() {
+            @Override
+            public <T> T inTransaction(Supplier<T> action) {
+                return action.get();
+            }
+
+            @Override
+            public void afterCompletion(Runnable onCommit, Runnable onRollback) {
+                commits.add(onCommit);
+            }
+        };
+        ProjectRegistrationService orchestrating = new ProjectRegistrationService(
+                projects, scheduled::add, deferred);
+
+        Project project = orchestrating.register(command("app_audit", workspace.toString()));
+
+        assertTrue(scheduled.isEmpty(), "事务完成前不能启动后台 Codex");
+        commits.forEach(Runnable::run);
+        assertEquals(List.of(project.getId()), scheduled);
     }
 }

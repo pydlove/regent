@@ -139,11 +139,11 @@ public class Task {
      * 派发执行。首次派发和排队后的起跑都走这里。
      *
      * <p>分支名由调用方（执行编排）传入而不是这里拼 {@code codex/task-N}：命名策略属于
-     * 分支管理端口，写死在聚合里会让接 Git 适配器时无处可改。
+     * 分支管理端口。普通目录、空仓库或多仓库父目录没有分支名，传 null 仍可正常派发。
      */
     public void dispatch(String branchName) {
         requireStateIn("只有待执行或排队中的任务可以派发", TaskStatus.PENDING, TaskStatus.QUEUED);
-        this.branchName = requireText(branchName, "分支名");
+        this.branchName = blankToNull(branchName);
         this.branchApprovalState = BranchApprovalState.NONE;
         this.status = TaskStatus.RUNNING;
         this.attemptCount += 1;
@@ -216,9 +216,9 @@ public class Task {
     /**
      * 开启一次续跑尝试 —— 决策批准之后，接着上一轮的会话继续执行。
      *
-     * <p>与 {@link #dispatch(String)} 的区别只有入口状态与凭据：dispatch 是「第一次派发」，
-     * 需要一条新分支；本方法是「带着人拍的板接着跑」，必须有可续跑的会话，
-     * 而且分支还是原来那条 —— 换条分支续跑，上一轮的改动就被留在原地没人管了。
+     * <p>与 {@link #dispatch(String)} 的区别只有入口状态与凭据：dispatch 是「第一次派发」；
+     * 本方法是「带着人拍的板接着跑」，必须有可续跑的会话。有分支时仍留在原来那条分支，
+     * 没有分支时继续在项目目录当前状态执行。
      *
      * <p>它必须在执行器真的被拉起来之前由编排层调用：尝试次数是「执行器跑了几次」的计数，
      * 提前加一，历史里就会出现一条没有对应执行记录的尝试。
@@ -227,9 +227,6 @@ public class Task {
         requireState(TaskStatus.RUNNING, "只有执行中的任务可以开启续跑");
         if (codexThreadId == null) {
             throw new DomainException("任务没有可续跑的会话（codex_thread_id 为空），只能重新派发：" + id);
-        }
-        if (branchName == null) {
-            throw new DomainException("任务没有分支名，无法续跑：" + id);
         }
         this.attemptCount += 1;
         this.startedAt = now();
@@ -242,13 +239,10 @@ public class Task {
      *
      * <p>这不是一次新的执行尝试：尝试次数和执行记录都由紧接着的派发流程创建。
      * 这里保留 {@code codexThreadId}，下一次派发才能用 {@code codex exec resume}
-     * 接着原会话继续；分支也保留，避免把上一轮改动留在一条无人接管的分支上。
+     * 接着原会话继续；有分支则保留，避免把上一轮改动留在一条无人接管的分支上。
      */
     public void requeueAfterInterruption() {
         requireState(TaskStatus.RUNNING, "只有执行中的任务可以在中断后重新排队");
-        if (branchName == null || branchName.isBlank()) {
-            throw new DomainException("任务没有分支名，无法从中断中恢复：" + id);
-        }
         if (blockingDecisionId != null) {
             throw new DomainException("任务仍在等待决策，不能按重启中断恢复：" + id);
         }
@@ -334,6 +328,15 @@ public class Task {
         touch();
     }
 
+    /** AI 执行后决定为本任务创建隔离分支；只更新记录，不触碰分支本身。 */
+    public void adoptBranch(String branchName) {
+        if (this.status != TaskStatus.RUNNING) {
+            throw new DomainException("只有执行中的任务可以记录实际分支：" + this.status);
+        }
+        this.branchName = requireText(branchName, "分支名");
+        touch();
+    }
+
     private void requireState(TaskStatus expected, String message) {
         if (this.status != expected) {
             throw new DomainException(message + "，当前状态：" + this.status);
@@ -377,6 +380,10 @@ public class Task {
             throw new DomainException(field + "不能为空");
         }
         return value;
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 
     private static String requireTitle(String title) {

@@ -3,7 +3,7 @@
 <mapper namespace="com.pydlove.regent.project.infrastructure.persistence.EnvironmentEntryMapper">
 
     <sql id="columns">
-        id, project_id, item_key, item_value, tags, description, created_at, updated_at
+        id, project_id, item_key, item_value, tags, description, secret, created_at, updated_at
     </sql>
 
     <select id="selectById" resultType="com.pydlove.regent.project.infrastructure.persistence.EnvironmentRow">
@@ -47,9 +47,9 @@
     </select>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO environment_entry (project_id, item_key, item_value, tags, description,
+        INSERT INTO environment_entry (project_id, item_key, item_value, tags, description, secret,
                                        deleted, created_at, updated_at)
-        VALUES (#{projectId}, #{itemKey}, #{itemValue}, #{tags}, #{description},
+        VALUES (#{projectId}, #{itemKey}, #{itemValue}, #{tags}, #{description}, #{secret},
                 0, #{createdAt}, #{updatedAt})
     </insert>
 
@@ -60,6 +60,7 @@
             item_value = #{itemValue},
             tags = #{tags},
             description = #{description},
+            secret = #{secret},
             updated_at = #{updatedAt}
         WHERE id = #{id} AND deleted = 0
     </update>

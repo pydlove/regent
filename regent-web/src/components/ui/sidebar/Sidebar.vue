@@ -13,9 +13,14 @@ type SidebarItem = {
   badgeLabel?: string
 }
 
+type SidebarGroup = {
+  label: string
+  items: SidebarItem[]
+}
+
 const props = withDefaults(
   defineProps<{
-    items: SidebarItem[]
+    groups: SidebarGroup[]
     collapsed?: boolean
   }>(),
   { collapsed: false },
@@ -37,8 +42,16 @@ const props = withDefaults(
     ]"
   >
     <nav class="scroll-area flex h-full flex-col gap-px overflow-y-auto p-2">
-      <template v-for="item in props.items" :key="item.to">
+      <template v-for="(group, index) in props.groups" :key="group.label">
+        <p
+          class="px-2 text-[10px] font-emphasis leading-[14px] text-label-tertiary"
+          :class="index === 0 ? 'pb-1 pt-1' : 'pb-1 pt-3'"
+        >
+          {{ group.label }}
+        </p>
         <RouterLink
+          v-for="item in group.items"
+          :key="item.to"
           :to="item.to"
           class="group flex h-row items-center gap-2 rounded-[6px] px-2 text-body text-label transition-colors duration-[120ms] ease-apple hover:bg-hover aria-[current=page]:bg-accent aria-[current=page]:text-white"
         >

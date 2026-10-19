@@ -12,7 +12,9 @@ import {
   ListChecks,
   PanelLeftOpen,
   Plus,
+  ServerCog,
   Settings,
+  TriangleAlert,
   Workflow,
 } from '@lucide/vue'
 import { TooltipProvider } from 'reka-ui'
@@ -20,6 +22,7 @@ import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppFooter from '@/components/business/AppFooter.vue'
+import CodexInstallDialog from '@/components/business/CodexInstallDialog.vue'
 import FailedTaskNotifications from '@/components/business/FailedTaskNotifications.vue'
 import ProjectFormDialog from '@/components/business/ProjectFormDialog.vue'
 import UserProfileCard from '@/components/business/UserProfileCard.vue'
@@ -33,10 +36,12 @@ import ToastHost from '@/components/ui/toast/ToastHost.vue'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
 import Toolbar from '@/components/ui/toolbar/Toolbar.vue'
 import { useOverlayScrollbar } from '@/composables/useOverlayScrollbar'
+import { useCodexInstallDialog } from '@/composables/useCodexInstallDialog'
 import { useProjectDialog } from '@/composables/useProjectDialog'
 import { useTheme, type ThemePreference } from '@/composables/useTheme'
 import { useAuthStore } from '@/stores/useAuthStore'
 import { useDecisionStore } from '@/stores/useDecisionStore'
+import { useExecutionRuntimeStore } from '@/stores/useExecutionRuntimeStore'
 import { useTaskStore } from '@/stores/useTaskStore'
 
 const { preference, setTheme } = useTheme()
@@ -72,10 +77,15 @@ const themeOptions = [
 const store = useTaskStore()
 const decisionStore = useDecisionStore()
 const auth = useAuthStore()
+const executionRuntime = useExecutionRuntimeStore()
+const { openDialog: openCodexInstallDialog } = useCodexInstallDialog()
 
 const project = computed({
   get: () => (store.projectId === null ? 'all' : String(store.projectId)),
   set: (value: string | undefined) => {
+    // 项目列表尚未加载时，下拉没有匹配项会瞬时发出空值；此时保留持久化选择，
+    // 等 loadProjects 拿到列表后再校验并恢复。
+    if (store.projects.length === 0) return
     // 万一拿到空值或非数字，一律退回「全部项目」：把 NaN 塞进查询串会变成一个 400，
     // 而用户看到的是「列表怎么报错了」，跟他的操作对不上
     const parsed = Number(value)
@@ -92,29 +102,45 @@ const projects = computed(() => [
   })),
 ])
 
-// 角标只挂「需要人管」的数：待批决策的数字和决策页是同一个源，不会两处对不上
-const navItems = computed(() => [
-  { label: '工作台', to: '/dashboard', icon: LayoutDashboard },
+// 分组按「概览 → 执行与交付 → 平台配置」排：工作台看全局，任务与决策是每天最先处理的；
+// 计划、部署、测试用例属于执行链路；项目、环境、插件是低频配置，放在最后。
+// 角标只挂「需要人管」的数：待批决策的数字和决策页是同一个源，不会两处对不上。
+const navGroups = computed(() => [
   {
-    label: '任务',
-    to: '/tasks',
-    icon: ListChecks,
-    badge: store.taskTotal,
-    badgeLabel: `共 ${store.taskTotal} 个任务`,
+    label: '概览',
+    items: [{ label: '工作台', to: '/dashboard', icon: LayoutDashboard }],
   },
-  { label: '计划', to: '/plans', icon: CalendarClock },
   {
-    label: '决策',
-    to: '/decisions',
-    icon: Workflow,
-    badge: decisionStore.pendingTotal,
-    badgeLabel: `共 ${decisionStore.pendingTotal} 条待批决策`,
+    label: '执行与交付',
+    items: [
+      {
+        label: '任务',
+        to: '/tasks',
+        icon: ListChecks,
+        badge: store.taskTotal,
+        badgeLabel: `共 ${store.taskTotal} 个任务`,
+      },
+      {
+        label: '决策',
+        to: '/decisions',
+        icon: Workflow,
+        badge: decisionStore.pendingTotal,
+        badgeLabel: `共 ${decisionStore.pendingTotal} 条待批决策`,
+      },
+      { label: '计划', to: '/plans', icon: CalendarClock },
+      { label: '部署', to: '/deployments', icon: ServerCog },
+      { label: '测试用例', to: '/test-cases', icon: FlaskConical },
+    ],
   },
-  // 项目不放角标：它是配置，不是「等你处理」的事 —— 角标一旦不表示待办，就没人再看它了
-  { label: '项目', to: '/projects', icon: FolderKanban },
-  { label: '环境', to: '/environments', icon: KeyRound },
-  { label: '插件', to: '/plugins', icon: Blocks },
-  { label: '测试用例', to: '/test-cases', icon: FlaskConical },
+  {
+    label: '平台配置',
+    items: [
+      // 项目不放角标：它是配置，不是「等你处理」的事 —— 角标一旦不表示待办，就没人再看它了
+      { label: '项目', to: '/projects', icon: FolderKanban },
+      { label: '环境', to: '/environments', icon: KeyRound },
+      { label: '插件', to: '/plugins', icon: Blocks },
+    ],
+  },
 ])
 
 const profileDialogOpen = ref(false)
@@ -123,10 +149,35 @@ const profileDialogOpen = ref(false)
 watch(
   () => auth.isAuthenticated,
   (authenticated) => {
-    if (!authenticated) return
+    if (!authenticated) {
+      executionRuntime.clear()
+      return
+    }
     void store.loadStats()
     void store.loadProjects().catch(() => undefined)
     void decisionStore.loadPendingCount()
+    executionRuntime.startMonitoring()
+  },
+  { immediate: true },
+)
+
+/*
+ * 第一次进入且 Codex 缺失时，直接打开安装向导。
+ * sessionStorage 按用户记录“本次浏览器会话已提示过”，避免刷新页面时反复弹框；
+ * 关闭后顶部常驻提示条仍然保留，用户随时可以重新打开。
+ */
+watch(
+  [() => auth.isAuthenticated, () => executionRuntime.unavailable, () => auth.user?.id],
+  ([authenticated, unavailable, userId]) => {
+    if (!authenticated || !unavailable || !userId) return
+    const key = `regent.codex-setup-prompted.${userId}`
+    try {
+      if (sessionStorage.getItem(key) === '1') return
+      sessionStorage.setItem(key, '1')
+    } catch {
+      // 浏览器禁用存储时仍然弹一次；只是刷新后可能再次出现。
+    }
+    openCodexInstallDialog()
   },
   { immediate: true },
 )
@@ -158,6 +209,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('resize', syncViewport)
   window.removeEventListener('regent:unauthorized', handleUnauthorized)
+  executionRuntime.stopMonitoring()
 })
 
 // 手机端点导航后自动收起抽屉：否则点了「决策」还要再点一次遮罩才能看到内容
@@ -251,6 +303,32 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
         </template>
       </Toolbar>
 
+      <div
+        v-if="executionRuntime.unavailable"
+        role="status"
+        class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-warning/25 bg-warning/10 px-4 py-2 text-caption text-warning"
+      >
+        <Icon :as="TriangleAlert" size="inline" class="shrink-0" />
+        <span class="min-w-0 flex-1">
+          Codex 未就绪。可以继续录入和浏览，但任务派发与项目资料生成需要先安装 Codex。
+        </span>
+        <button
+          type="button"
+          class="font-emphasis underline underline-offset-2"
+          @click="openCodexInstallDialog"
+        >
+          安装 Codex
+        </button>
+        <button
+          type="button"
+          class="font-emphasis underline underline-offset-2 disabled:opacity-50"
+          :disabled="executionRuntime.loading"
+          @click="executionRuntime.check(true)"
+        >
+          {{ executionRuntime.loading ? '检测中…' : '重新检测' }}
+        </button>
+      </div>
+
       <div class="flex min-h-0 flex-1">
         <!-- 手机端抽屉的遮罩：点空白处收起侧边栏 -->
         <div
@@ -261,7 +339,7 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
         <div class="relative flex shrink-0">
           <Sidebar
             id="app-sidebar"
-            :items="navItems"
+            :groups="navGroups"
             :collapsed="sidebarCollapsed"
           >
             <div class="mt-auto">
@@ -303,6 +381,7 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
     </div>
     <RouterView v-else />
     <ProjectFormDialog v-if="!authPage" v-model:open="projectDialogOpen" />
+    <CodexInstallDialog v-if="!authPage" />
     <UserProfileDialog v-if="!authPage" v-model:open="profileDialogOpen" />
     <ToastHost />
   </TooltipProvider>

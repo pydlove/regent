@@ -19,7 +19,7 @@ import java.nio.charset.StandardCharsets;
 public class AuthSessionInterceptor implements HandlerInterceptor {
 
     static final String COOKIE_NAME = "regent_session";
-    static final String CURRENT_USER_ATTRIBUTE =
+    public static final String CURRENT_USER_ATTRIBUTE =
             AuthSessionInterceptor.class.getName() + ".currentUser";
 
     private final AuthService authService;
@@ -59,7 +59,7 @@ public class AuthSessionInterceptor implements HandlerInterceptor {
         return null;
     }
 
-    static AuthenticatedUser currentUser(HttpServletRequest request) {
+    public static AuthenticatedUser currentUser(HttpServletRequest request) {
         Object value = request.getAttribute(CURRENT_USER_ATTRIBUTE);
         if (value instanceof AuthenticatedUser user) {
             return user;
