@@ -18,6 +18,9 @@ const electronPackager = path.join(
   '.bin',
   'electron-packager',
 )
+const electronVersion = JSON.parse(
+  fs.readFileSync(path.join(projectDirectory, 'node_modules', 'electron', 'package.json'), 'utf8'),
+).version
 
 function run(command, args, options = {}) {
   console.log(`\n$ ${command} ${args.join(' ')}`)
@@ -43,6 +46,60 @@ function runWithRetry(command, args, options = {}) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000)
     }
   }
+}
+
+function findCachedElectronZip(cacheRoot, filename) {
+  if (!fs.existsSync(cacheRoot)) return null
+  const pending = [cacheRoot]
+  while (pending.length > 0) {
+    const directory = pending.pop()
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const fullPath = path.join(directory, entry.name)
+      if (entry.isDirectory()) {
+        pending.push(fullPath)
+      } else if (entry.isFile() && entry.name === filename) {
+        return fullPath
+      }
+    }
+  }
+  return null
+}
+
+function prepareElectronZipDirectory() {
+  const cacheRoots = [
+    process.env.ELECTRON_CACHE,
+    path.join(os.homedir(), 'Library', 'Caches', 'electron'),
+    path.join(os.homedir(), '.cache', 'electron'),
+  ].filter(Boolean)
+  const filenames = [
+    `electron-v${electronVersion}-darwin-x64.zip`,
+    `electron-v${electronVersion}-darwin-arm64.zip`,
+    `electron-v${electronVersion}-win32-x64.zip`,
+  ]
+  const sources = []
+  for (const filename of filenames) {
+    let source = null
+    for (const root of cacheRoots) {
+      source = findCachedElectronZip(root, filename)
+      if (source) break
+    }
+    if (!source) return null
+    sources.push([filename, source])
+  }
+
+  const zipDirectory = path.join(workDirectory, 'electron-zips')
+  fs.rmSync(zipDirectory, { recursive: true, force: true })
+  fs.mkdirSync(zipDirectory, { recursive: true })
+  for (const [filename, source] of sources) {
+    const target = path.join(zipDirectory, filename)
+    try {
+      fs.symlinkSync(source, target)
+    } catch {
+      fs.copyFileSync(source, target)
+    }
+  }
+  console.log(`\n使用本地 Electron ZIP：${zipDirectory}`)
+  return zipDirectory
 }
 
 function iconSet() {
@@ -81,7 +138,7 @@ function iconSet() {
   ])
 }
 
-function packageApplication(platform, arch, outputDirectory) {
+function packageApplication(platform, arch, outputDirectory, electronZipDir) {
   if (!fs.existsSync(electronPackager)) {
     throw new Error(`找不到本地 electron-packager：${electronPackager}`)
   }
@@ -96,6 +153,7 @@ function packageApplication(platform, arch, outputDirectory) {
     '--app-bundle-id=com.pydlove.regent',
     `--app-version=${version}`,
     `--build-version=${version}`,
+    ...(electronZipDir ? [`--electron-zip-dir=${electronZipDir}`] : []),
     ...(platform === 'darwin' && arch === 'universal' ? ['--osx-universal.mergeASARs=true'] : []),
     `--icon=${path.join(assetsDirectory, platform === 'darwin' ? 'icon.icns' : 'icon.ico')}`,
     '--ignore=^/dist',
@@ -109,9 +167,9 @@ function packageApplication(platform, arch, outputDirectory) {
   })
 }
 
-function buildMacDmg() {
+function buildMacDmg(electronZipDir) {
   const macOutput = path.join(workDirectory, 'mac')
-  packageApplication('darwin', 'universal', macOutput)
+  packageApplication('darwin', 'universal', macOutput, electronZipDir)
   const application = path.join(macOutput, 'Regent-darwin-universal', 'Regent.app')
   run('codesign', ['--force', '--deep', '--sign', '-', application])
 
@@ -144,9 +202,9 @@ function buildMacDmg() {
   return dmg
 }
 
-function buildWindowsZip() {
+function buildWindowsZip(electronZipDir) {
   const windowsOutput = path.join(workDirectory, 'windows')
-  packageApplication('win32', 'x64', windowsOutput)
+  packageApplication('win32', 'x64', windowsOutput, electronZipDir)
   const applicationDirectory = path.join(windowsOutput, 'Regent-win32-x64')
   const zip = path.join(releaseDirectory, `Regent-${artifactVersion}-Windows-x64.zip`)
   fs.rmSync(zip, { force: true })
@@ -165,8 +223,9 @@ function buildWindowsZip() {
 fs.rmSync(releaseDirectory, { recursive: true, force: true })
 fs.mkdirSync(workDirectory, { recursive: true })
 iconSet()
-const macos = buildMacDmg()
-const windows = buildWindowsZip()
+const electronZipDir = prepareElectronZipDirectory()
+const macos = buildMacDmg(electronZipDir)
+const windows = buildWindowsZip(electronZipDir)
 
 console.log('\n发布产物：')
 console.log(`macOS: ${macos}`)

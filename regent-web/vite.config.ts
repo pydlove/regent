@@ -10,6 +10,12 @@ export default defineConfig({
   // 生产包由 Nginx 挂在站点根目录。显式固定为 '/'，避免构建环境把资源路径推断成本机 file:// 地址。
   base: '/',
   plugins: [vue(), tailwindcss()],
+  build: {
+    // 桌面端会打包给 Windows 用户，不能假设对方是最新 Chromium。
+    // 低于这个档位时，Lightning CSS 会把 @media (width>=…) 降级成 min-width，
+    // 并给 color-mix() 生成静态回退色；否则旧版 Windows 浏览器会忽略整段响应式布局。
+    cssTarget: 'chrome96',
+  },
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },

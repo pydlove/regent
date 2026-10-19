@@ -179,7 +179,7 @@ const features = computed(() => [
             </p>
           </div>
 
-          <div class="download-platform-grid mt-8 grid gap-4 lg:grid-cols-2">
+          <div class="download-platform-grid mt-8 grid gap-4 md:grid-cols-2">
             <article
               v-for="platform in downloads"
               :key="platform.id"
@@ -419,6 +419,9 @@ open /Applications/Regent.app</pre>
     padding: 3rem;
   }
 
+}
+
+@media (min-width: 48rem) {
   .download-platform-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
