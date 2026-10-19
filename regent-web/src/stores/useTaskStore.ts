@@ -137,9 +137,22 @@ export const useTaskStore = defineStore('tasks', () => {
     writeProjectSelection(resolved)
   }
 
+  /** 退出登录或切换账号时清掉上一个账号的项目范围，避免旧项目名在界面上闪一下。 */
+  const clearProjectScope = () => {
+    projects.value = []
+    projectId.value = null
+    items.value = []
+    total.value = 0
+    totalPages.value = 0
+    selected.value = null
+    detail.value = null
+    counts.value = { ...EMPTY_COUNTS }
+    writeProjectSelection(null)
+  }
+
   const loadStats = async () => {
     try {
-      counts.value = { ...EMPTY_COUNTS, ...(await getTaskStats()) }
+      counts.value = { ...EMPTY_COUNTS, ...(await getTaskStats(projectId.value)) }
     } catch {
       // 角标是锦上添花，取不到就维持上一次的值，不打扰用户
     }
@@ -291,9 +304,13 @@ export const useTaskStore = defineStore('tasks', () => {
   }
 
   // 筛选条件一变就回第 1 页：停在原页码上会得到一张空表，而且看不出为什么空
-  watch([statusFilter, levelFilter, projectId, taskIdFilter, keyword], () => {
+  watch([statusFilter, levelFilter, taskIdFilter, keyword], () => {
     page.value = 1
     void load()
+  })
+  watch(projectId, () => {
+    page.value = 1
+    void Promise.all([load(), loadStats()])
   })
   watch(
     projectId,
@@ -328,6 +345,7 @@ export const useTaskStore = defineStore('tasks', () => {
     detail,
     load,
     loadProjects,
+    clearProjectScope,
     loadStats,
     select,
     refresh,

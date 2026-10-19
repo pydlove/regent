@@ -4,6 +4,7 @@ import {
   BookOpen,
   ChevronDown,
   CircleHelp,
+  Download,
   FlaskConical,
   FolderKanban,
   History,
@@ -243,6 +244,16 @@ watch([query, activeCategory], () => {
               从注册项目到核对执行结果，先按主流程完成任务，再用 FAQ 处理具体问题。
             </p>
           </div>
+          <RouterLink
+            :to="{ name: 'download' }"
+            target="_blank"
+            aria-label="下载桌面客户端"
+            :class="buttonVariants({ variant: 'default', size: 'sm' })"
+            class="ml-auto shrink-0"
+          >
+            <Icon :as="Download" size="inline" />
+            <span class="hidden sm:inline">下载客户端</span>
+          </RouterLink>
         </header>
 
         <section class="mt-7" aria-labelledby="quick-start-title">

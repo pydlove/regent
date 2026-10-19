@@ -1,6 +1,7 @@
 package com.pydlove.regent.plan.infrastructure.persistence;
 
 import com.pydlove.regent.execution.domain.model.TaskId;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.plan.domain.model.Plan;
 import com.pydlove.regent.plan.domain.model.PlanId;
 import com.pydlove.regent.plan.domain.model.PlanSnapshot;
@@ -20,6 +21,7 @@ public final class PlanDataMapper {
     public static PlanData toData(Plan plan) {
         PlanData data = new PlanData();
         data.setId(plan.getId() == null ? null : plan.getId().value());
+        data.setUserId(plan.getOwnerId() == null ? null : plan.getOwnerId().value());
         data.setName(plan.getName());
         data.setStatus(plan.getStatus().name());
         data.setScheduledAt(toDb(plan.getScheduledAt()));
@@ -33,6 +35,7 @@ public final class PlanDataMapper {
     public static Plan toDomain(PlanData data, List<Long> taskIds) {
         return Plan.restore(new PlanSnapshot(
                 PlanId.of(data.getId()),
+                data.getUserId() == null ? null : UserId.of(data.getUserId()),
                 data.getName(),
                 taskIds.stream().map(TaskId::of).toList(),
                 PlanStatus.valueOf(data.getStatus()),

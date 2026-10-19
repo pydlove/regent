@@ -1,6 +1,9 @@
 package com.pydlove.regent.plan.interfaces.rest;
 
 import com.pydlove.regent.execution.domain.model.TaskId;
+import com.pydlove.regent.identity.application.query.AuthenticatedUser;
+import com.pydlove.regent.identity.domain.model.UserId;
+import com.pydlove.regent.identity.interfaces.rest.AuthSessionInterceptor;
 import com.pydlove.regent.plan.application.command.CreatePlanCommand;
 import com.pydlove.regent.plan.application.command.PlanCommandService;
 import com.pydlove.regent.plan.application.command.PlanExecutionService;
@@ -14,6 +17,7 @@ import com.pydlove.regent.plan.interfaces.dto.PlanDetailResponse;
 import com.pydlove.regent.plan.interfaces.dto.PlanRunDetailResponse;
 import com.pydlove.regent.plan.interfaces.dto.PlanRunResponse;
 import com.pydlove.regent.plan.interfaces.dto.PlanSummaryResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -42,17 +46,20 @@ public class PlanController {
     }
 
     @GetMapping("/plans")
-    public List<PlanSummaryResponse> list() {
-        return planQueryService.list().stream().map(PlanSummaryResponse::from).toList();
+    public List<PlanSummaryResponse> list(HttpServletRequest request) {
+        return planQueryService.list(currentUser(request)).stream()
+                .map(PlanSummaryResponse::from)
+                .toList();
     }
 
     @GetMapping("/plans/{id}")
-    public PlanDetailResponse detail(@PathVariable long id) {
-        return PlanDetailResponse.from(planQueryService.get(PlanId.of(id)));
+    public PlanDetailResponse detail(@PathVariable long id, HttpServletRequest request) {
+        return PlanDetailResponse.from(planQueryService.get(PlanId.of(id), currentUser(request)));
     }
 
     @PostMapping("/plans")
-    public PlanSummaryResponse create(@RequestBody PlanCreateRequest request) {
+    public PlanSummaryResponse create(@RequestBody PlanCreateRequest request,
+                                      HttpServletRequest servletRequest) {
         if (request.taskIds() == null || request.taskIds().isEmpty()) {
             throw new IllegalArgumentException("至少选择一个任务");
         }
@@ -62,21 +69,30 @@ public class PlanController {
             }
             return TaskId.of(taskId);
         }).toList();
+        UserId ownerId = currentUser(servletRequest);
         Plan plan = planCommandService.create(new CreatePlanCommand(
                 request.name(),
                 taskIds,
-                request.scheduledAt() == null ? Instant.now() : request.scheduledAt()));
-        return PlanSummaryResponse.from(planQueryService.get(plan.getId()).plan());
+                request.scheduledAt() == null ? Instant.now() : request.scheduledAt()), ownerId);
+        return PlanSummaryResponse.from(planQueryService.get(plan.getId(), ownerId).plan());
     }
 
     @PostMapping("/plans/{id}/run")
-    public PlanRunResponse run(@PathVariable long id) {
+    public PlanRunResponse run(@PathVariable long id, HttpServletRequest request) {
+        UserId ownerId = currentUser(request);
+        planQueryService.get(PlanId.of(id), ownerId);
         PlanRun run = planExecutionService.runNow(PlanId.of(id));
-        return PlanRunResponse.from(planQueryService.getRun(run.getId()).run());
+        return PlanRunResponse.from(planQueryService.getRun(run.getId(), ownerId).run());
     }
 
     @GetMapping("/plan-runs/{id}")
-    public PlanRunDetailResponse runDetail(@PathVariable long id) {
-        return PlanRunDetailResponse.from(planQueryService.getRun(PlanRunId.of(id)));
+    public PlanRunDetailResponse runDetail(@PathVariable long id, HttpServletRequest request) {
+        return PlanRunDetailResponse.from(
+                planQueryService.getRun(PlanRunId.of(id), currentUser(request)));
+    }
+
+    private static UserId currentUser(HttpServletRequest request) {
+        AuthenticatedUser user = AuthSessionInterceptor.currentUser(request);
+        return UserId.of(user.id());
     }
 }

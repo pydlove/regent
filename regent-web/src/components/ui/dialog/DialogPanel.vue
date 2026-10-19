@@ -16,20 +16,36 @@ import {
 const props = withDefaults(
   defineProps<{
     layout?: DialogVariantProps['layout']
-    /** 表单弹框的宽度两档；alert 与 log 用不到 */
+    /** 弹框宽度：large 用于长表单，wide 只给需要横排查看的日志类弹框 */
     size?: DialogVariantProps['size']
+    /** compact 把最大高度收敛到视口的 80% */
+    maxHeight?: DialogVariantProps['maxHeight']
+    /** 占满整个视口；用于日志、事件流等需要大面积查看的内容 */
+    fullscreen?: boolean
     /** 左上角图标。警告类给一个，普通确认可以不给 —— 原生也不是每个警告框都带图标 */
     icon?: DialogIcon
     iconTone?: DialogIconProps['tone']
   }>(),
-  { layout: 'alert', size: 'regular', icon: undefined, iconTone: 'default' },
+  {
+    layout: 'alert',
+    size: 'regular',
+    maxHeight: 'default',
+    fullscreen: false,
+    icon: undefined,
+    iconTone: 'default',
+  },
 )
 
 /* 红点要真的关掉弹框，但面板只管外观（见下方模板注释），所以把动作抛给 Dialog.vue */
 const emit = defineEmits<{ close: [] }>()
 
 const panelClasses = computed(() =>
-  dialogPanelVariants({ layout: props.layout, size: props.size }),
+  dialogPanelVariants({
+    layout: props.layout,
+    size: props.size,
+    maxHeight: props.maxHeight,
+    fullscreen: props.fullscreen,
+  }),
 )
 const iconClasses = computed(() => dialogIconVariants({ tone: props.iconTone }))
 </script>

@@ -12,5 +12,7 @@ public interface TaskAttachmentMapper {
 
     TaskAttachmentData selectById(@Param("id") long id);
 
+    TaskAttachmentData selectByIdOwned(@Param("id") long id, @Param("ownerId") long ownerId);
+
     List<TaskAttachmentData> selectByTask(@Param("taskId") long taskId);
 }

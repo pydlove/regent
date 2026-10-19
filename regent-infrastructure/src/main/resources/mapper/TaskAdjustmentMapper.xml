@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 调整方向只追加；APPLIED 只允许从 PENDING 迁移一次。 -->
+<mapper namespace="com.pydlove.regent.execution.infrastructure.persistence.TaskAdjustmentMapper">
+
+    <sql id="columns">
+        id, task_id, source_type, source_task_id, source_title, content, status,
+        applied_run_id, applied_at, created_at
+    </sql>
+
+    <select id="selectById" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskAdjustmentData">
+        SELECT <include refid="columns"/>
+        FROM task_adjustment
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByTask" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskAdjustmentData">
+        SELECT <include refid="columns"/>
+        FROM task_adjustment
+        WHERE task_id = #{taskId}
+        ORDER BY id
+    </select>
+
+    <select id="selectPendingByTask" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskAdjustmentData">
+        SELECT <include refid="columns"/>
+        FROM task_adjustment
+        WHERE task_id = #{taskId}
+          AND status = 'PENDING'
+        ORDER BY id
+    </select>
+
+    <select id="countPending" resultType="int">
+        SELECT COUNT(1)
+        FROM task_adjustment
+        WHERE task_id = #{taskId}
+          AND status = 'PENDING'
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO task_adjustment (task_id, source_type, source_task_id, source_title, content,
+                                     status, applied_run_id, applied_at, created_at)
+        VALUES (#{taskId}, #{sourceType}, #{sourceTaskId}, #{sourceTitle}, #{content},
+                #{status}, #{appliedRunId}, #{appliedAt}, #{createdAt})
+    </insert>
+
+    <update id="markApplied">
+        UPDATE task_adjustment
+        SET status = 'APPLIED',
+            applied_run_id = #{runId},
+            applied_at = #{appliedAt}
+        WHERE id = #{id}
+          AND status = 'PENDING'
+    </update>
+
+</mapper>

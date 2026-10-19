@@ -6,7 +6,11 @@ import com.pydlove.regent.execution.domain.model.AttachmentId;
 import com.pydlove.regent.execution.domain.model.TaskAttachment;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.interfaces.dto.AttachmentResponse;
+import com.pydlove.regent.identity.application.query.AuthenticatedUser;
+import com.pydlove.regent.identity.domain.model.UserId;
+import com.pydlove.regent.identity.interfaces.rest.AuthSessionInterceptor;
 import com.pydlove.regent.shared.domain.DomainException;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -44,17 +48,19 @@ public class AttachmentController {
 
     @PostMapping("/tasks/{taskId}/attachments")
     public AttachmentResponse upload(@PathVariable long taskId,
-                                     @RequestParam("file") MultipartFile file) {
+                                     @RequestParam("file") MultipartFile file,
+                                     HttpServletRequest request) {
         if (file == null || file.isEmpty()) {
             throw new DomainException("没有收到图片内容");
         }
-        TaskAttachment saved = attachmentService.attach(TaskId.of(taskId), toUploaded(file));
+        TaskAttachment saved = attachmentService.attach(
+                TaskId.of(taskId), currentUser(request), toUploaded(file));
         return AttachmentResponse.from(saved);
     }
 
     @GetMapping("/tasks/{taskId}/attachments")
-    public List<AttachmentResponse> list(@PathVariable long taskId) {
-        return attachmentService.list(TaskId.of(taskId)).stream()
+    public List<AttachmentResponse> list(@PathVariable long taskId, HttpServletRequest request) {
+        return attachmentService.list(TaskId.of(taskId), currentUser(request)).stream()
                 .map(AttachmentResponse::from)
                 .toList();
     }
@@ -67,8 +73,8 @@ public class AttachmentController {
      * 这一点用 {@code <a download>} 在前端就能解决。
      */
     @GetMapping("/attachments/{id}/content")
-    public ResponseEntity<byte[]> content(@PathVariable long id) {
-        TaskAttachment attachment = attachmentService.load(AttachmentId.of(id));
+    public ResponseEntity<byte[]> content(@PathVariable long id, HttpServletRequest request) {
+        TaskAttachment attachment = attachmentService.load(AttachmentId.of(id), currentUser(request));
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(attachment.contentType()))
                 .cacheControl(IMAGE_CACHE)
@@ -81,5 +87,10 @@ public class AttachmentController {
         } catch (IOException e) {
             throw new DomainException("上传的图片读不出来：" + e.getMessage());
         }
+    }
+
+    private static UserId currentUser(HttpServletRequest request) {
+        AuthenticatedUser user = AuthSessionInterceptor.currentUser(request);
+        return UserId.of(user.id());
     }
 }

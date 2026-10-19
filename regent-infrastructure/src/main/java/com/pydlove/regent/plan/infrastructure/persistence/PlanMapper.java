@@ -10,9 +10,13 @@ public interface PlanMapper {
 
     PlanData selectById(@Param("id") long id);
 
+    PlanData selectByIdOwned(@Param("id") long id, @Param("ownerId") long ownerId);
+
     PlanData selectByIdForUpdate(@Param("id") long id);
 
     List<PlanData> selectAll();
+
+    List<PlanData> selectAllOwned(@Param("ownerId") long ownerId);
 
     List<PlanData> selectDue(@Param("now") LocalDateTime now, @Param("limit") int limit);
 

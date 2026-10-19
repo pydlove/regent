@@ -8,6 +8,8 @@ import com.pydlove.regent.bug.domain.model.BugSeverity;
 import com.pydlove.regent.bug.domain.model.BugSource;
 import com.pydlove.regent.bug.domain.model.BugStatus;
 import com.pydlove.regent.bug.domain.repository.BugView;
+import com.pydlove.regent.identity.domain.model.UserId;
+import com.pydlove.regent.support.TestCurrentUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -33,7 +35,8 @@ class BugControllerTest {
         commandService = new RecordingBugCommandService();
         queryService = new RecordingBugQueryService();
         mockMvc = MockMvcBuilders.standaloneSetup(new BugController(
-                        queryService, commandService, null))
+                        queryService, commandService, null, null))
+                .addInterceptors(TestCurrentUser.interceptor())
                 .build();
     }
 
@@ -123,6 +126,11 @@ class BugControllerTest {
                     id, 1L, "Regent", null, null, 12L, BugSource.MANUAL,
                     "导出文件名乱码", BugSeverity.MAJOR, status,
                     null, null, null, now, null, null);
+        }
+
+        @Override
+        public BugView get(long id, UserId ownerId) {
+            return get(id);
         }
     }
 }

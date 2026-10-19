@@ -4,6 +4,7 @@ import com.pydlove.regent.governance.domain.repository.DecisionPage;
 import com.pydlove.regent.governance.domain.repository.DecisionQuery;
 import com.pydlove.regent.governance.domain.repository.DecisionQueryRepository;
 import com.pydlove.regent.governance.domain.repository.DecisionView;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 import org.springframework.stereotype.Repository;
 
@@ -26,14 +27,16 @@ public class MyBatisDecisionQueryRepository implements DecisionQueryRepository {
     @Override
     public DecisionPage findPage(DecisionQuery query) {
         String level = query.level() == null ? null : query.level().name();
+        Long projectId = query.projectId() == null ? null : query.projectId().value();
         String scope = query.scope().name();
         String keyword = escapeLike(query.keyword());
-        long total = decisionQueryMapper.countBy(level, scope, keyword);
+        Long ownerId = query.ownerId() == null ? null : query.ownerId().value();
+        long total = decisionQueryMapper.countBy(level, projectId, scope, keyword, ownerId);
         if (total == 0) {
             return new DecisionPage(List.of(), 0, query.page(), query.size());
         }
         List<DecisionView> items = decisionQueryMapper
-                .selectPage(level, scope, keyword, query.size(), query.offset())
+                .selectPage(level, projectId, scope, keyword, ownerId, query.size(), query.offset())
                 .stream()
                 .map(MyBatisDecisionQueryRepository::toView)
                 .toList();
@@ -43,6 +46,12 @@ public class MyBatisDecisionQueryRepository implements DecisionQueryRepository {
     @Override
     public Optional<DecisionView> findById(long id) {
         return Optional.ofNullable(decisionQueryMapper.selectById(id))
+                .map(MyBatisDecisionQueryRepository::toView);
+    }
+
+    @Override
+    public Optional<DecisionView> findByIdOwned(long id, UserId ownerId) {
+        return Optional.ofNullable(decisionQueryMapper.selectByIdOwned(id, ownerId.value()))
                 .map(MyBatisDecisionQueryRepository::toView);
     }
 

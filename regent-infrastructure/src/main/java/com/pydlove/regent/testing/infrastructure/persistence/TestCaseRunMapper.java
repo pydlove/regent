@@ -9,6 +9,8 @@ public interface TestCaseRunMapper {
 
     TestCaseRunRow selectById(@Param("id") long id);
 
+    TestCaseRunRow selectByIdOwned(@Param("id") long id, @Param("ownerId") long ownerId);
+
     List<TestCaseRunRow> selectByTask(@Param("taskId") long taskId);
 
     List<TestCaseRunRow> selectByTestCase(@Param("testCaseId") long testCaseId,

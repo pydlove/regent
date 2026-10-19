@@ -7,6 +7,7 @@ export type BugScope = 'ALL' | 'OPEN' | 'RESOLVED'
 export type BugListParams = {
   severity?: BugSeverity | 'ALL'
   scope?: BugScope
+  projectId?: number | null
   keyword?: string
   page?: number
   size?: number
@@ -16,6 +17,7 @@ export const listBugs = (params: BugListParams = {}) =>
   get<PageResponse<Bug>>('/bugs', {
     severity: params.severity === 'ALL' ? undefined : params.severity,
     scope: params.scope,
+    projectId: params.projectId,
     keyword: params.keyword,
     page: params.page,
     size: params.size,

@@ -26,7 +26,7 @@ public class TaskDraftService {
 
     public TaskDraft save(UserId userId, SaveTaskDraftCommand command) {
         if (command.projectId() != null) {
-            projectProfileRepository.findById(command.projectId())
+            projectProfileRepository.findById(command.projectId(), userId)
                     .orElseThrow(() -> new EntityNotFoundException(
                             "项目不存在：" + command.projectId()));
         }

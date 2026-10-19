@@ -17,6 +17,16 @@
         WHERE id = #{id}
     </select>
 
+    <select id="selectByIdOwned" resultType="com.pydlove.regent.bug.infrastructure.persistence.BugAttachmentData">
+        SELECT a.id, a.bug_id, a.filename, a.content_type, a.size_bytes, a.storage_path, a.created_at
+        FROM bug_attachment a
+        JOIN bug b ON b.id = a.bug_id
+        JOIN project p ON p.id = b.project_id
+        WHERE a.id = #{id}
+          AND b.deleted = 0
+          AND p.owner_id = #{ownerId}
+    </select>
+
     <select id="selectByBug" resultType="com.pydlove.regent.bug.infrastructure.persistence.BugAttachmentData">
         SELECT <include refid="columns"/>
         FROM bug_attachment

@@ -28,6 +28,9 @@
         <if test="level != null">
             AND d.effective_level = #{level}
         </if>
+        <if test="projectId != null">
+            AND d.project_id = #{projectId}
+        </if>
         <if test="scope == 'PENDING'">
             AND d.status = 'PENDING'
         </if>
@@ -37,6 +40,9 @@
         <if test="keyword != null">
             AND (d.question LIKE CONCAT('%', #{keyword}, '%')
                  OR t.title LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="ownerId != null">
+            AND p.owner_id = #{ownerId}
         </if>
     </sql>
 
@@ -60,6 +66,13 @@
         SELECT <include refid="columns"/>
         <include refid="joins"/>
         WHERE d.id = #{id}
+    </select>
+
+    <select id="selectByIdOwned" resultType="com.pydlove.regent.governance.infrastructure.persistence.DecisionRow">
+        SELECT <include refid="columns"/>
+        <include refid="joins"/>
+        WHERE d.id = #{id}
+          AND p.owner_id = #{ownerId}
     </select>
 
 </mapper>

@@ -2,18 +2,26 @@ package com.pydlove.regent.boot.config;
 
 import com.pydlove.regent.deployment.application.command.DeploymentCommandService;
 import com.pydlove.regent.deployment.application.command.DeploymentExecutionService;
+import com.pydlove.regent.deployment.application.command.DeploymentScriptGenerationService;
+import com.pydlove.regent.deployment.application.command.DeploymentServerCommandService;
 import com.pydlove.regent.deployment.application.query.DeploymentQueryService;
 import com.pydlove.regent.deployment.application.query.DeploymentRunQueryService;
+import com.pydlove.regent.deployment.application.query.DeploymentServerQueryService;
 import com.pydlove.regent.deployment.domain.port.DeploymentExecutor;
-import com.pydlove.regent.deployment.domain.port.DeploymentCredentialStore;
 import com.pydlove.regent.deployment.domain.port.DeploymentLogStore;
+import com.pydlove.regent.deployment.domain.port.DeploymentScriptGenerator;
+import com.pydlove.regent.deployment.domain.port.DeploymentServerCredentialStore;
 import com.pydlove.regent.deployment.domain.repository.DeploymentRepository;
 import com.pydlove.regent.deployment.domain.repository.DeploymentRunRepository;
+import com.pydlove.regent.deployment.domain.repository.DeploymentServerRepository;
+import com.pydlove.regent.deployment.infrastructure.generation.CodexDeploymentScriptGenerator;
 import com.pydlove.regent.deployment.infrastructure.log.FileDeploymentLogStore;
-import com.pydlove.regent.deployment.infrastructure.credential.LocalDeploymentCredentialStore;
+import com.pydlove.regent.deployment.infrastructure.credential.LocalDeploymentServerCredentialStore;
 import com.pydlove.regent.deployment.infrastructure.process.ProcessDeploymentExecutor;
-import com.pydlove.regent.deployment.infrastructure.persistence.DeploymentCredentialMapper;
+import com.pydlove.regent.deployment.infrastructure.persistence.DeploymentServerCredentialMapper;
+import com.pydlove.regent.execution.domain.port.AgentExecutor;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
+import com.pydlove.regent.project.domain.repository.ProjectRepository;
 import com.pydlove.regent.shared.domain.TransactionRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,11 +49,49 @@ public class DeploymentConfig {
             DeploymentRepository deploymentRepository,
             DeploymentRunRepository deploymentRunRepository,
             ProjectProfileRepository projectProfileRepository,
-            DeploymentCredentialStore credentialStore,
+            DeploymentServerRepository serverRepository,
             TransactionRunner transactionRunner) {
         return new DeploymentCommandService(
                 deploymentRepository, deploymentRunRepository, projectProfileRepository,
+                serverRepository, transactionRunner);
+    }
+
+    @Bean
+    public DeploymentScriptGenerator deploymentScriptGenerator(
+            AgentExecutor agentExecutor,
+            @Value("${regent.deployment.script-generation-timeout:PT3M}") Duration timeout) {
+        return new CodexDeploymentScriptGenerator(agentExecutor, timeout);
+    }
+
+    @Bean
+    public DeploymentScriptGenerationService deploymentScriptGenerationService(
+            ProjectRepository projectRepository,
+            DeploymentServerRepository serverRepository,
+            DeploymentScriptGenerator deploymentScriptGenerator) {
+        return new DeploymentScriptGenerationService(
+                projectRepository, serverRepository, deploymentScriptGenerator);
+    }
+
+    @Bean
+    public DeploymentServerCommandService deploymentServerCommandService(
+            DeploymentServerRepository serverRepository,
+            DeploymentRepository deploymentRepository,
+            DeploymentRunRepository deploymentRunRepository,
+            ProjectProfileRepository projectProfileRepository,
+            DeploymentServerCredentialStore credentialStore,
+            TransactionRunner transactionRunner) {
+        return new DeploymentServerCommandService(
+                serverRepository, deploymentRepository, deploymentRunRepository, projectProfileRepository,
                 credentialStore, transactionRunner);
+    }
+
+    @Bean
+    public DeploymentServerQueryService deploymentServerQueryService(
+            DeploymentServerRepository serverRepository,
+            DeploymentRepository deploymentRepository,
+            DeploymentServerCredentialStore credentialStore) {
+        return new DeploymentServerQueryService(
+                serverRepository, deploymentRepository, credentialStore);
     }
 
     @Bean
@@ -53,17 +99,18 @@ public class DeploymentConfig {
             DeploymentRepository deploymentRepository,
             DeploymentRunRepository deploymentRunRepository,
             ProjectProfileRepository projectProfileRepository,
-            DeploymentCredentialStore credentialStore) {
+            DeploymentServerRepository serverRepository,
+            DeploymentServerCredentialStore credentialStore) {
         return new DeploymentQueryService(
                 deploymentRepository, deploymentRunRepository, projectProfileRepository,
-                credentialStore);
+                serverRepository, credentialStore);
     }
 
     @Bean
-    public DeploymentCredentialStore deploymentCredentialStore(
-            DeploymentCredentialMapper mapper,
+    public DeploymentServerCredentialStore deploymentServerCredentialStore(
+            DeploymentServerCredentialMapper mapper,
             @Value("${regent.home}") String home) {
-        return new LocalDeploymentCredentialStore(
+        return new LocalDeploymentServerCredentialStore(
                 mapper, Path.of(home, "deployment", "credential.key"));
     }
 
@@ -105,14 +152,16 @@ public class DeploymentConfig {
     public DeploymentExecutionService deploymentExecutionService(
             DeploymentRepository deploymentRepository,
             DeploymentRunRepository deploymentRunRepository,
+            DeploymentServerRepository serverRepository,
             DeploymentExecutor deploymentExecutor,
-            DeploymentCredentialStore credentialStore,
+            DeploymentServerCredentialStore credentialStore,
             DeploymentLogStore deploymentLogStore,
             @Qualifier("deploymentWorkers") ExecutorService deploymentWorkers,
             TransactionRunner transactionRunner) {
         return new DeploymentExecutionService(
                 deploymentRepository,
                 deploymentRunRepository,
+                serverRepository,
                 deploymentExecutor,
                 credentialStore,
                 deploymentLogStore,

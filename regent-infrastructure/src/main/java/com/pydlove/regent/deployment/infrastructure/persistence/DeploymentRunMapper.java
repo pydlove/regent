@@ -9,6 +9,8 @@ public interface DeploymentRunMapper {
 
     DeploymentRunRow selectById(@Param("id") long id);
 
+    DeploymentRunRow selectByIdOwned(@Param("id") long id, @Param("ownerId") long ownerId);
+
     List<DeploymentRunRow> selectByDeployment(@Param("deploymentId") long deploymentId,
                                               @Param("limit") int limit);
 

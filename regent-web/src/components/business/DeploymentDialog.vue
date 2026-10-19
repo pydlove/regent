@@ -4,9 +4,16 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  CircleAlert,
+  CircleCheck,
   Copy,
   FileCode2,
+  FolderOpen,
+  Plus,
+  RefreshCw,
   ServerCog,
+  Sparkles,
+  Square,
   Upload,
   X,
 } from '@lucide/vue'
@@ -15,16 +22,21 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { ApiError } from '@/api/http'
 import {
   createDeployment,
+  cancelDeploymentScriptGeneration,
+  generateDeploymentScript,
   getDeployment,
   updateDeployment,
+  validateDeploymentScript,
   type SaveDeploymentInput,
 } from '@/api/deployments'
+import { listDeploymentServers } from '@/api/deploymentServers'
 import Button from '@/components/ui/button/Button.vue'
+import DeploymentServerDialog from '@/components/business/DeploymentServerDialog.vue'
+import DirectoryPickerDialog from '@/components/business/DirectoryPickerDialog.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import DialogField from '@/components/ui/dialog/DialogField.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import Input from '@/components/ui/input/Input.vue'
-import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
 import Select from '@/components/ui/select/Select.vue'
 import {
   DEPLOYMENT_SCRIPT_RULES,
@@ -32,7 +44,15 @@ import {
   DEPLOYMENT_SCRIPT_VARIABLES,
 } from '@/content/deploymentScript'
 import { useToast } from '@/composables/useToast'
-import type { DeploymentDetail, DeploymentSummary, Project } from '@/types/api'
+import type {
+  DeploymentDetail,
+  DeploymentScriptValidation,
+  DeploymentServer,
+  DeploymentSummary,
+  Project,
+} from '@/types/api'
+import { inferDeploymentDirectory } from '@/utils/deploymentDirectory'
+import { resolveDeploymentServerSelection } from '@/utils/deploymentServerSelection'
 import { formatBytes } from '@/utils/format'
 
 const MAX_SCRIPT_BYTES = 512 * 1024
@@ -47,58 +67,98 @@ const open = defineModel<boolean>('open', { default: false })
 const toast = useToast()
 
 const projectId = ref('')
+const serverId = ref('')
+const allServers = ref<DeploymentServer[]>([])
 const name = ref('')
-const host = ref('')
-const port = ref('22')
-const username = ref('root')
-const authType = ref('KEY')
-const password = ref('')
-const credentialConfigured = ref(false)
-const remoteDirectory = ref('~')
+const remoteDirectory = ref('')
+const workspacePath = ref('')
 const scriptFilename = ref<string | null>(null)
 const scriptContent = ref<string | null>(null)
+const scriptValidation = ref<DeploymentScriptValidation | null>(null)
+const checkingScript = ref(false)
+const generatingScript = ref(false)
+const stoppingScript = ref(false)
+const cancelledGeneration = ref(false)
+let generationRequestId: string | null = null
 const loading = ref(false)
+const loadingServers = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const specOpen = ref(true)
 const copiedTemplate = ref(false)
+const serverDialogOpen = ref(false)
+const directoryPickerOpen = ref(false)
+const editingServer = ref<DeploymentServer | null>(null)
 let copiedTemplateTimer: number | undefined
+let initializing = false
 
-const authItems = [
-  { value: 'KEY', label: 'SSH 密钥' },
-  { value: 'PASSWORD', label: '密码' },
-]
 const projectItems = computed(() =>
   props.projects.map((project) => ({
     value: String(project.id),
     label: project.enabled ? project.name : `${project.name}（已暂停）`,
   })),
 )
-const authModel = computed({
-  get: () => authType.value,
-  set: (value: string) => {
-    authType.value = value
-  },
+const servers = computed(() => {
+  const selectedProjectId = Number(projectId.value)
+  if (!Number.isSafeInteger(selectedProjectId) || selectedProjectId <= 0) return []
+  return allServers.value.filter((server) => server.projectId === selectedProjectId)
 })
+const selectedProject = computed(
+  () => props.projects.find((project) => String(project.id) === projectId.value) ?? null,
+)
+const serverItems = computed(() =>
+  servers.value.map((server) => ({
+    value: String(server.id),
+    label: `${server.name} · ${server.username}@${server.host}:${server.port}`,
+  })),
+)
+const selectedServer = computed(
+  () => servers.value.find((server) => String(server.id) === serverId.value) ?? null,
+)
 const scriptSize = computed(() => new Blob([scriptContent.value ?? '']).size)
+const canGenerateScript = computed(
+  () =>
+    projectId.value !== '' &&
+    serverId.value !== '' &&
+    workspacePath.value.trim().length > 0 &&
+    remoteDirectory.value.trim().length > 0 &&
+    !loading.value &&
+    !loadingServers.value &&
+    !checkingScript.value &&
+    !generatingScript.value &&
+    !saving.value,
+)
 const canSave = computed(
   () =>
     projectId.value !== '' &&
+    serverId.value !== '' &&
     name.value.trim().length > 0 &&
-    host.value.trim().length > 0 &&
-    Number(port.value) >= 1 &&
-    Number(port.value) <= 65535 &&
-    username.value.trim().length > 0 &&
-    (authType.value !== 'PASSWORD' ||
-      password.value.length > 0 ||
-      credentialConfigured.value) &&
     remoteDirectory.value.trim().length > 0 &&
     scriptFilename.value !== null &&
     scriptContent.value !== null &&
+    scriptValidation.value?.valid === true &&
+    !checkingScript.value &&
+    !generatingScript.value &&
     !saving.value &&
     !loading.value,
 )
+
+const remoteDirectoryNotice = computed(() => {
+  if (remoteDirectory.value.trim() || !scriptContent.value?.trim()) return null
+  if (scriptContent.value.includes('REGENT_DEPLOY_DIRECTORY')) {
+    return '该脚本通过 REGENT_DEPLOY_DIRECTORY 读取远程目录，没有写死路径；请填写服务器上的项目根目录（package.json 所在目录）。'
+  }
+  return '未从脚本中识别到远程目录，请手动填写服务器上的部署工作目录。'
+})
+
+const generateHint = computed(() => {
+  if (projectId.value === '') return '先选择所属项目'
+  if (workspacePath.value.trim() === '') return '先选择项目文件夹'
+  if (serverId.value === '') return '先选择部署服务器'
+  if (remoteDirectory.value.trim() === '') return '先填写远程目录'
+  return '让 Codex 分析项目并生成部署脚本'
+})
 
 function messageOf(e: unknown): string {
   if (e instanceof ApiError) return e.message
@@ -106,43 +166,113 @@ function messageOf(e: unknown): string {
 }
 
 watch(open, async (opened) => {
-  if (!opened) return
+  if (!opened) {
+    if (generationRequestId) {
+      void cancelDeploymentScriptGeneration(generationRequestId).catch(() => false)
+    }
+    return
+  }
+  initializing = true
   loading.value = props.deployment !== null
   saving.value = false
   error.value = null
-  projectId.value = String(
-    props.deployment?.projectId ??
-      props.defaultProjectId ??
-      props.projects[0]?.id ??
-      '',
-  )
+  const requestedProjectId = props.deployment?.projectId ?? props.defaultProjectId
+  projectId.value =
+    requestedProjectId === null
+      ? String(props.projects[0]?.id ?? '')
+      : String(requestedProjectId)
+  workspacePath.value = selectedProject.value?.path ?? ''
+  serverId.value =
+    props.deployment?.serverId === undefined ? '' : String(props.deployment.serverId)
   name.value = props.deployment?.name ?? ''
-  host.value = props.deployment?.host ?? ''
-  port.value = String(props.deployment?.port ?? 22)
-  username.value = props.deployment?.username ?? 'root'
-  authType.value = props.deployment?.authType ?? 'KEY'
-  password.value = ''
-  credentialConfigured.value = false
-  remoteDirectory.value = props.deployment?.remoteDirectory ?? '~'
+  remoteDirectory.value = props.deployment?.remoteDirectory ?? ''
   scriptFilename.value = props.deployment?.scriptFilename ?? null
   scriptContent.value = null
+  scriptValidation.value = null
+  await loadServers(requestedProjectId)
+  initializing = false
   if (!props.deployment) return
   try {
     const detail = await getDeployment(props.deployment.id)
-    host.value = detail.host
-    port.value = String(detail.port)
-    username.value = detail.username
-    authType.value = detail.authType
-    credentialConfigured.value = detail.credentialConfigured
+    serverId.value = String(detail.serverId)
     remoteDirectory.value = detail.remoteDirectory
     scriptFilename.value = detail.scriptFilename
     scriptContent.value = detail.scriptContent
+    const storedDirectory = detail.remoteDirectory.trim()
+    if (!storedDirectory || storedDirectory === '~') {
+      const inferredDirectory = inferDeploymentDirectory(detail.scriptContent)
+      if (inferredDirectory) remoteDirectory.value = inferredDirectory
+    }
+    await validateScript()
   } catch (e) {
     error.value = messageOf(e)
   } finally {
     loading.value = false
   }
 })
+
+const selectAvailableServer = () => {
+  if (!servers.value.some((server) => String(server.id) === serverId.value)) {
+    serverId.value = servers.value[0] ? String(servers.value[0].id) : ''
+  }
+}
+
+const loadServers = async (requestedProjectId: number | null) => {
+  loadingServers.value = true
+  try {
+    allServers.value = await listDeploymentServers()
+    const selection = resolveDeploymentServerSelection(
+      requestedProjectId,
+      props.projects,
+      allServers.value,
+    )
+    if (selection.projectId !== null) {
+      projectId.value = String(selection.projectId)
+      workspacePath.value = selectedProject.value?.path ?? ''
+    }
+    selectAvailableServer()
+  } catch (e) {
+    allServers.value = []
+    serverId.value = ''
+    error.value = messageOf(e)
+  } finally {
+    loadingServers.value = false
+  }
+}
+
+watch(projectId, () => {
+  if (open.value && !initializing) {
+    workspacePath.value = selectedProject.value?.path ?? ''
+    selectAvailableServer()
+  }
+})
+
+watch(
+  () => props.projects.map((project) => project.id).join(','),
+  () => {
+    if (!open.value || initializing || projectId.value !== '' || !props.projects[0]) return
+    projectId.value = String(props.projects[0].id)
+    workspacePath.value = selectedProject.value?.path ?? ''
+  },
+)
+
+const openNewServer = () => {
+  editingServer.value = null
+  serverDialogOpen.value = true
+}
+
+const onServerSaved = async (server: DeploymentServer) => {
+  if (String(server.projectId) === projectId.value) {
+    allServers.value = await listDeploymentServers()
+    selectAvailableServer()
+    serverId.value = String(server.id)
+  }
+}
+
+const onWorkspacePicked = (path: string) => {
+  workspacePath.value = path
+  directoryPickerOpen.value = false
+}
 
 const importFile = async (event: Event) => {
   const input = event.target as HTMLInputElement
@@ -157,9 +287,23 @@ const importFile = async (event: Event) => {
     return
   }
   try {
-    scriptContent.value = await file.text()
+    const content = await file.text()
+    scriptContent.value = content
     scriptFilename.value = file.name
     if (!name.value.trim()) name.value = file.name.replace(/\.[^.]+$/, '')
+    const inferredDirectory = inferDeploymentDirectory(content)
+    if (inferredDirectory) {
+      remoteDirectory.value = inferredDirectory
+      toast.success('已从脚本识别远程目录', inferredDirectory)
+    } else if (!remoteDirectory.value.trim()) {
+      toast.warning(
+        '未从脚本识别到远程目录',
+        content.includes('REGENT_DEPLOY_DIRECTORY')
+          ? '脚本通过 REGENT_DEPLOY_DIRECTORY 读取路径，请手动填写服务器上的项目根目录'
+          : '请手动填写服务器上的部署工作目录',
+      )
+    }
+    await validateScript()
   } catch {
     toast.warning('无法读取部署脚本', '请确认文件是 UTF-8 文本脚本')
   }
@@ -168,6 +312,90 @@ const importFile = async (event: Event) => {
 const removeScript = () => {
   scriptFilename.value = null
   scriptContent.value = null
+  scriptValidation.value = null
+}
+
+const validateScript = async () => {
+  if (scriptContent.value === null) {
+    scriptValidation.value = null
+    return
+  }
+  checkingScript.value = true
+  try {
+    scriptValidation.value = await validateDeploymentScript(scriptContent.value)
+  } catch (e) {
+    scriptValidation.value = {
+      valid: false,
+      issues: [{ line: 1, code: 'VALIDATION_FAILED', message: messageOf(e) }],
+    }
+  } finally {
+    checkingScript.value = false
+  }
+}
+
+const generateScript = async () => {
+  if (!canGenerateScript.value) return
+  generatingScript.value = true
+  stoppingScript.value = false
+  cancelledGeneration.value = false
+  generationRequestId = newGenerationRequestId()
+  error.value = null
+  try {
+    const generated = await generateDeploymentScript({
+      requestId: generationRequestId,
+      projectId: Number(projectId.value),
+      serverId: Number(serverId.value),
+      workspacePath: workspacePath.value.trim(),
+      remoteDirectory: remoteDirectory.value.trim(),
+    })
+    if (cancelledGeneration.value) {
+      error.value = null
+      toast.warning('已停止 AI 生成', '当前脚本内容保持不变')
+      return
+    }
+    scriptFilename.value = generated.scriptFilename
+    scriptContent.value = generated.scriptContent
+    await validateScript()
+    if (scriptValidation.value?.valid) {
+      toast.success('Codex 已生成部署脚本', generated.scriptFilename)
+    }
+  } catch (e) {
+    if (cancelledGeneration.value) {
+      error.value = null
+      toast.warning('已停止 AI 生成', '当前脚本内容保持不变')
+      return
+    }
+    const message = messageOf(e)
+    error.value = message
+    toast.failure('部署脚本生成失败', message)
+  } finally {
+    generatingScript.value = false
+    stoppingScript.value = false
+    cancelledGeneration.value = false
+    generationRequestId = null
+  }
+}
+
+const newGenerationRequestId = (): string =>
+  globalThis.crypto?.randomUUID?.() ??
+  `deploy-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+const stopScriptGeneration = async () => {
+  const requestId = generationRequestId
+  if (!requestId || stoppingScript.value) return
+  stoppingScript.value = true
+  cancelledGeneration.value = true
+  try {
+    const cancelled = await cancelDeploymentScriptGeneration(requestId)
+    if (!cancelled) {
+      cancelledGeneration.value = false
+      toast.warning('AI 生成已经结束', '无需再停止')
+    }
+  } catch (e) {
+    cancelledGeneration.value = false
+    stoppingScript.value = false
+    toast.failure('停止 AI 生成失败', messageOf(e))
+  }
 }
 
 const copyTemplate = async () => {
@@ -209,7 +437,12 @@ const copyTemplate = async () => {
   toast.success('部署脚本模板已复制')
 }
 
-onUnmounted(() => window.clearTimeout(copiedTemplateTimer))
+onUnmounted(() => {
+  window.clearTimeout(copiedTemplateTimer)
+  if (generationRequestId) {
+    void cancelDeploymentScriptGeneration(generationRequestId).catch(() => false)
+  }
+})
 
 const save = async () => {
   if (!canSave.value) return
@@ -217,15 +450,11 @@ const save = async () => {
   error.value = null
   const input: SaveDeploymentInput = {
     projectId: Number(projectId.value),
+    serverId: Number(serverId.value),
     name: name.value.trim(),
-    host: host.value.trim(),
-    port: Number(port.value),
-    username: username.value.trim(),
-    authType: authType.value,
     remoteDirectory: remoteDirectory.value.trim(),
     scriptFilename: scriptFilename.value ?? '',
     scriptContent: scriptContent.value ?? '',
-    password: password.value,
   }
   try {
     const saved = props.deployment
@@ -251,7 +480,7 @@ const save = async () => {
     layout="form"
     size="large"
     :title="deployment ? '编辑部署' : '新建部署'"
-    description="先选择部署脚本，再填写项目、服务器和认证信息；SSH 密码加密保存，执行时只需二次确认。"
+    description="先选择部署脚本和已录入的服务器；主机与密码只在服务器资源里维护一次。"
     :icon="ServerCog"
   >
     <div class="flex flex-col gap-3">
@@ -260,11 +489,11 @@ const save = async () => {
       <DialogField
         label="部署脚本"
         required
-        :hint="`先上传 UTF-8 shell 脚本，最大 ${formatBytes(MAX_SCRIPT_BYTES)}；执行时通过 SSH stdin 传入`"
+        :hint="`上传 UTF-8 shell 脚本，或选择项目文件夹和远程目录后由 Codex 生成；保存前自动检测规范`"
       >
         <div
           v-if="scriptFilename"
-          class="flex items-center gap-2 rounded-panel border border-separator-soft bg-content px-2.5 py-2"
+          class="flex flex-wrap items-center gap-2 rounded-panel border border-separator-soft bg-content px-2.5 py-2"
         >
           <span class="grid size-7 shrink-0 place-items-center rounded-control bg-accent/10 text-accent">
             <Icon :as="FileCode2" size="inline" />
@@ -278,13 +507,32 @@ const save = async () => {
             </p>
           </div>
           <Button size="sm" @click="fileInput?.click()">替换</Button>
+          <Button
+            size="sm"
+            :disabled="!canGenerateScript"
+            :title="generateHint"
+            @click="generateScript"
+          >
+            <Icon :as="generatingScript ? RefreshCw : Sparkles" size="inline" />
+            {{ generatingScript ? '生成中…' : 'AI 生成' }}
+          </Button>
           <Button size="sm" variant="ghost" @click="removeScript">
             <Icon :as="X" size="inline" />移除
           </Button>
         </div>
-        <Button v-else :disabled="loading || saving" @click="fileInput?.click()">
-          <Icon :as="Upload" size="inline" />上传部署脚本
-        </Button>
+        <div v-else class="flex flex-wrap gap-2">
+          <Button :disabled="loading || saving" @click="fileInput?.click()">
+            <Icon :as="Upload" size="inline" />上传部署脚本
+          </Button>
+          <Button
+            :disabled="!canGenerateScript"
+            :title="generateHint"
+            @click="generateScript"
+          >
+            <Icon :as="generatingScript ? RefreshCw : Sparkles" size="inline" />
+            {{ generatingScript ? 'Codex 生成中…' : 'AI 生成脚本' }}
+          </Button>
+        </div>
         <input
           ref="fileInput"
           type="file"
@@ -292,6 +540,57 @@ const save = async () => {
           accept=".sh,.bash,.zsh,.command,.txt"
           @change="importFile"
         />
+        <div class="mt-2">
+          <div
+            v-if="generatingScript"
+            class="flex items-center justify-between gap-3"
+          >
+            <p class="flex min-w-0 items-center gap-1.5 text-caption text-label-tertiary">
+              <Icon :as="RefreshCw" size="inline" class="animate-spin" />
+              <span class="truncate">Codex 正在分析项目并生成脚本…</span>
+            </p>
+            <Button
+              size="sm"
+              variant="ghost"
+              :disabled="stoppingScript"
+              @click="stopScriptGeneration"
+            >
+              <Icon :as="Square" size="inline" />
+              {{ stoppingScript ? '停止中…' : '停止生成' }}
+            </Button>
+          </div>
+          <p v-else-if="checkingScript" class="flex items-center gap-1.5 text-caption text-label-tertiary">
+            <Icon :as="RefreshCw" size="inline" class="animate-spin" />正在检测脚本…
+          </p>
+          <div
+            v-else-if="scriptValidation?.valid"
+            class="flex items-center gap-1.5 text-caption text-success"
+          >
+            <Icon :as="CircleCheck" size="inline" />脚本检测通过
+          </div>
+          <div v-else-if="scriptValidation && !scriptValidation.valid">
+            <div class="flex items-center gap-1.5 text-caption font-emphasis text-danger">
+              <Icon :as="CircleAlert" size="inline" />脚本不符合规范，修复后才能保存和执行
+            </div>
+            <ul class="mt-1 space-y-1">
+              <li
+                v-for="issue in scriptValidation.issues"
+                :key="`${issue.line}-${issue.code}`"
+                class="text-caption leading-relaxed text-danger"
+              >
+                第 {{ issue.line }} 行：{{ issue.message }}
+              </li>
+            </ul>
+            <Button
+              size="sm"
+              class="mt-1.5"
+              :disabled="checkingScript || scriptContent === null"
+              @click="validateScript"
+            >
+              <Icon :as="RefreshCw" size="inline" />重新检测
+            </Button>
+          </div>
+        </div>
       </DialogField>
 
       <DialogField
@@ -308,63 +607,80 @@ const save = async () => {
         />
       </DialogField>
 
-      <DialogField label="名称" required hint="例如：生产环境 API、预发布回归环境">
+      <DialogField
+        label="项目文件夹"
+        hint="AI 生成时读取这个目录，优先参考其中的 deploy / script 脚本；必须位于所选项目工作区内"
+      >
+        <div class="flex gap-2">
+          <Input
+            v-model="workspacePath"
+            class="min-w-0 flex-1 font-mono"
+            placeholder="选择项目工作区或子目录"
+          />
+          <Button
+            :disabled="projectId === ''"
+            @click="directoryPickerOpen = true"
+          >
+            <Icon :as="FolderOpen" size="inline" />选择目录
+          </Button>
+        </div>
+      </DialogField>
+
+      <DialogField
+        label="部署名称"
+        required
+        hint="用于部署列表识别；与上方脚本文件名相互独立，例如：生产环境 API、预发布回归环境"
+      >
         <Input v-model="name" class="w-full" placeholder="生产环境 API" />
       </DialogField>
 
       <DialogField
         label="服务器"
         required
-        hint="SSH 地址与端口；脚本中通过 REGENT_DEPLOY_HOST 与 REGENT_DEPLOY_PORT 读取"
+        hint="服务器连接信息由项目级服务器资源统一维护，可被多个部署脚本复用"
       >
         <div class="flex gap-2">
           <div class="min-w-0 flex-1">
-            <span class="mb-1 block text-caption text-label-tertiary">主机地址</span>
-            <Input v-model="host" class="w-full" placeholder="10.0.0.12 或 api.example.com" />
+            <Select
+              v-model="serverId"
+              :items="serverItems"
+              :disabled="loadingServers"
+              placeholder="选择服务器"
+              class="w-full"
+            />
           </div>
-          <div class="w-20 shrink-0">
-            <span class="mb-1 block text-caption text-label-tertiary">端口</span>
-            <Input v-model="port" type="number" class="w-full" placeholder="22" />
-          </div>
+          <Button :disabled="loadingServers" @click="openNewServer">
+            <Icon :as="Plus" size="inline" />新建服务器
+          </Button>
         </div>
-      </DialogField>
-
-      <DialogField label="登录用户" required hint="脚本中通过 REGENT_DEPLOY_USER 读取">
-        <Input v-model="username" class="w-full" placeholder="root" autocomplete="username" />
-      </DialogField>
-
-      <DialogField label="认证方式" required>
-        <SegmentedControl v-model="authModel" :items="authItems" />
-        <p v-if="authType === 'PASSWORD'" class="mt-1 text-caption text-label-tertiary">
-          密码会在保存配置时加密写入本机凭据库，不写日志，也不会通过接口回传。
+        <p v-if="loadingServers" class="mt-1 text-caption text-label-tertiary">
+          正在读取服务器…
         </p>
-      </DialogField>
-
-      <DialogField
-        v-if="authType === 'PASSWORD'"
-        label="SSH 密码"
-        required
-        :hint="
-          credentialConfigured
-            ? '已保存密码；留空保持不变，输入新密码会覆盖'
-            : '保存部署时需要填写，执行时只做二次确认'
-        "
-      >
-        <Input
-          v-model="password"
-          type="password"
-          class="w-full"
-          :placeholder="credentialConfigured ? '已保存，留空保持不变' : '输入服务器登录密码'"
-          autocomplete="new-password"
-        />
+        <p
+          v-else-if="selectedServer"
+          class="mt-1 truncate font-mono text-caption text-label-tertiary"
+        >
+          {{ selectedServer.username }}@{{ selectedServer.host }}:{{ selectedServer.port }}
+        </p>
+        <p v-else class="mt-1 text-caption text-warning">
+          当前项目还没有服务器，请切换上方项目或先新建一台。
+        </p>
       </DialogField>
 
       <DialogField
         label="远程目录"
         required
-        hint="脚本会在这个目录下执行，并通过 REGENT_DEPLOY_DIRECTORY 读取；支持 ~ 或绝对路径"
+        hint="部署脚本在服务器上的工作目录；脚本若使用 REGENT_DEPLOY_DIRECTORY，则不会写死路径，需要手动填写服务器上的项目根目录"
       >
-        <Input v-model="remoteDirectory" class="w-full font-mono" placeholder="~ 或 /opt/regent" />
+        <Input
+          v-model="remoteDirectory"
+          class="w-full font-mono"
+          :invalid="Boolean(remoteDirectoryNotice)"
+          placeholder="~ 或 /opt/regent"
+        />
+        <p v-if="remoteDirectoryNotice" class="mt-1 text-caption leading-relaxed text-warning">
+          {{ remoteDirectoryNotice }}
+        </p>
       </DialogField>
 
       <DialogField label="脚本规范">
@@ -452,4 +768,18 @@ const save = async () => {
       </Button>
     </template>
   </Dialog>
+
+  <DeploymentServerDialog
+    v-model:open="serverDialogOpen"
+    :server="editingServer"
+    :projects="projects"
+    :default-project-id="projectId === '' ? null : Number(projectId)"
+    @saved="onServerSaved"
+  />
+
+  <DirectoryPickerDialog
+    v-model:open="directoryPickerOpen"
+    :initial="workspacePath || selectedProject?.path"
+    @picked="onWorkspacePicked"
+  />
 </template>

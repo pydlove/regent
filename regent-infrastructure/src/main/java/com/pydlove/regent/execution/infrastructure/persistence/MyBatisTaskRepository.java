@@ -3,6 +3,7 @@ package com.pydlove.regent.execution.infrastructure.persistence;
 import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.shared.domain.DomainException;
 import org.springframework.stereotype.Repository;
@@ -32,6 +33,12 @@ public class MyBatisTaskRepository implements TaskRepository {
     @Override
     public Optional<Task> findById(TaskId id) {
         return Optional.ofNullable(taskMapper.selectById(id.value()))
+                .map(TaskDataMapper::toDomain);
+    }
+
+    @Override
+    public Optional<Task> findByIdOwned(TaskId id, UserId ownerId) {
+        return Optional.ofNullable(taskMapper.selectByIdOwned(id.value(), ownerId.value()))
                 .map(TaskDataMapper::toDomain);
     }
 

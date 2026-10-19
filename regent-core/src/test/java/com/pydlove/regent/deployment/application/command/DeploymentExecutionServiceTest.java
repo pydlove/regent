@@ -5,6 +5,7 @@ import com.pydlove.regent.deployment.domain.model.DeploymentAuthType;
 import com.pydlove.regent.deployment.domain.model.DeploymentExecutionResult;
 import com.pydlove.regent.deployment.domain.model.DeploymentRun;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunStatus;
+import com.pydlove.regent.deployment.domain.model.DeploymentServer;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.support.DeploymentFakes;
 import com.pydlove.regent.shared.domain.TransactionRunner;
@@ -25,30 +26,37 @@ class DeploymentExecutionServiceTest {
 
     private DeploymentFakes.Deployments deployments;
     private DeploymentFakes.Runs runs;
+    private DeploymentFakes.Servers servers;
     private DeploymentFakes.Logs logs;
     private DeploymentFakes.Credentials credentials;
     private DeploymentFakes.ScriptedExecutor executor;
     private DeploymentExecutionService service;
     private Deployment deployment;
+    private DeploymentServer server;
 
     @BeforeEach
     void setUp() {
         deployments = new DeploymentFakes.Deployments();
         runs = new DeploymentFakes.Runs();
+        servers = new DeploymentFakes.Servers();
         logs = new DeploymentFakes.Logs();
         credentials = new DeploymentFakes.Credentials();
         executor = new DeploymentFakes.ScriptedExecutor();
         service = new DeploymentExecutionService(
                 deployments,
                 runs,
+                servers,
                 executor,
                 credentials,
                 logs,
                 new DirectExecutorService(),
                 new DirectTransactions());
+        server = servers.put(DeploymentServer.create(
+                ProjectId.of(7L), "生产服务器", "api.example.com", 22,
+                "root", DeploymentAuthType.KEY));
         deployment = deployments.put(Deployment.create(
-                ProjectId.of(7L), "生产", "api.example.com", 22, "root", DeploymentAuthType.KEY,
-                "/opt/app", "deploy.sh", "echo ok"));
+                ProjectId.of(7L), server.getId(), "生产",
+                "/opt/app", "deploy.sh", validScript()));
     }
 
     @Test
@@ -68,13 +76,15 @@ class DeploymentExecutionServiceTest {
     @DisplayName("密码认证读取配置时保存的密码，密码只传给执行器")
     void usesStoredPasswordForPasswordAuth() {
         Deployment passwordDeployment = deployments.put(Deployment.create(
-                ProjectId.of(7L), "密码服务器", "api.example.com", 22, "deploy",
-                DeploymentAuthType.PASSWORD,
-                "~", "deploy.sh", "echo ok"));
+                ProjectId.of(7L), servers.put(DeploymentServer.create(
+                        ProjectId.of(7L), "密码服务器", "api.example.com", 22,
+                        "deploy", DeploymentAuthType.PASSWORD)).getId(),
+                "密码部署",
+                "~", "deploy.sh", validScript()));
 
         assertThrows(RuntimeException.class, () -> service.start(passwordDeployment.getId()));
 
-        credentials.save(passwordDeployment.getId(), "s3cret");
+        credentials.save(passwordDeployment.getServerId(), "s3cret");
         service.start(passwordDeployment.getId());
         assertEquals("s3cret", executor.requests().get(0).password());
     }
@@ -82,13 +92,24 @@ class DeploymentExecutionServiceTest {
     @Test
     @DisplayName("启动恢复把排队中的部署标记为中断")
     void recoversInterruptedRuns() {
-        DeploymentRun queued = DeploymentRun.queue(deployment.snapshot());
+        DeploymentRun queued = DeploymentRun.queue(deployment.snapshot(), server.snapshot());
         runs.save(queued);
 
         int interrupted = service.recoverInterruptedRuns();
 
         assertEquals(1, interrupted);
         assertEquals(DeploymentRunStatus.INTERRUPTED, runs.all().get(0).getStatus());
+    }
+
+    @Test
+    @DisplayName("历史遗留的不规范脚本不能开始执行")
+    void rejectsInvalidStoredScript() {
+        Deployment invalid = deployments.put(Deployment.create(
+                ProjectId.of(7L), server.getId(), "遗留部署",
+                "/opt/app", "legacy.sh", "echo legacy"));
+
+        assertThrows(RuntimeException.class, () -> service.start(invalid.getId()));
+        assertTrue(runs.all().isEmpty());
     }
 
     private static final class DirectExecutorService extends AbstractExecutorService {
@@ -121,6 +142,14 @@ class DeploymentExecutionServiceTest {
         public void execute(Runnable command) {
             command.run();
         }
+    }
+
+    private static String validScript() {
+        return """
+                #!/usr/bin/env bash
+                set -Eeuo pipefail
+                echo ok
+                """;
     }
 
     private static final class DirectTransactions implements TransactionRunner {

@@ -1,5 +1,7 @@
 package com.pydlove.regent.governance.domain.repository;
 
+import com.pydlove.regent.identity.domain.model.UserId;
+
 import java.util.Optional;
 
 /**
@@ -13,4 +15,8 @@ public interface DecisionQueryRepository {
     DecisionPage findPage(DecisionQuery query);
 
     Optional<DecisionView> findById(long id);
+
+    default Optional<DecisionView> findByIdOwned(long id, UserId ownerId) {
+        return findById(id);
+    }
 }

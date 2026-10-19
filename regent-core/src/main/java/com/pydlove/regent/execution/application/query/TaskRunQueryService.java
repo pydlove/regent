@@ -6,6 +6,7 @@ import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskRunId;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 
 import java.util.ArrayList;
@@ -37,6 +38,11 @@ public class TaskRunQueryService {
 
     public TaskRun get(TaskRunId id) {
         return taskRunRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("执行记录不存在：" + id));
+    }
+
+    public TaskRun get(TaskRunId id, UserId ownerId) {
+        return taskRunRepository.findByIdOwned(id, ownerId)
                 .orElseThrow(() -> new EntityNotFoundException("执行记录不存在：" + id));
     }
 

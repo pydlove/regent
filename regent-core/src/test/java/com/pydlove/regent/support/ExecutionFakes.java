@@ -13,6 +13,9 @@ import com.pydlove.regent.execution.domain.model.ExecResult;
 import com.pydlove.regent.execution.domain.model.RunEvent;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.model.Task;
+import com.pydlove.regent.execution.domain.model.TaskAdjustment;
+import com.pydlove.regent.execution.domain.model.TaskAdjustmentId;
+import com.pydlove.regent.execution.domain.model.TaskAdjustmentStatus;
 import com.pydlove.regent.execution.domain.model.TaskAttachment;
 import com.pydlove.regent.execution.domain.model.TaskDraft;
 import com.pydlove.regent.execution.domain.model.TaskDraftId;
@@ -24,6 +27,7 @@ import com.pydlove.regent.execution.domain.port.AgentExecutor;
 import com.pydlove.regent.execution.domain.port.BranchManager;
 import com.pydlove.regent.execution.domain.port.RunEventListener;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
+import com.pydlove.regent.execution.domain.repository.TaskAdjustmentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskAttachmentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskDraftRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
@@ -424,6 +428,59 @@ public final class ExecutionFakes {
                 run.assignIdentity(TaskRunId.of(++sequence));
             }
             store.put(run.getId().value(), run);
+        }
+    }
+
+    /** 只记账的调整方向仓储：保留状态变化，用来断言下发时间与执行记录。 */
+    public static final class Adjustments implements TaskAdjustmentRepository {
+
+        private final Map<Long, TaskAdjustment> store = new LinkedHashMap<>();
+        private long sequence;
+
+        public void add(TaskAdjustment adjustment) {
+            if (adjustment.getId() == null) {
+                adjustment.assignIdentity(TaskAdjustmentId.of(++sequence));
+            }
+            store.put(adjustment.getId().value(), adjustment);
+        }
+
+        public List<TaskAdjustment> all() {
+            return List.copyOf(store.values());
+        }
+
+        @Override
+        public Optional<TaskAdjustment> findById(TaskAdjustmentId id) {
+            return Optional.ofNullable(store.get(id.value()));
+        }
+
+        @Override
+        public List<TaskAdjustment> findByTask(TaskId taskId) {
+            return store.values().stream()
+                    .filter(adjustment -> adjustment.getTaskId().equals(taskId))
+                    .toList();
+        }
+
+        @Override
+        public List<TaskAdjustment> findPendingByTask(TaskId taskId) {
+            return findByTask(taskId).stream()
+                    .filter(adjustment -> adjustment.getStatus() == TaskAdjustmentStatus.PENDING)
+                    .toList();
+        }
+
+        @Override
+        public boolean hasPending(TaskId taskId) {
+            return !findPendingByTask(taskId).isEmpty();
+        }
+
+        @Override
+        public TaskAdjustment save(TaskAdjustment adjustment) {
+            add(adjustment);
+            return adjustment;
+        }
+
+        @Override
+        public void markApplied(TaskAdjustmentId id, TaskRunId runId, Instant appliedAt) {
+            findById(id).orElseThrow().markApplied(runId);
         }
     }
 

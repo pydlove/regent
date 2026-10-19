@@ -21,6 +21,16 @@
         WHERE id = #{id}
     </select>
 
+    <select id="selectByIdOwned" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskAttachmentData">
+        SELECT a.id, a.task_id, a.filename, a.content_type, a.size_bytes, a.storage_path, a.created_at
+        FROM task_attachment a
+        JOIN task t ON t.id = a.task_id
+        JOIN project p ON p.id = t.project_id
+        WHERE a.id = #{id}
+          AND t.deleted = 0
+          AND p.owner_id = #{ownerId}
+    </select>
+
     <!-- 按 ID 升序 = 上传顺序：界面上的缩略图要按人贴的顺序排 -->
     <select id="selectByTask" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskAttachmentData">
         SELECT <include refid="columns"/>

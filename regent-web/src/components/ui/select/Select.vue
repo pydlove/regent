@@ -33,10 +33,17 @@ const props = withDefaults(
     items: { value: string; label: string }[]
     placeholder?: string
     size?: ButtonVariantProps['size']
+    variant?: ButtonVariantProps['variant']
     disabled?: boolean
     block?: boolean
   }>(),
-  { placeholder: '请选择', size: 'regular', disabled: false, block: false },
+  {
+    placeholder: '请选择',
+    size: 'regular',
+    variant: 'default',
+    disabled: false,
+    block: false,
+  },
 )
 
 const model = defineModel<string | undefined>()
@@ -56,7 +63,7 @@ const { zIndex } = useOverlayLayer(open)
 const triggerVariants = tv({ extend: buttonVariants, base: 'justify-between gap-2' })
 
 const triggerClasses = computed(() =>
-  triggerVariants({ variant: 'default', size: props.size, block: props.block }),
+  triggerVariants({ variant: props.variant, size: props.size, block: props.block }),
 )
 </script>
 

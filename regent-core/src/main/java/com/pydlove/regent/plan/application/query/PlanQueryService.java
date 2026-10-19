@@ -2,6 +2,7 @@ package com.pydlove.regent.plan.application.query;
 
 import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.plan.domain.model.Plan;
 import com.pydlove.regent.plan.domain.model.PlanId;
 import com.pydlove.regent.plan.domain.model.PlanRun;
@@ -29,13 +30,23 @@ public class PlanQueryService {
     }
 
     public List<PlanSummaryView> list() {
-        return planRepository.findAll().stream()
+        return list(null);
+    }
+
+    public List<PlanSummaryView> list(UserId ownerId) {
+        return (ownerId == null ? planRepository.findAll() : planRepository.findAll(ownerId)).stream()
                 .map(this::summary)
                 .toList();
     }
 
     public PlanDetailView get(PlanId planId) {
-        Plan plan = planRepository.findById(planId)
+        return get(planId, null);
+    }
+
+    public PlanDetailView get(PlanId planId, UserId ownerId) {
+        Plan plan = (ownerId == null
+                ? planRepository.findById(planId)
+                : planRepository.findByIdOwned(planId, ownerId))
                 .orElseThrow(() -> new EntityNotFoundException("计划不存在：" + planId));
         PlanRun latest = planRunRepository.findLatestByPlan(planId).orElse(null);
         List<PlanTaskView> tasks = plan.getTaskIds().stream()
@@ -48,8 +59,15 @@ public class PlanQueryService {
     }
 
     public PlanRunDetailView getRun(PlanRunId runId) {
+        return getRun(runId, null);
+    }
+
+    public PlanRunDetailView getRun(PlanRunId runId, UserId ownerId) {
         PlanRun run = planRunRepository.findById(runId)
                 .orElseThrow(() -> new EntityNotFoundException("计划执行不存在：" + runId));
+        if (ownerId != null && planRepository.findByIdOwned(run.getPlanId(), ownerId).isEmpty()) {
+            throw new EntityNotFoundException("计划执行不存在：" + runId);
+        }
         return new PlanRunDetailView(
                 PlanRunView.from(run),
                 run.getItems().stream()

@@ -140,10 +140,13 @@ spring:
 | `test_case` / `task_test_case` / `test_case_run` | `V20__test_case_suite.sql` | Web / 接口测试用例、任务完成后的绑定，以及独立于 codex 执行记录的测试结果与输出 |
 | `test_case_run` 手动执行字段 | `V21__manual_test_case_runs.sql` | 增加项目归属与 `trigger_type`，允许手动执行没有 `task_id` |
 | `task_draft` | `V22__task_draft.sql` | 当前登录用户的单份任务录入草稿；保存项目、指令、优先级与插件 ID，不进入任务队列 |
+| `task_adjustment` | `V30__task_adjustment.sql` | 执行期间新增的调整方向；保存来源任务快照或临时文本、下发状态与实际执行记录 |
 | 项目资料字段 | `V23__project_summary.sql` | 保存 Codex 只读分析生成的 Markdown 项目资料、生成状态、失败原因与生成时间 |
-| 部署配置与执行记录 | `V24__deployment.sql` | 保存服务器 SSH 配置、部署脚本与执行快照；密码不进入部署快照，日志写入 `~/.regent/deployments/runs/` |
+| 部署配置与执行记录 | `V24__deployment.sql` | 初始保存部署 SSH 配置、部署脚本与执行快照；后续由 V28 抽取服务器，密码不进入部署快照 |
 | 部署归属项目 | `V25__deployment_project.sql` | 给部署配置与执行快照增加 `project_id`，部署创建后归属项目不可变更 |
 | 部署密码密文 | `V27__deployment_credential.sql` | 独立保存 AES-GCM 加密后的 SSH 密码；主密钥只存在 `~/.regent/deployment/credential.key` |
+| 可复用部署服务器 | `V28__reusable_deployment_servers.sql` | 抽取项目级服务器与服务器凭据；旧部署按连接和凭据自动迁移，部署配置改为引用 `server_id` |
+| 账户数据隔离 | `V29__account_data_isolation.sql` | `project.owner_id` 作为租户根；环境与计划增加 `user_id`；存量数据归最早账号，环境唯一键改为按账号区分 |
 
 全部用 `utf8mb4`，主键用 `BIGINT`，状态字段用 `VARCHAR` 存枚举名（不用 MySQL `ENUM`，避免改枚举要动表结构）。时间统一 `DATETIME(3)` 存 UTC。
 
@@ -347,6 +350,39 @@ codex exec resume <thread_id> \
 `application-{profile}.yml` 为主，密码走环境变量，不进 Git。**分级参数不在配置文件里**：
 项目阈值来自 `project.default_decision_level` 列，规则来自 `decision_rule` 表 —— 它们是要按项目
 调的业务数据，不是部署参数。配置文件只管「进程怎么跑」：
+
+### 8.1 配置密文
+
+数据库、邮件和第三方凭据可以在 YAML 里写成 `ENC(v1:...)`。启动时
+`EncryptedPropertyEnvironmentPostProcessor` 会把所有密文解密后放到最高优先级，
+业务代码和 DataSource 仍然读到明文属性，不需要改任何调用点。
+
+- 主密钥优先读取 `REGENT_CONFIG_KEY`，否则读取 `~/.regent/config.key`（权限 `600`）；
+- 密文使用 AES-256-GCM，格式为 `ENC(v1:<base64url(iv + ciphertext + tag)>)`；
+- 生成密文：`printf '%s' '明文' | node scripts/encrypt-config.mjs encrypt`；
+- `application-local.yml`、`application-test.yml`、`~/.regent/config.key` 和
+  `doc/数据库文档/env` 都不得入库；`.gitignore` 已兜底；
+- 主密钥丢失后不能解密配置，只能重置对应账号密码并重新生成密文。
+
+### 8.2 无 CDN 发布
+
+安装包和 `latest.json` 放在后端运行目录 `~/.regent/downloads`。发布命令：
+
+```bash
+node scripts/publish-release.mjs \
+  --version feature_V1.0.3_R100B003 \
+  --code R100B003 \
+  --notes "修复执行记录与更新提醒" \
+  --macos /path/Regent-1.0.3-macOS.dmg \
+  --windows /path/Regent-1.0.3-Windows.exe
+```
+
+后端公开接口：
+
+- `GET /api/release/latest`：返回版本、说明、安装包大小/摘要和本机下载地址；
+- `GET /api/release/download/macos|windows`：从下载目录流式返回安装包。
+
+浏览器端每 30 分钟和窗口重新获得焦点时读取清单；版本变化时提示刷新页面。桌面壳后续可以在同一份清单上增加 Tauri updater 的签名平台条目。
 
 ```yaml
 regent:

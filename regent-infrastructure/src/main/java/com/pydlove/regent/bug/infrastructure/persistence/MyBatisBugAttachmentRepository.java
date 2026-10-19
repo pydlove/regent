@@ -4,6 +4,7 @@ import com.pydlove.regent.bug.domain.model.BugAttachment;
 import com.pydlove.regent.bug.domain.model.BugAttachmentId;
 import com.pydlove.regent.bug.domain.model.BugId;
 import com.pydlove.regent.bug.domain.repository.BugAttachmentRepository;
+import com.pydlove.regent.identity.domain.model.UserId;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
@@ -32,6 +33,12 @@ public class MyBatisBugAttachmentRepository implements BugAttachmentRepository {
     @Override
     public Optional<BugAttachment> findById(BugAttachmentId id) {
         return Optional.ofNullable(attachmentMapper.selectById(id.value()))
+                .map(MyBatisBugAttachmentRepository::toAttachment);
+    }
+
+    @Override
+    public Optional<BugAttachment> findByIdOwned(BugAttachmentId id, UserId ownerId) {
+        return Optional.ofNullable(attachmentMapper.selectByIdOwned(id.value(), ownerId.value()))
                 .map(MyBatisBugAttachmentRepository::toAttachment);
     }
 

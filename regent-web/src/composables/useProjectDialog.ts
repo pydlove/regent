@@ -12,6 +12,7 @@ import type { Project } from '@/types/api'
  * 失效的计算属性 —— 建一个 store 只会多一层「为什么这件事在 store 里」的追问。
  */
 const open = ref(false)
+const editingProject = ref<Project | null>(null)
 
 /**
  * 最近一次注册成功的项目。
@@ -21,11 +22,21 @@ const open = ref(false)
  */
 const lastRegistered = ref<Project | null>(null)
 
+/** 最近一次编辑成功的项目；项目页据此刷新并保持选中。 */
+const lastUpdated = ref<Project | null>(null)
+
 export function useProjectDialog() {
   return {
     open,
+    editingProject,
     lastRegistered,
+    lastUpdated,
     openDialog: () => {
+      editingProject.value = null
+      open.value = true
+    },
+    openEditDialog: (project: Project) => {
+      editingProject.value = project
       open.value = true
     },
   }

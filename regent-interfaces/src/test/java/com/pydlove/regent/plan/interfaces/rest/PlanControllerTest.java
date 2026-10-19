@@ -17,6 +17,8 @@ import com.pydlove.regent.plan.domain.model.PlanRunStatus;
 import com.pydlove.regent.plan.domain.model.PlanStatus;
 import com.pydlove.regent.plan.domain.model.PlanTaskSnapshot;
 import com.pydlove.regent.plan.domain.model.PlanTrigger;
+import com.pydlove.regent.identity.domain.model.UserId;
+import com.pydlove.regent.support.TestCurrentUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -47,7 +49,9 @@ class PlanControllerTest {
         command = new RecordingPlanCommand();
         execution = new RecordingPlanExecution();
         query = new RecordingPlanQuery();
-        mockMvc = MockMvcBuilders.standaloneSetup(new PlanController(command, execution, query)).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(new PlanController(command, execution, query))
+                .addInterceptors(TestCurrentUser.interceptor())
+                .build();
     }
 
     @Test
@@ -109,6 +113,11 @@ class PlanControllerTest {
             this.command = command;
             return created;
         }
+
+        @Override
+        public Plan create(CreatePlanCommand command, UserId ownerId) {
+            return create(command);
+        }
     }
 
     private static final class RecordingPlanExecution extends PlanExecutionService {
@@ -143,8 +152,18 @@ class PlanControllerTest {
         }
 
         @Override
+        public PlanDetailView get(PlanId planId, UserId ownerId) {
+            return get(planId);
+        }
+
+        @Override
         public PlanRunDetailView getRun(PlanRunId runId) {
             return runDetail;
+        }
+
+        @Override
+        public PlanRunDetailView getRun(PlanRunId runId, UserId ownerId) {
+            return getRun(runId);
         }
     }
 }

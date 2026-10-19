@@ -24,6 +24,7 @@ import { ACCEPTED_IMAGE_TYPES, listTaskAttachments, uploadTaskAttachment } from 
 import { getDecision } from '@/api/decisions'
 import { ApiError } from '@/api/http'
 import { listTaskPlugins } from '@/api/plugins'
+import { listTaskAdjustments } from '@/api/tasks'
 import DecisionLevelBadge from '@/components/business/DecisionLevelBadge.vue'
 import DecisionReviewDialog from '@/components/business/DecisionReviewDialog.vue'
 import ImageAttachmentGrid from '@/components/business/ImageAttachmentGrid.vue'
@@ -32,6 +33,7 @@ import NewTaskDialog from '@/components/business/NewTaskDialog.vue'
 import RunDetailDialog from '@/components/business/RunDetailDialog.vue'
 import RunStatusBadge from '@/components/business/RunStatusBadge.vue'
 import TaskEditDialog from '@/components/business/TaskEditDialog.vue'
+import TaskAdjustmentDialog from '@/components/business/TaskAdjustmentDialog.vue'
 import TaskPluginDialog from '@/components/business/TaskPluginDialog.vue'
 import TaskTestCasePanel from '@/components/business/TaskTestCasePanel.vue'
 import TaskStatusBadge from '@/components/business/TaskStatusBadge.vue'
@@ -60,12 +62,14 @@ import type {
   DecisionSummary,
   ImageAttachment,
   TaskAttachment,
+  TaskAdjustment,
   TaskBatchDeleteFailure,
   TaskBatchDispatchFailure,
   TaskPluginBinding,
 } from '@/types/api'
 import {
   canBatchDispatch,
+  canAdjust,
   canCancel,
   canDelete,
   canDispatch,
@@ -219,6 +223,46 @@ watch(
 )
 const promptOpen = ref(false)
 const editOpen = ref(false)
+const adjustmentOpen = ref(false)
+const adjustments = ref<TaskAdjustment[]>([])
+const adjustmentsLoading = ref(false)
+const adjustmentsError = ref<string | null>(null)
+
+const loadAdjustments = async (taskId: number) => {
+  adjustmentsLoading.value = true
+  adjustmentsError.value = null
+  try {
+    const loaded = await listTaskAdjustments(taskId)
+    if (selected.value?.id === taskId) adjustments.value = loaded
+  } catch {
+    if (selected.value?.id === taskId) {
+      adjustments.value = []
+      adjustmentsError.value = '调整方向读取失败，请稍后重试'
+    }
+  } finally {
+    if (selected.value?.id === taskId) adjustmentsLoading.value = false
+  }
+}
+
+watch(
+  () => selected.value?.id,
+  (taskId) => {
+    adjustmentOpen.value = false
+    adjustments.value = []
+    adjustmentsError.value = null
+    adjustmentsLoading.value = false
+    if (taskId !== undefined) void loadAdjustments(taskId)
+  },
+  { immediate: true },
+)
+
+const onAdjustmentCreated = (adjustment: TaskAdjustment) => {
+  if (adjustment.taskId === selected.value?.id) adjustments.value.push(adjustment)
+  toast.success(
+    `#${adjustment.taskId} 已加入调整方向`,
+    adjustment.status === 'PENDING' ? '执行器会在下一轮开始前读取它' : '调整已下发',
+  )
+}
 
 const openEdit = () => {
   if (!selected.value || !store.detail || !canEdit(selected.value.status)) return
@@ -1156,6 +1200,63 @@ onUnmounted(() => {
             </p>
           </div>
 
+          <div class="mt-4 border-t border-separator pt-3">
+            <div class="flex items-center gap-2">
+              <p class="text-caption font-emphasis text-label-secondary">调整方向</p>
+              <span v-if="adjustments.length > 0" class="tnum text-caption text-label-tertiary">
+                {{ adjustments.length }}
+              </span>
+              <Button
+                v-if="canAdjust(selected.status)"
+                size="sm"
+                class="ml-auto"
+                @click="adjustmentOpen = true"
+              >
+                <Icon :as="Plus" size="inline" />增加
+              </Button>
+            </div>
+
+            <p v-if="adjustmentsError" class="mt-2 text-caption text-danger">
+              {{ adjustmentsError }}
+            </p>
+            <p v-else-if="adjustmentsLoading" class="mt-2 text-caption text-label-tertiary">
+              正在读取…
+            </p>
+            <p v-else-if="adjustments.length === 0" class="mt-2 text-caption text-label-tertiary">
+              没有新增方向。
+            </p>
+            <ul v-else class="mt-2 max-h-40 space-y-1.5 overflow-y-auto">
+              <li
+                v-for="adjustment in adjustments"
+                :key="adjustment.id"
+                class="rounded-panel border border-separator-soft bg-content px-2.5 py-2"
+              >
+                <div class="flex items-center gap-2">
+                  <span class="text-caption text-label-tertiary">
+                    {{ adjustment.source === 'TASK' ? `任务 #${adjustment.sourceTaskId}` : '临时补充' }}
+                  </span>
+                  <Badge
+                    class="ml-auto"
+                    :tone="adjustment.status === 'PENDING' ? 'warning' : 'accent'"
+                    :title="
+                      adjustment.appliedRunId
+                        ? `已下发到运行 #${adjustment.appliedRunId}`
+                        : '等待下一轮执行'
+                    "
+                  >
+                    {{ adjustment.status === 'PENDING' ? '待下发' : '已下发' }}
+                  </Badge>
+                </div>
+                <p class="mt-1 line-clamp-2 whitespace-pre-wrap text-caption text-label-secondary">
+                  {{ adjustment.content }}
+                </p>
+                <p class="tnum mt-1 text-caption text-label-tertiary">
+                  {{ formatRelative(adjustment.createdAt) }}
+                </p>
+              </li>
+            </ul>
+          </div>
+
           <dl class="mt-4 space-y-2">
             <div class="flex items-center gap-2">
               <dt class="whitespace-nowrap text-caption text-label-secondary">项目</dt>
@@ -1473,6 +1574,12 @@ onUnmounted(() => {
       :attachments="attachments"
       @uploaded="onUploaded({ id: selected?.id ?? 0 })"
       @preview="openViewer"
+    />
+
+    <TaskAdjustmentDialog
+      v-model:open="adjustmentOpen"
+      :task="store.detail"
+      @created="onAdjustmentCreated"
     />
 
     <TaskPluginDialog

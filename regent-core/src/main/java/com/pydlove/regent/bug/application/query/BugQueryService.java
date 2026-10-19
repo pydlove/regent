@@ -4,6 +4,7 @@ import com.pydlove.regent.bug.domain.repository.BugPage;
 import com.pydlove.regent.bug.domain.repository.BugQuery;
 import com.pydlove.regent.bug.domain.repository.BugQueryRepository;
 import com.pydlove.regent.bug.domain.repository.BugView;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 
 /** 缺陷单读侧用例。 */
@@ -21,6 +22,11 @@ public class BugQueryService {
 
     public BugView get(long id) {
         return bugQueryRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("缺陷单不存在：" + id));
+    }
+
+    public BugView get(long id, UserId ownerId) {
+        return bugQueryRepository.findByIdOwned(id, ownerId)
                 .orElseThrow(() -> new EntityNotFoundException("缺陷单不存在：" + id));
     }
 }

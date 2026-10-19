@@ -1,6 +1,7 @@
 package com.pydlove.regent.testing.domain.repository;
 
 import com.pydlove.regent.execution.domain.model.TaskId;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.testing.domain.model.TestCaseId;
 import com.pydlove.regent.testing.domain.model.TestCaseRun;
 import com.pydlove.regent.testing.domain.model.TestCaseRunId;
@@ -12,6 +13,10 @@ import java.util.Optional;
 public interface TestCaseRunRepository {
 
     Optional<TestCaseRun> findById(TestCaseRunId id);
+
+    default Optional<TestCaseRun> findByIdOwned(TestCaseRunId id, UserId ownerId) {
+        return findById(id);
+    }
 
     List<TestCaseRun> findByTask(TaskId taskId);
 

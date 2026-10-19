@@ -293,6 +293,17 @@ public class Task {
         touch();
     }
 
+    /**
+     * 调整方向只对已经进入执行链路、但尚未收场的任务开放。
+     *
+     * <p>PENDING 任务仍走完整编辑；DONE/FAILED/CANCELLED 的任务没有正在进行的上下文，
+     * 接受调整只会制造一条永远不会被执行的记录。
+     */
+    public void requireAcceptsAdjustment() {
+        requireStateIn("只有已提交执行且尚未收场的任务可以增加调整方向",
+                TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.BLOCKED);
+    }
+
     /** 终止任务。除终态外都可终止，包括阻塞中（等价于驳回该决策）。 */
     public void cancel() {
         if (this.status.isTerminal()) {

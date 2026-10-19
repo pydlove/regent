@@ -35,6 +35,15 @@ server {
     gzip_vary on;
     gzip_disable "MSIE [1-6]\.";
 
+    # 外部执行者协议是给本机 codex/CLI 用的免登录入口，不通过公网中继暴露。
+    # 它按项目标识找活，没有浏览器账号身份；一旦公网可达，等于绕过账户数据隔离。
+    location = /api/agent {
+        return 404;
+    }
+    location ^~ /api/agent/ {
+        return 404;
+    }
+
     # ^~ 优先于上面静态资源正则：附件下载等带扩展名的接口路径也必须走后端
     # 中继对本机 8787 后端做长轮询转发，读超时放宽到 120s
     location ^~ /api/ {

@@ -64,3 +64,5 @@ export const canDelete = (s: TaskStatus) =>
   s === 'PENDING' || s === 'QUEUED' || s === 'CANCELLED'
 export const canBatchDispatch = (s: TaskStatus) => s === 'PENDING' || s === 'QUEUED'
 export const canEdit = (s: TaskStatus) => s !== 'DONE'
+export const canAdjust = (s: TaskStatus) =>
+  s === 'QUEUED' || s === 'RUNNING' || s === 'BLOCKED'

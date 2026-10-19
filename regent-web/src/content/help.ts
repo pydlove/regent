@@ -460,16 +460,22 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
   {
     id: 'deployment-setup',
     category: 'configuration',
-    question: '部署配置里的服务器、认证方式和脚本怎么填？',
-    keywords: ['部署', '项目', '服务器', 'SSH', '脚本', '密码', '密钥', '日志', '环境变量'],
+    question: '部署服务器怎么复用，脚本里的连接信息怎么填？',
+    keywords: ['部署', '项目', '服务器', '复用', 'SSH', '脚本', '密码', '密钥', '日志', '环境变量', 'AI', 'Codex', '项目文件夹', '生成'],
     answer: {
       paragraphs: [
-        '部署配置归属于一个项目，并跟随顶栏选中的项目过滤。每条配置保存服务器地址、SSH 端口、登录用户、认证方式和一份 UTF-8 部署脚本。',
-        '脚本会在远程目录下通过 bash 执行，平台在本机拉起 OpenSSH，不会把脚本先上传到服务器。脚本通过 REGENT_DEPLOY_* 环境变量读取项目、服务器、目录与执行记录等上下文，不要重复实现连接参数。',
-        '密钥认证使用运行后端那台机器的 ssh-agent 或默认私钥；密码认证在保存配置时写入加密凭据库，点击「立即部署」后只需二次确认，密码不会通过查询接口回传，也不会写入执行日志。',
+        '先在“服务器”页按项目录入主机、端口、登录用户和认证方式；也可以从部署弹框里直接新建。多个部署脚本可以复用同一台服务器。',
+        '部署配置可以选择服务器、填写部署名称和远程目录，再上传 UTF-8 脚本；也可以在新建部署时选择项目文件夹，让 Codex 只读分析项目，并优先参考 deploy/、script/、scripts/ 里已有部署脚本生成新脚本。',
+        '脚本会在远程目录下通过 bash 执行，平台在本机拉起 OpenSSH，不会把脚本先上传到服务器。生成或上传的脚本都会先经过同一套规范检测。',
+        '远程目录由配置统一提供，平台执行前会先进入该目录；脚本里不要再写死 cd /...，需要读取路径时使用 $REGENT_DEPLOY_DIRECTORY。',
+        '上传脚本后会自动检测 bash 头、fail-fast 设置、写死目录、交互输入和重复 SSH 连接；不通过时会指出具体行号，修复前不能保存或执行。',
+        '密钥认证使用运行后端那台机器的 ssh-agent 或默认私钥；密码属于服务器资源，加密保存且不会通过查询接口回传，也不会写入执行日志。',
       ],
       note: '部署日志写入 ~/.regent/deployments/runs/，可在部署列表右侧的日志按钮中查看。',
-      links: [{ label: '打开部署', to: '/deployments' }],
+      links: [
+        { label: '管理服务器', to: '/servers' },
+        { label: '打开部署', to: '/deployments' },
+      ],
     },
   },
   {
@@ -479,9 +485,23 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     keywords: ['运行记录', '事件', '原始事件', 'JSONL', '执行过程', '排错'],
     answer: {
       paragraphs: [
-        '“执行过程”把事件流整理成更容易阅读的动作、命令、输出和结论，适合日常核对。',
+        '“执行过程”把事件流整理成更容易阅读的动作、命令、输出和结论，并按最新事件在上排列，适合日常核对。',
         '“原始事件”保留执行器返回的逐条数据，适合排查解析或平台行为问题；两者不一致时以原始事件为准。',
       ],
+    },
+  },
+  {
+    id: 'deployment-remote-directory',
+    category: 'configuration',
+    question: '上传脚本后远程目录为什么还是空的？',
+    keywords: ['部署', '远程目录', 'REGENT_DEPLOY_DIRECTORY', '脚本', '目录', '自动识别'],
+    answer: {
+      paragraphs: [
+        '自动识别只读取脚本里写死的绝对路径或 ~ 路径。若脚本按平台规范使用 $REGENT_DEPLOY_DIRECTORY 或 ${REGENT_DEPLOY_DIRECTORY}，源码里就没有可推断的远程路径，字段会保持为空。',
+        '这时需要手动填写服务器上的项目根目录，通常是 package.json 所在目录。/usr/setup/.../static/... 这类 web_dir 是发布目标，不是构建工作目录，不要拿它当远程目录。',
+      ],
+      note: '远程目录为空时 AI 生成与保存都会被禁用，填写后才能继续。',
+      links: [{ label: '打开部署', to: '/deployments' }],
     },
   },
   {

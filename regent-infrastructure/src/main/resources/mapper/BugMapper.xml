@@ -12,6 +12,9 @@
         <if test="severity != null">
             AND b.severity = #{severity}
         </if>
+        <if test="projectId != null">
+            AND b.project_id = #{projectId}
+        </if>
         <if test="scope == 'OPEN'">
             AND b.status NOT IN ('CLOSED', 'WONTFIX')
         </if>
@@ -25,12 +28,26 @@
                 OR b.file_path LIKE CONCAT('%', #{keyword}, '%')
             )
         </if>
+        <if test="ownerId != null">
+            AND p.owner_id = #{ownerId}
+        </if>
     </sql>
 
     <select id="selectDataById" resultType="com.pydlove.regent.bug.infrastructure.persistence.BugData">
         SELECT <include refid="dataColumns"/>
         FROM bug
         WHERE id = #{id} AND deleted = 0
+    </select>
+
+    <select id="selectDataByIdOwned" resultType="com.pydlove.regent.bug.infrastructure.persistence.BugData">
+        SELECT b.id, b.project_id, b.requirement_id, b.source_task_id, b.fix_task_id, b.source,
+               b.title, b.severity, b.status, b.repro, b.file_path, b.detail, b.wont_fix_reason,
+               b.found_at, b.fixed_at, b.created_at, b.updated_at
+        FROM bug b
+        JOIN project p ON p.id = b.project_id
+        WHERE b.id = #{id}
+          AND b.deleted = 0
+          AND p.owner_id = #{ownerId}
     </select>
 
     <select id="selectDataByIdForUpdate" resultType="com.pydlove.regent.bug.infrastructure.persistence.BugData">
@@ -49,6 +66,17 @@
         WHERE b.id = #{id} AND b.deleted = 0
     </select>
 
+    <select id="selectRowByIdOwned" resultType="com.pydlove.regent.bug.infrastructure.persistence.BugRow">
+        SELECT b.id, b.project_id, p.name AS project_name, b.requirement_id, b.source_task_id,
+               b.fix_task_id, b.source, b.title, b.severity, b.status, b.repro, b.file_path,
+               b.detail, b.wont_fix_reason, b.found_at, b.fixed_at
+        FROM bug b
+        JOIN project p ON p.id = b.project_id
+        WHERE b.id = #{id}
+          AND b.deleted = 0
+          AND p.owner_id = #{ownerId}
+    </select>
+
     <select id="selectPage" resultType="com.pydlove.regent.bug.infrastructure.persistence.BugRow">
         SELECT b.id, b.project_id, p.name AS project_name, b.requirement_id, b.source_task_id,
                b.fix_task_id, b.source, b.title, b.severity, b.status, b.repro, b.file_path,
@@ -56,13 +84,14 @@
         FROM bug b
         JOIN project p ON p.id = b.project_id
         WHERE <include refid="filters"/>
-        ORDER BY FIELD(b.severity, 'BLOCKER', 'MAJOR', 'MINOR', 'TRIVIAL'), b.id DESC
+        ORDER BY b.id ASC
         LIMIT #{size} OFFSET #{offset}
     </select>
 
     <select id="countBy" resultType="long">
         SELECT COUNT(*)
         FROM bug b
+        JOIN project p ON p.id = b.project_id
         WHERE <include refid="filters"/>
     </select>
 

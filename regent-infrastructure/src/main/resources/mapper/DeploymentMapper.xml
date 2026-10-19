@@ -3,7 +3,7 @@
 <mapper namespace="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentMapper">
 
     <sql id="deploymentColumns">
-        id, project_id, name, host, port, ssh_username, auth_type, remote_directory,
+        id, project_id, server_id, name, remote_directory,
         script_filename, script_content, script_hash, created_at, updated_at
     </sql>
 
@@ -12,6 +12,15 @@
         SELECT <include refid="deploymentColumns"/>
         FROM deployment
         WHERE id = #{id} AND deleted = 0
+    </select>
+
+    <select id="selectByIdOwned"
+            resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentRow">
+        SELECT <include refid="deploymentColumns"/>
+        FROM deployment
+        WHERE id = #{id}
+          AND deleted = 0
+          AND project_id IN (SELECT id FROM project WHERE owner_id = #{ownerId})
     </select>
 
     <select id="selectByIdForUpdate"
@@ -30,6 +39,9 @@
         <if test="projectId != null">
             AND project_id = #{projectId}
         </if>
+        <if test="ownerId != null">
+            AND project_id IN (SELECT id FROM project WHERE owner_id = #{ownerId})
+        </if>
         ORDER BY updated_at DESC, id DESC
     </select>
 
@@ -44,12 +56,27 @@
         </if>
     </select>
 
+    <select id="countByServerId" resultType="int">
+        SELECT COUNT(*)
+        FROM deployment
+        WHERE server_id = #{serverId}
+          AND deleted = 0
+    </select>
+
+    <select id="selectIdsByServerId" resultType="long">
+        SELECT id
+        FROM deployment
+        WHERE server_id = #{serverId}
+          AND deleted = 0
+        ORDER BY id
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO deployment (
-            project_id, name, host, port, ssh_username, auth_type, remote_directory,
+            project_id, server_id, name, remote_directory,
             script_filename, script_content, script_hash, deleted, created_at, updated_at
         ) VALUES (
-            #{projectId}, #{name}, #{host}, #{port}, #{sshUsername}, #{authType}, #{remoteDirectory},
+            #{projectId}, #{serverId}, #{name}, #{remoteDirectory},
             #{scriptFilename}, #{scriptContent}, #{scriptHash}, 0, #{createdAt}, #{updatedAt}
         )
     </insert>
@@ -57,10 +84,7 @@
     <update id="update">
         UPDATE deployment
         SET name = #{name},
-            host = #{host},
-            port = #{port},
-            ssh_username = #{sshUsername},
-            auth_type = #{authType},
+            server_id = #{serverId},
             remote_directory = #{remoteDirectory},
             script_filename = #{scriptFilename},
             script_content = #{scriptContent},

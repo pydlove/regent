@@ -6,14 +6,17 @@
 #   账号：regent，仅授权 regent.* 与 regent_test.*，看不到实例上其它项目的库
 spring:
   datasource:
+    # 敏感值统一写成 ENC(v1:...)；启动时由 REGENT_CONFIG_KEY 或 ~/.regent/config.key 解密
+    # 生成：printf '%s' '明文' | node scripts/encrypt-config.mjs encrypt
+    url: jdbc:mysql://db-host:3306/regent?characterEncoding=UTF-8&connectionTimeZone=UTC&useSSL=false&allowPublicKeyRetrieval=true
     username: regent
-    password: 在此填入本地密码
+    password: 'ENC(v1:在此填入由 ConfigEncryptionTool 生成的密文)'
   mail:
     # 邮箱注册验证码。只把真实账号密码写进 application-local.yml（已 gitignore）。
     host: smtp.126.com
     port: 465
     username: 在此填入发件邮箱
-    password: 在此填入 SMTP 授权码
+    password: 'ENC(v1:在此填入由 ConfigEncryptionTool 生成的密文)'
     properties:
       mail.smtp.auth: true
       mail.smtp.ssl.enable: true

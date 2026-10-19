@@ -59,7 +59,7 @@ const deleteTarget = ref<DeploymentSummary | null>(null)
 const deleting = ref(false)
 
 const columns: TableColumn[] = [
-  { key: 'name', label: '部署' },
+  { key: 'name', label: '部署名称' },
   { key: 'project', label: '项目', width: '120px', hideBelow: 'lg' },
   { key: 'server', label: '服务器', width: '176px', hideBelow: 'md' },
   { key: 'remoteDirectory', label: '远程目录', width: '144px', hideBelow: 'xl' },
@@ -74,6 +74,7 @@ const filtered = computed(() => {
   return deployments.value.filter((deployment) =>
     [
       deployment.name,
+      deployment.serverName,
       deployment.projectName,
       deployment.host,
       deployment.username,
@@ -290,10 +291,16 @@ const confirmDelete = async () => {
               <Icon :as="ServerCog" size="inline" />
             </span>
             <span
-              class="truncate font-emphasis text-label"
+              class="min-w-0 truncate font-emphasis text-label"
               :title="`${row.name} · ${row.scriptFilename}`"
             >
               {{ row.name }}
+            </span>
+            <span
+              class="hidden min-w-0 truncate text-caption text-label-tertiary xl:inline"
+              :title="row.scriptFilename"
+            >
+              {{ row.scriptFilename }}
             </span>
           </span>
           <span
@@ -305,9 +312,10 @@ const confirmDelete = async () => {
           </span>
           <span
             v-else-if="column.key === 'server'"
-            class="truncate font-mono text-caption text-label-secondary"
+            class="truncate text-caption text-label-secondary"
+            :title="`${row.serverName} · ${row.username}@${row.host}:${row.port}`"
           >
-            {{ row.username }}@{{ row.host }}:{{ row.port }}
+            {{ row.serverName }}
           </span>
           <span
             v-else-if="column.key === 'remoteDirectory'"

@@ -7,7 +7,7 @@ package com.pydlove.regent.execution.application.command;
  * @param runStatus   这次尝试的最终状态
  * @param taskStatus  任务的状态
  * @param instruction 只有 {@link Outcome#CONTINUE} 时非空：接着要做什么（已含人的结论）
- * @param decisionId  相关决策单 ID；CONTINUE 与 BLOCKED 时非空
+ * @param decisionId  相关决策单 ID；因调整方向继续时为空
  * @param decisionLevel 生效等级（就高不就低之后），没有决策时为 null
  * @param note        一句人话，说明平台为什么这样判；界面与日志都用它
  * @param roundsLeft  本次尝试还能连续决策几轮；用完平台会判失败，避免自己跟自己聊到天亮

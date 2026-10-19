@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { ChevronLeft, ListChecks, Plus, RefreshCw, Search, X } from '@lucide/vue'
+import {
+  BookOpenText,
+  ChevronLeft,
+  ListChecks,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  X,
+} from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -7,6 +16,7 @@ import { ApiError } from '@/api/http'
 import { getProjectGitBranch, regenerateProjectSummary } from '@/api/projects'
 import { listTasks } from '@/api/tasks'
 import DecisionLevelBadge from '@/components/business/DecisionLevelBadge.vue'
+import ProjectSummaryDialog from '@/components/business/ProjectSummaryDialog.vue'
 import TaskStatusBadge from '@/components/business/TaskStatusBadge.vue'
 import Button from '@/components/ui/button/Button.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
@@ -28,9 +38,8 @@ import type { Project, TaskSummary } from '@/types/api'
 /*
  * 项目管理。
  *
- * 这一页现在只做「看得清 + 建得出来」：项目画像（路径、阈值、是否暂停）、每个项目下有多少任务、
- * 最近几条是什么。改名 / 暂停 / 删除都还没有接口（ARCHITECTURE.md 待办 19），
- * 所以这里**不摆假开关** —— 一个点了没反应的暂停按钮，比没有这个按钮更让人怀疑平台。
+ * 这一页负责看清项目画像（路径、阈值、是否暂停）、编辑可维护字段，并查看每个项目的
+ * 任务规模与最近记录。删除仍未提供独立入口。
  *
  * 列表不分页：项目是平台里数量最少的东西（个位数），分页是照猫画虎。
  */
@@ -39,16 +48,22 @@ const executionRuntime = useExecutionRuntimeStore()
 const router = useRouter()
 const toast = useToast()
 const { openDialog: openCodexInstallDialog } = useCodexInstallDialog()
-const { openDialog: openProjectDialog, lastRegistered } = useProjectDialog()
+const {
+  openDialog: openProjectDialog,
+  openEditDialog,
+  lastRegistered,
+  lastUpdated,
+} = useProjectDialog()
 
 const columns: TableColumn[] = [
-  { key: 'name', label: '项目' },
-  { key: 'code', label: '标识', width: '152px', hideBelow: 'lg' },
-  { key: 'path', label: '工作区路径', width: '220px', hideBelow: 'md' },
-  { key: 'gitBranch', label: 'Git 分支', width: '180px', hideBelow: 'lg' },
-  { key: 'level', label: '自动决策', width: '136px', hideBelow: 'md' },
-  { key: 'status', label: '状态', width: '88px' },
-  { key: 'tasks', label: '任务', align: 'right', width: '64px' },
+  { key: 'name', label: '项目名称', width: '280px' },
+  { key: 'code', label: '标识', width: '108px', hideBelow: 'lg' },
+  { key: 'path', label: '工作区路径', width: '160px', hideBelow: '2xl' },
+  { key: 'gitBranch', label: 'Git 分支', width: '128px', hideBelow: '2xl' },
+  { key: 'level', label: '自动决策', width: '128px', hideBelow: 'md' },
+  { key: 'status', label: '状态', width: '76px' },
+  { key: 'tasks', label: '任务', align: 'right', width: '52px' },
+  { key: 'actions', label: '', align: 'right', width: '44px' },
 ]
 
 const loading = ref(false)
@@ -87,6 +102,7 @@ const projectTasks = ref<TaskSummary[]>([])
 const projectBranches = ref<Record<number, string | null>>({})
 let branchRequestSequence = 0
 const summaryRegeneratingId = ref<number | null>(null)
+const summaryDialogOpen = ref(false)
 let summaryPollTimer: number | null = null
 
 const summaryStatusLabel = (project: Project | null) => {
@@ -183,10 +199,21 @@ const load = async () => {
 
 onMounted(load)
 onBeforeUnmount(stopSummaryPolling)
-watch(selectedId, () => void loadProjectTasks())
+watch(selectedId, () => {
+  summaryDialogOpen.value = false
+  void loadProjectTasks()
+})
 
 /** 注册成功后：整页刷新，并把新项目选中 —— 刚建的东西应该立刻是焦点 */
 watch(lastRegistered, async (project) => {
+  if (!project) return
+  keyword.value = ''
+  await load()
+  selectedId.value = project.id
+})
+
+/** 编辑成功后重新加载分支等运行时信息，并保持当前项目选中。 */
+watch(lastUpdated, async (project) => {
   if (!project) return
   keyword.value = ''
   await load()
@@ -292,8 +319,16 @@ const regenerateSummary = async () => {
         >
           <template #cell="{ row, column }">
             <span
-              v-if="column.key === 'gitBranch'"
+              v-if="column.key === 'name'"
+              class="block truncate font-emphasis text-label"
+              :title="String(row.name)"
+            >
+              {{ row.name }}
+            </span>
+            <span
+              v-else-if="column.key === 'gitBranch'"
               class="font-mono text-caption text-label-secondary group-data-[selected=true]:text-white"
+              :title="projectBranches[row.id as number] || undefined"
             >
               {{ projectBranches[row.id as number] || '—' }}
             </span>
@@ -310,6 +345,15 @@ const regenerateSummary = async () => {
             >
               {{ taskCounts[row.id as number] ?? '—' }}
             </span>
+            <Tooltip v-else-if="column.key === 'actions'" content="编辑项目">
+              <IconButton
+                label="编辑项目"
+                size="sm"
+                @click.stop="openEditDialog(row as Project)"
+              >
+                <Icon :as="Pencil" size="inline" />
+              </IconButton>
+            </Tooltip>
           </template>
         </Table>
 
@@ -360,7 +404,14 @@ const regenerateSummary = async () => {
             {{ selected.enabled ? '启用' : '已暂停' }}
           </StatusDot>
         </div>
-        <h2 class="mt-2 text-body font-emphasis text-label">{{ selected.name }}</h2>
+        <div class="mt-2 flex items-center gap-2">
+          <h2 class="min-w-0 flex-1 truncate text-body font-emphasis text-label">
+            {{ selected.name }}
+          </h2>
+          <Button size="sm" @click="openEditDialog(selected)">
+            <Icon :as="Pencil" size="inline" />编辑
+          </Button>
+        </div>
 
         <p class="mt-3 text-caption text-label-secondary">工作区路径</p>
         <p class="mt-1 break-all rounded-panel border border-separator-soft bg-content px-2 py-1.5 font-mono text-caption text-label">
@@ -411,39 +462,49 @@ const regenerateSummary = async () => {
           <p v-if="selected.summaryStatus === 'GENERATING'" class="mt-2 text-caption text-label-tertiary">
             Codex 正在只读分析工作区，完成后会自动刷新。
           </p>
-          <template v-else>
-            <p v-if="selected.summaryStatus === 'FAILED'" class="mt-2 text-caption text-danger">
-              {{ selected.summaryError || '项目资料生成失败' }}
-            </p>
-            <div
-              v-if="selected.summary"
-              class="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-separator-soft pt-2 text-caption leading-5 text-label-secondary"
-            >
-              {{ selected.summary }}
-            </div>
-            <p
-              v-else-if="selected.summaryStatus === 'NOT_GENERATED'"
-              class="mt-2 text-caption text-label-tertiary"
-            >
-              尚未生成项目资料。Codex 会读项目结构与说明，只生成总结，不改文件。
-            </p>
-            <p
-              v-if="selected.summaryGeneratedAt"
-              class="mt-2 text-caption text-label-tertiary"
-            >
-              最近生成：{{ new Date(selected.summaryGeneratedAt).toLocaleString('zh-CN') }}
-            </p>
+          <p v-if="selected.summaryStatus === 'FAILED'" class="mt-2 text-caption text-danger">
+            {{ selected.summaryError || '项目资料生成失败' }}
+          </p>
+          <p
+            v-if="!selected.summary && selected.summaryStatus === 'NOT_GENERATED'"
+            class="mt-2 text-caption text-label-tertiary"
+          >
+            尚未生成项目资料。Codex 会读项目结构与说明，只生成总结，不改文件。
+          </p>
+          <p
+            v-if="selected.summaryGeneratedAt"
+            class="mt-2 text-caption text-label-tertiary"
+          >
+            最近生成：{{ new Date(selected.summaryGeneratedAt).toLocaleString('zh-CN') }}
+          </p>
+          <div class="mt-3 flex gap-2">
             <Button
-              class="mt-3"
+              v-if="selected.summary"
+              class="flex-1"
               size="sm"
-              block
-              :disabled="summaryRegeneratingId === selected.id"
+              @click="summaryDialogOpen = true"
+            >
+              <Icon :as="BookOpenText" size="inline" />查看资料
+            </Button>
+            <Button
+              :class="selected.summary ? 'flex-1' : 'w-full'"
+              size="sm"
+              :disabled="
+                selected.summaryStatus === 'GENERATING'
+                  || summaryRegeneratingId === selected.id
+              "
               @click="regenerateSummary"
             >
               <Icon :as="RefreshCw" size="inline" />
-              {{ selected.summaryStatus === 'READY' ? '重新生成项目资料' : '生成项目资料' }}
+              {{
+                selected.summaryStatus === 'GENERATING'
+                  ? '生成中'
+                  : selected.summaryStatus === 'READY'
+                    ? '重新生成'
+                    : '生成资料'
+              }}
             </Button>
-          </template>
+          </div>
         </div>
 
         <div class="mt-4 border-t border-separator pt-3">
@@ -481,5 +542,7 @@ const regenerateSummary = async () => {
 
       <p v-else class="text-caption text-label-tertiary">选中一个项目查看详情</p>
     </aside>
+
+    <ProjectSummaryDialog v-model:open="summaryDialogOpen" :project="selected" />
   </div>
 </template>

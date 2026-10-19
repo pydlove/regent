@@ -14,6 +14,9 @@ export const buttonVariants = tv({
   variants: {
     variant: {
       default: 'bg-content text-label shadow-control hover:brightness-[0.98]',
+      // 分页条这类「同一行还有相邻控件」的场景用描边而不是投影：
+      // 投影会把 24px 的控件视觉上撑高 1px，和旁边的步进控件对不齐。
+      outline: 'border border-separator bg-content text-label hover:bg-hover',
       // 强调按钮加一点内部高光，纯色块会显得扁平；这是 macOS 按钮「可点」的观感来源之一
       primary:
         'bg-accent text-white shadow-[inset_0_0.5px_0_rgba(255,255,255,0.25)] hover:brightness-105',

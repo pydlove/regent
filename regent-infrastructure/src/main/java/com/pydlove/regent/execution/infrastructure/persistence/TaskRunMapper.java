@@ -14,6 +14,8 @@ public interface TaskRunMapper {
 
     TaskRunData selectById(@Param("id") long id);
 
+    TaskRunData selectByIdOwned(@Param("id") long id, @Param("ownerId") long ownerId);
+
     TaskRunData selectLatestByTask(@Param("taskId") long taskId);
 
     List<TaskRunData> selectByTask(@Param("taskId") long taskId);

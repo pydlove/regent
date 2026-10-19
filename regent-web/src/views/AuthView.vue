@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LogIn, Mail, UserPlus } from '@lucide/vue'
+import { Download, LogIn, Mail, UserPlus } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
@@ -264,7 +264,13 @@ async function submit(): Promise<void> {
           class="auth-form-content relative z-10 flex min-w-0 flex-1 flex-col justify-center px-6 py-9 sm:px-10 lg:px-12 xl:px-14"
         >
           <div class="mx-auto w-full min-w-0 max-w-[360px]">
-            <div class="mb-8 flex items-center justify-end">
+            <div class="mb-8 flex items-center justify-between gap-3">
+              <RouterLink
+                class="inline-flex items-center gap-1.5 text-caption text-label-secondary transition-colors duration-100 ease-apple hover:text-label"
+                to="/download"
+              >
+                <Icon :as="Download" size="inline" />下载客户端
+              </RouterLink>
               <SegmentedControl v-model="themeModel" :items="themeOptions" size="sm" />
             </div>
 

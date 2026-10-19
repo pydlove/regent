@@ -2,6 +2,8 @@ package com.pydlove.regent.deployment.application.command;
 
 import com.pydlove.regent.deployment.domain.model.Deployment;
 import com.pydlove.regent.deployment.domain.model.DeploymentAuthType;
+import com.pydlove.regent.deployment.domain.model.DeploymentServer;
+import com.pydlove.regent.deployment.domain.model.DeploymentServerId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
@@ -26,18 +28,22 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class DeploymentCommandServiceTest {
 
     private DeploymentFakes.Deployments deployments;
-    private DeploymentFakes.Credentials credentials;
+    private DeploymentFakes.Servers servers;
     private ProjectProfiles projects;
     private DeploymentCommandService service;
+    private DeploymentServer server;
 
     @BeforeEach
     void setUp() {
         deployments = new DeploymentFakes.Deployments();
-        credentials = new DeploymentFakes.Credentials();
+        servers = new DeploymentFakes.Servers();
         projects = new ProjectProfiles();
         projects.put(profile(7L, "app_audit"));
+        server = servers.put(DeploymentServer.create(
+                ProjectId.of(7L), "生产服务器", "api.example.com", 22,
+                "root", DeploymentAuthType.KEY));
         service = new DeploymentCommandService(
-                deployments, new DeploymentFakes.Runs(), projects, credentials,
+                deployments, new DeploymentFakes.Runs(), projects, servers,
                 new DirectTransactions());
     }
 
@@ -67,45 +73,59 @@ class DeploymentCommandServiceTest {
     }
 
     @Test
-    @DisplayName("密码认证在配置时写入独立凭据存储，编辑留空时保留")
-    void storesPasswordCredential() {
-        Deployment deployment = service.create(command(
-                7L, "生产 API", DeploymentAuthType.PASSWORD, "s3cret"));
+    @DisplayName("部署不能引用其他项目的服务器")
+    void rejectsServerFromAnotherProject() {
+        projects.put(profile(8L, "other"));
+        DeploymentServer other = servers.put(DeploymentServer.create(
+                ProjectId.of(8L), "其他服务器", "other.example.com", 22,
+                "root", DeploymentAuthType.KEY));
+        SaveDeploymentCommand command = new SaveDeploymentCommand(
+                ProjectId.of(7L),
+                other.getId(),
+                "生产 API",
+                "/opt/app",
+                "deploy.sh",
+                validScript("ok"));
 
-        assertEquals("s3cret", credentials.password(deployment.getId()));
-
-        service.update(deployment.getId(), command(
-                7L, "生产 API", DeploymentAuthType.PASSWORD, ""));
-
-        assertEquals("s3cret", credentials.password(deployment.getId()));
+        assertThrows(DomainException.class, () -> service.create(command));
     }
 
     @Test
-    @DisplayName("新建密码认证部署必须填写密码")
-    void requiresPasswordOnCreate() {
-        assertThrows(DomainException.class, () -> service.create(command(
-                7L, "生产 API", DeploymentAuthType.PASSWORD, "")));
+    @DisplayName("不符合规范的脚本不能保存")
+    void rejectsInvalidScript() {
+        SaveDeploymentCommand command = new SaveDeploymentCommand(
+                ProjectId.of(7L),
+                server.getId(),
+                "生产 API",
+                "/opt/app",
+                "deploy.sh",
+                "echo ok");
+
+        assertThrows(DomainException.class, () -> service.create(command));
     }
 
     private static SaveDeploymentCommand command(long projectId, String name) {
-        return command(projectId, name, DeploymentAuthType.KEY, null);
+        return command(projectId, name, DeploymentServerId.of(1L));
     }
 
     private static SaveDeploymentCommand command(long projectId,
                                                  String name,
-                                                 DeploymentAuthType authType,
-                                                 String password) {
+                                                 DeploymentServerId serverId) {
         return new SaveDeploymentCommand(
                 ProjectId.of(projectId),
+                serverId,
                 name,
-                "api.example.com",
-                22,
-                "root",
-                authType,
                 "/opt/app",
                 "deploy.sh",
-                "echo ok",
-                password);
+                validScript("ok"));
+    }
+
+    private static String validScript(String message) {
+        return """
+                #!/usr/bin/env bash
+                set -Eeuo pipefail
+                echo %s
+                """.formatted(message);
     }
 
     private static ProjectProfile profile(long id, String code) {

@@ -71,8 +71,11 @@ async function loadSection<T>(
  *
  * <p>九个请求是并列的展示数据，不应该因为其中一个超时就让整个首页永远停在骨架屏：
  * 单项失败时用空值占位，并在页面上列出缺失区块；只有全部失败才交给页面的错误态处理。
+ * projectId 是整份快照的统一范围，避免同一张工作台上混进多个项目的数据。
  */
-export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
+export async function getDashboardSnapshot(
+  projectId: number | null = null,
+): Promise<DashboardSnapshot> {
   const [
     tasks,
     tokenUsage,
@@ -84,20 +87,37 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
     running,
     queued,
   ] = await Promise.all([
-    loadSection('任务统计', getTaskStats, EMPTY_TASKS),
-    loadSection('Token 消耗', getTaskTokenUsage, EMPTY_TOKEN_USAGE),
-    loadSection('执行趋势', () => getTaskTrend(7), []),
-    loadSection('待批决策', () => listDecisions({ scope: 'PENDING', page: 1, size: 4 }),
+    loadSection('任务统计', () => getTaskStats(projectId), EMPTY_TASKS),
+    loadSection('Token 消耗', () => getTaskTokenUsage(projectId), EMPTY_TOKEN_USAGE),
+    loadSection('执行趋势', () => getTaskTrend(7, projectId), []),
+    loadSection('待批决策', () => listDecisions({
+      scope: 'PENDING',
+      projectId,
+      page: 1,
+      size: 4,
+    }),
       emptyPage<DecisionSummary>()),
-    loadSection('L2 决策', () => listDecisions({ scope: 'PENDING', level: 'L2', page: 1, size: 1 }),
+    loadSection('L2 决策', () => listDecisions({
+      scope: 'PENDING',
+      level: 'L2',
+      projectId,
+      page: 1,
+      size: 1,
+    }),
       emptyPage<DecisionSummary>()),
-    loadSection('L3 决策', () => listDecisions({ scope: 'PENDING', level: 'L3', page: 1, size: 1 }),
+    loadSection('L3 决策', () => listDecisions({
+      scope: 'PENDING',
+      level: 'L3',
+      projectId,
+      page: 1,
+      size: 1,
+    }),
       emptyPage<DecisionSummary>()),
-    loadSection('开放缺陷', () => listBugs({ scope: 'OPEN', page: 1, size: 4 }),
+    loadSection('开放缺陷', () => listBugs({ scope: 'OPEN', projectId, page: 1, size: 4 }),
       emptyPage<Bug>()),
-    loadSection('运行任务', () => listTasks({ status: 'RUNNING', page: 1, size: 4 }),
+    loadSection('运行任务', () => listTasks({ status: 'RUNNING', projectId, page: 1, size: 4 }),
       emptyPage<TaskSummary>()),
-    loadSection('排队任务', () => listTasks({ status: 'QUEUED', page: 1, size: 4 }),
+    loadSection('排队任务', () => listTasks({ status: 'QUEUED', projectId, page: 1, size: 4 }),
       emptyPage<TaskSummary>()),
   ])
 

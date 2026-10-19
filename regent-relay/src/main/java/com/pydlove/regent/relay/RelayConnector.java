@@ -134,13 +134,20 @@ public final class RelayConnector implements AutoCloseable {
         try {
             localResponse = client.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
         } catch (IOException exception) {
-            return errorResponse(502, "本地 Regent 请求失败：" + exception.getMessage());
+            return errorResponse(502, "本地 Regent 请求失败：" + failureMessage(exception));
         }
         return new RelayResponse(
             localResponse.statusCode(),
             RelayHeaders.filterResponse(localResponse.headers().map()),
             localResponse.body()
         );
+    }
+
+    static String failureMessage(IOException exception) {
+        String message = exception.getMessage();
+        return message == null || message.isBlank()
+                ? exception.getClass().getSimpleName()
+                : message;
     }
 
     private void sendResponse(String requestId, RelayResponse response) throws IOException, InterruptedException {

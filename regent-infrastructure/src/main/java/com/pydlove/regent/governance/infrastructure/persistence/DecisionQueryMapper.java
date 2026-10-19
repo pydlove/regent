@@ -8,14 +8,20 @@ import java.util.List;
 public interface DecisionQueryMapper {
 
     List<DecisionRow> selectPage(@Param("level") String level,
+                                 @Param("projectId") Long projectId,
                                  @Param("scope") String scope,
                                  @Param("keyword") String keyword,
+                                 @Param("ownerId") Long ownerId,
                                  @Param("size") int size,
                                  @Param("offset") int offset);
 
     long countBy(@Param("level") String level,
+                 @Param("projectId") Long projectId,
                  @Param("scope") String scope,
-                 @Param("keyword") String keyword);
+                 @Param("keyword") String keyword,
+                 @Param("ownerId") Long ownerId);
 
     DecisionRow selectById(@Param("id") long id);
+
+    DecisionRow selectByIdOwned(@Param("id") long id, @Param("ownerId") long ownerId);
 }

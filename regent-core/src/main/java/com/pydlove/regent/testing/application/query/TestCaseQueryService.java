@@ -1,5 +1,6 @@
 package com.pydlove.regent.testing.application.query;
 
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
@@ -32,14 +33,20 @@ public class TestCaseQueryService {
     }
 
     public List<TestCaseOverview> list(Long projectId) {
+        return list(projectId, null);
+    }
+
+    public List<TestCaseOverview> list(Long projectId, UserId ownerId) {
         List<TestCase> cases = projectId == null
-                ? testCaseRepository.findAll()
+                ? (ownerId == null ? testCaseRepository.findAll() : testCaseRepository.findAll(ownerId))
                 : testCaseRepository.findByProject(ProjectId.of(projectId));
         if (cases.isEmpty()) {
             return List.of();
         }
 
-        Map<Long, String> projectNames = projectProfileRepository.findAll().stream()
+        Map<Long, String> projectNames = (ownerId == null
+                ? projectProfileRepository.findAll()
+                : projectProfileRepository.findAll(ownerId)).stream()
                 .collect(Collectors.toMap(
                         project -> project.id().value(),
                         ProjectProfile::name,
@@ -64,9 +71,20 @@ public class TestCaseQueryService {
                 .orElseThrow(() -> new EntityNotFoundException("测试用例不存在：" + id.value()));
     }
 
+    public TestCase get(TestCaseId id, UserId ownerId) {
+        return testCaseRepository.findByIdOwned(id, ownerId)
+                .orElseThrow(() -> new EntityNotFoundException("测试用例不存在：" + id.value()));
+    }
+
     public TestCaseOverview getOverview(TestCaseId id) {
-        TestCase testCase = get(id);
-        String projectName = projectProfileRepository.findById(testCase.getProjectId())
+        return getOverview(id, null);
+    }
+
+    public TestCaseOverview getOverview(TestCaseId id, UserId ownerId) {
+        TestCase testCase = get(id, ownerId);
+        String projectName = (ownerId == null
+                ? projectProfileRepository.findById(testCase.getProjectId())
+                : projectProfileRepository.findById(testCase.getProjectId(), ownerId))
                 .map(ProjectProfile::name)
                 .orElse("项目 #" + testCase.getProjectId().value());
         TestCaseRun latest = testCaseRunRepository

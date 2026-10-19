@@ -3,6 +3,7 @@ package com.pydlove.regent.project.domain.repository;
 import com.pydlove.regent.project.domain.model.Project;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.model.ProjectSummaryStatus;
+import com.pydlove.regent.identity.domain.model.UserId;
 
 import java.util.List;
 import java.util.Optional;
@@ -28,8 +29,16 @@ public interface ProjectRepository {
 
     Optional<Project> findById(ProjectId id);
 
+    /** 只在指定账号名下取项目；接口侧改项目前必须先过这一层。 */
+    default Optional<Project> findByIdOwned(ProjectId id, UserId ownerId) {
+        return findById(id);
+    }
+
     List<Project> findBySummaryStatus(ProjectSummaryStatus status);
 
-    /** 持久化聚合中受守卫的变更（当前用于项目资料生成状态）。 */
+    /** 持久化项目资料生成状态相关字段。 */
     void update(Project project);
+
+    /** 持久化名称、路径、决策阈值与启停状态；不触碰项目资料字段。 */
+    void updateDetails(Project project);
 }

@@ -4,6 +4,7 @@ import com.pydlove.regent.governance.domain.repository.DecisionPage;
 import com.pydlove.regent.governance.domain.repository.DecisionQuery;
 import com.pydlove.regent.governance.domain.repository.DecisionQueryRepository;
 import com.pydlove.regent.governance.domain.repository.DecisionView;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 
 /** 决策单读侧用例。 */
@@ -21,6 +22,11 @@ public class DecisionQueryService {
 
     public DecisionView get(long id) {
         return decisionQueryRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("决策不存在：" + id));
+    }
+
+    public DecisionView get(long id, UserId ownerId) {
+        return decisionQueryRepository.findByIdOwned(id, ownerId)
                 .orElseThrow(() -> new EntityNotFoundException("决策不存在：" + id));
     }
 }

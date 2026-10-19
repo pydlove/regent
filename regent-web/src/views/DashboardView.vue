@@ -15,7 +15,7 @@ import {
   TrendingUp,
   Workflow,
 } from '@lucide/vue'
-import { computed, onMounted, ref, type Component } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, type Component } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import { getDashboardSnapshot, type DashboardSnapshot } from '@/api/dashboard'
@@ -23,6 +23,7 @@ import { ApiError } from '@/api/http'
 import BugSeverityBadge from '@/components/business/BugSeverityBadge.vue'
 import DecisionLevelBadge from '@/components/business/DecisionLevelBadge.vue'
 import TaskStatusBadge from '@/components/business/TaskStatusBadge.vue'
+import TokenUsageDialog from '@/components/business/TokenUsageDialog.vue'
 import Button from '@/components/ui/button/Button.vue'
 import DonutChart from '@/components/ui/chart/DonutChart.vue'
 import TrendArea from '@/components/ui/chart/TrendArea.vue'
@@ -31,6 +32,7 @@ import Icon from '@/components/ui/icon/Icon.vue'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
 import Skeleton from '@/components/ui/skeleton/Skeleton.vue'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
+import { useTaskStore } from '@/stores/useTaskStore'
 import type { TaskStatus } from '@/types/task'
 import { formatRelative, formatTokens } from '@/utils/format'
 
@@ -38,7 +40,10 @@ const snapshot = ref<DashboardSnapshot | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const lastUpdated = ref<Date | null>(null)
+const tokenDialogOpen = ref(false)
 const router = useRouter()
+const store = useTaskStore()
+let loadSequence = 0
 
 const integerFormatter = new Intl.NumberFormat('zh-CN')
 const formatInteger = (value: number) => integerFormatter.format(value)
@@ -51,18 +56,28 @@ function messageOf(value: unknown): string {
 }
 
 async function load() {
-  if (loading.value) return
+  const sequence = ++loadSequence
+  const projectId = store.projectId
   loading.value = true
   error.value = null
   try {
-    snapshot.value = await getDashboardSnapshot()
+    const next = await getDashboardSnapshot(projectId)
+    if (sequence !== loadSequence) return
+    snapshot.value = next
     lastUpdated.value = new Date()
   } catch (value) {
+    if (sequence !== loadSequence) return
     error.value = messageOf(value)
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
+
+const scopeLabel = computed(() => {
+  if (store.projectId === null) return '全部项目'
+  return store.projects.find((project) => project.id === store.projectId)?.name
+    ?? `项目 #${store.projectId}`
+})
 
 const totalTasks = computed(() =>
   snapshot.value ? Object.values(snapshot.value.tasks).reduce((sum, count) => sum + count, 0) : 0,
@@ -141,6 +156,13 @@ const primaryAction = computed(() => {
 })
 
 const goPrimaryAction = () => router.push(primaryAction.value.to)
+const openMetric = (metric: Metric) => {
+  if (metric.key === 'tokens') {
+    tokenDialogOpen.value = true
+    return
+  }
+  void router.push(metric.to)
+}
 
 type Metric = {
   key: string
@@ -331,7 +353,20 @@ const updatedAt = computed(() =>
     : '',
 )
 
+watch(
+  () => store.projectId,
+  () => {
+    snapshot.value = null
+    lastUpdated.value = null
+    error.value = null
+    void load()
+  },
+)
+
 onMounted(() => void load())
+onUnmounted(() => {
+  loadSequence++
+})
 </script>
 
 <template>
@@ -351,6 +386,7 @@ onMounted(() => void load())
               <span v-if="updatedAt" class="text-subhead text-label-tertiary">
                 更新于 <span class="tnum">{{ updatedAt }}</span>
               </span>
+              <span class="text-subhead text-label-tertiary">{{ scopeLabel }}</span>
             </div>
             <h1 class="mt-3 max-w-4xl text-metric font-bold tracking-[-0.015em] text-label">{{ focusTitle }}</h1>
             <p class="mt-1 max-w-3xl text-body leading-5 text-label-secondary">{{ focusDescription }}</p>
@@ -397,12 +433,13 @@ onMounted(() => void load())
           aria-label="核心指标"
           class="mt-4 grid grid-cols-2 gap-2.5 md:grid-cols-5"
         >
-          <RouterLink
+          <button
             v-for="metric in metrics"
             :key="metric.key"
-            :to="metric.to"
-            class="group relative flex min-h-[120px] min-w-0 flex-col overflow-hidden rounded-card border border-separator-soft bg-content px-4 py-3.5 shadow-panel transition duration-200 ease-apple hover:-translate-y-0.5 hover:border-accent/20 hover:shadow-popover"
+            type="button"
+            class="group relative flex min-h-[120px] min-w-0 flex-col overflow-hidden rounded-card border border-separator-soft bg-content px-4 py-3.5 text-left shadow-panel transition duration-200 ease-apple hover:-translate-y-0.5 hover:border-accent/20 hover:shadow-popover focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/35"
             :class="{ 'col-span-2 md:col-span-1': metric.key === 'tokens' }"
+            @click="openMetric(metric)"
           >
             <div class="relative flex items-center gap-2">
               <span class="grid size-8 shrink-0 place-items-center rounded-panel" :class="metric.iconClass">
@@ -424,7 +461,7 @@ onMounted(() => void load())
               </span>
             </div>
             <p class="relative mt-1 line-clamp-1 text-subhead text-label-tertiary md:line-clamp-2">{{ metric.caption }}</p>
-          </RouterLink>
+          </button>
         </section>
 
         <section
@@ -853,5 +890,11 @@ onMounted(() => void load())
         </div>
       </div>
     </div>
+
+    <TokenUsageDialog
+      v-model:open="tokenDialogOpen"
+      :project-id="store.projectId"
+      :scope-label="scopeLabel"
+    />
   </div>
 </template>

@@ -17,9 +17,17 @@ export const dialogPanelVariants = tv({
    * 标题与底部操作按钮不能被长内容顶出屏幕。
    */
   base:
-    'flex max-h-[calc(100dvh-24px)] max-w-[calc(100vw-24px)] flex-col overflow-hidden ' +
+    'flex max-w-[calc(100vw-24px)] flex-col overflow-hidden ' +
     'bg-material backdrop-blur-[30px] backdrop-saturate-150 shadow-window animate-panel-in rounded-window p-5',
   variants: {
+    maxHeight: {
+      default: 'max-h-[calc(100dvh-24px)]',
+      compact: 'max-h-[80dvh]',
+    },
+    fullscreen: {
+      true: 'h-dvh w-screen max-h-none max-w-none rounded-none',
+      false: '',
+    },
     layout: {
       /* 问「要不要做」：窄一点，一行说明就够 */
       alert: 'w-[340px]',
@@ -30,22 +38,30 @@ export const dialogPanelVariants = tv({
       log: 'w-[640px]',
     },
     /*
-     * 表单弹框的宽度两档。regular 够放「一句理由」这类短输入；large 留给要写长文、
-     * 要贴图、还要选项目的表单 —— 384px 下那种表单每一行都在换行，人填起来是受罪。
+     * 宽度档位：regular 够放短输入；large 留给长表单；wide 只给需要横排读内容的日志弹框。
      *
-     * 只对 form 生效：alert 与 log 的宽度各自只有一档，被顺手传个 large 就变宽属于漂移，
-     * 所以下面用 compoundVariants 把它们钉回去。
+     * alert 与 form 不允许被 wide 撑开，log 的 large/wide 各自有明确宽度；
+     * compoundVariants 负责把这些组合钉回预设，避免调用点凭感觉改宽。
      */
     size: {
       regular: '',
       large: 'w-[640px]',
+      wide: 'w-[760px]',
     },
   },
   compoundVariants: [
     { layout: 'alert', size: 'large', class: 'w-[340px]' },
+    { layout: 'alert', size: 'wide', class: 'w-[340px]' },
+    { layout: 'form', size: 'wide', class: 'w-[640px]' },
     { layout: 'log', size: 'large', class: 'w-[640px]' },
+    { layout: 'log', size: 'wide', class: 'w-[760px]' },
   ],
-  defaultVariants: { layout: 'alert', size: 'regular' },
+  defaultVariants: {
+    layout: 'alert',
+    size: 'regular',
+    maxHeight: 'default',
+    fullscreen: false,
+  },
 })
 
 /*

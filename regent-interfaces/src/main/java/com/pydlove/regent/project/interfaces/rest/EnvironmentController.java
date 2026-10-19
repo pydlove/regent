@@ -1,5 +1,8 @@
 package com.pydlove.regent.project.interfaces.rest;
 
+import com.pydlove.regent.identity.application.query.AuthenticatedUser;
+import com.pydlove.regent.identity.domain.model.UserId;
+import com.pydlove.regent.identity.interfaces.rest.AuthSessionInterceptor;
 import com.pydlove.regent.project.application.command.EnvironmentEntryService;
 import com.pydlove.regent.project.application.command.SaveEnvironmentCommand;
 import com.pydlove.regent.project.domain.model.EnvironmentId;
@@ -7,6 +10,7 @@ import com.pydlove.regent.project.domain.model.EnvironmentScope;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.interfaces.dto.EnvironmentRequest;
 import com.pydlove.regent.project.interfaces.dto.EnvironmentResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,25 +35,37 @@ public class EnvironmentController {
     }
 
     @GetMapping
-    public List<EnvironmentResponse> list() {
-        return environmentEntryService.list().stream().map(EnvironmentResponse::from).toList();
+    public List<EnvironmentResponse> list(HttpServletRequest request) {
+        return environmentEntryService.list(currentUser(request)).stream()
+                .map(EnvironmentResponse::from)
+                .toList();
     }
 
     @PostMapping
-    public EnvironmentResponse create(@RequestBody EnvironmentRequest request) {
-        return EnvironmentResponse.from(environmentEntryService.create(toCommand(request)));
+    public EnvironmentResponse create(@RequestBody EnvironmentRequest request,
+                                      HttpServletRequest servletRequest) {
+        return EnvironmentResponse.from(
+                environmentEntryService.create(toCommand(request), currentUser(servletRequest)));
     }
 
     @PutMapping("/{id}")
-    public EnvironmentResponse update(@PathVariable long id, @RequestBody EnvironmentRequest request) {
+    public EnvironmentResponse update(@PathVariable long id,
+                                      @RequestBody EnvironmentRequest request,
+                                      HttpServletRequest servletRequest) {
         return EnvironmentResponse.from(
-                environmentEntryService.update(EnvironmentId.of(id), toCommand(request)));
+                environmentEntryService.update(EnvironmentId.of(id), toCommand(request),
+                        currentUser(servletRequest)));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable long id) {
-        environmentEntryService.delete(EnvironmentId.of(id));
+    public ResponseEntity<Void> delete(@PathVariable long id, HttpServletRequest request) {
+        environmentEntryService.delete(EnvironmentId.of(id), currentUser(request));
         return ResponseEntity.noContent().build();
+    }
+
+    private static UserId currentUser(HttpServletRequest request) {
+        AuthenticatedUser user = AuthSessionInterceptor.currentUser(request);
+        return UserId.of(user.id());
     }
 
     private static SaveEnvironmentCommand toCommand(EnvironmentRequest request) {

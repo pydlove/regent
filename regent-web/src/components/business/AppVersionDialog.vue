@@ -58,11 +58,14 @@ function shortVersion(version: string): string {
       </button>
     </template>
 
-    <div class="grid gap-4 sm:grid-cols-[168px_minmax(0,1fr)]">
-      <aside class="min-w-0">
+    <div
+      class="grid grid-rows-[auto_minmax(0,1fr)] gap-4 overflow-hidden sm:grid-cols-[168px_minmax(0,1fr)] sm:grid-rows-1"
+      :style="{ height: 'min(500px, calc(100dvh - 220px))' }"
+    >
+      <aside class="flex min-h-0 min-w-0 flex-col">
         <p class="text-caption font-emphasis text-label-secondary">版本记录</p>
         <div
-          class="mt-2 hidden max-h-96 space-y-1 overflow-y-auto sm:block"
+          class="scroll-area mt-2 hidden min-h-0 flex-1 space-y-1 overflow-y-auto sm:block"
           role="tablist"
           aria-label="历史版本"
         >
@@ -102,7 +105,7 @@ function shortVersion(version: string): string {
         :id="`release-panel-${selectedRelease.version}`"
         role="tabpanel"
         :aria-labelledby="`release-tab-${selectedRelease.version}`"
-        class="min-w-0"
+        class="scroll-area min-h-0 min-w-0 overflow-y-auto pr-1"
       >
         <div class="rounded-panel bg-content/70 px-3 py-2.5">
           <div class="flex flex-wrap items-center gap-2">

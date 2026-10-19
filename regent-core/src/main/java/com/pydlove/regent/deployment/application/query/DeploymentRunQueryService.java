@@ -5,6 +5,7 @@ import com.pydlove.regent.deployment.domain.model.DeploymentRun;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunId;
 import com.pydlove.regent.deployment.domain.port.DeploymentLogStore;
 import com.pydlove.regent.deployment.domain.repository.DeploymentRunRepository;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 
 import java.util.List;
@@ -27,6 +28,11 @@ public class DeploymentRunQueryService {
 
     public DeploymentRun get(DeploymentRunId id) {
         return runRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("部署执行记录不存在：" + id.value()));
+    }
+
+    public DeploymentRun get(DeploymentRunId id, UserId ownerId) {
+        return runRepository.findByIdOwned(id, ownerId)
                 .orElseThrow(() -> new EntityNotFoundException("部署执行记录不存在：" + id.value()));
     }
 

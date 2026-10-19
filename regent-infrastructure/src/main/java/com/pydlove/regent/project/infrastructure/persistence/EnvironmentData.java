@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 public class EnvironmentData {
 
     private Long id;
+    private Long userId;
     private Long projectId;
     private String itemKey;
     private String itemValue;

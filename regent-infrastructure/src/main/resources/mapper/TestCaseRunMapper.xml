@@ -15,6 +15,18 @@
         WHERE id = #{id}
     </select>
 
+    <select id="selectByIdOwned"
+            resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRunRow">
+        SELECT r.id, r.project_id, r.task_id, r.trigger_type, r.test_case_id, r.test_case_name,
+               r.test_type, r.command_text, r.script_filename, r.script_content, r.script_hash,
+               r.status, r.exit_code, r.summary, r.output, r.queued_at, r.started_at,
+               r.finished_at, r.created_at
+        FROM test_case_run r
+        JOIN project p ON p.id = r.project_id
+        WHERE r.id = #{id}
+          AND p.owner_id = #{ownerId}
+    </select>
+
     <select id="selectByTask"
             resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRunRow">
         SELECT <include refid="runColumns"/>

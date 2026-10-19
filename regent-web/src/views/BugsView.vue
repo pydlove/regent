@@ -36,10 +36,7 @@ import {
 } from '@/types/bug'
 import { formatRelative } from '@/utils/format'
 
-/*
- * 缺陷单。列表按严重级排，同级新的在前 —— 缺陷不像任务有先后关系，
- * 它的问题永远是「先修哪个」，所以排序要回答这个问题，而不是堆成一团。
- */
+/* 缺陷单按录入先后排序：先添加的在前，分页也沿这条顺序切。 */
 
 const bugStore = useBugStore()
 const toast = useToast()

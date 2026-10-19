@@ -1,8 +1,13 @@
 package com.pydlove.regent.project.interfaces.rest;
 
+import com.pydlove.regent.identity.application.query.AuthenticatedUser;
+import com.pydlove.regent.identity.domain.model.UserId;
+import com.pydlove.regent.identity.interfaces.rest.AuthSessionInterceptor;
 import com.pydlove.regent.project.application.command.ProjectRegistrationService;
 import com.pydlove.regent.project.application.command.ProjectSummaryGenerationService;
+import com.pydlove.regent.project.application.command.ProjectUpdateService;
 import com.pydlove.regent.project.application.command.RegisterProjectCommand;
+import com.pydlove.regent.project.application.command.UpdateProjectCommand;
 import com.pydlove.regent.project.application.query.DirectoryListingService;
 import com.pydlove.regent.project.application.query.ProjectGitBranchQueryService;
 import com.pydlove.regent.project.domain.model.Project;
@@ -12,11 +17,14 @@ import com.pydlove.regent.project.interfaces.dto.DirectoryListingResponse;
 import com.pydlove.regent.project.interfaces.dto.ProjectCreateRequest;
 import com.pydlove.regent.project.interfaces.dto.ProjectGitBranchResponse;
 import com.pydlove.regent.project.interfaces.dto.ProjectResponse;
+import com.pydlove.regent.project.interfaces.dto.ProjectUpdateRequest;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -36,17 +44,20 @@ public class ProjectController {
 
     private final ProjectProfileRepository projectProfileRepository;
     private final ProjectRegistrationService projectRegistrationService;
+    private final ProjectUpdateService projectUpdateService;
     private final DirectoryListingService directoryListingService;
     private final ProjectGitBranchQueryService projectGitBranchQueryService;
     private final ProjectSummaryGenerationService projectSummaryGenerationService;
 
     public ProjectController(ProjectProfileRepository projectProfileRepository,
                              ProjectRegistrationService projectRegistrationService,
+                             ProjectUpdateService projectUpdateService,
                              DirectoryListingService directoryListingService,
                              ProjectGitBranchQueryService projectGitBranchQueryService,
                              ProjectSummaryGenerationService projectSummaryGenerationService) {
         this.projectProfileRepository = projectProfileRepository;
         this.projectRegistrationService = projectRegistrationService;
+        this.projectUpdateService = projectUpdateService;
         this.directoryListingService = directoryListingService;
         this.projectGitBranchQueryService = projectGitBranchQueryService;
         this.projectSummaryGenerationService = projectSummaryGenerationService;
@@ -67,16 +78,17 @@ public class ProjectController {
     }
 
     @GetMapping
-    public List<ProjectResponse> list() {
-        return projectProfileRepository.findAll().stream()
+    public List<ProjectResponse> list(HttpServletRequest request) {
+        return projectProfileRepository.findAll(currentUser(request)).stream()
                 .map(ProjectResponse::from)
                 .toList();
     }
 
     @GetMapping("/{id}/git-branch")
-    public ProjectGitBranchResponse gitBranch(@PathVariable long id) {
+    public ProjectGitBranchResponse gitBranch(@PathVariable long id, HttpServletRequest request) {
         return new ProjectGitBranchResponse(
-                projectGitBranchQueryService.currentBranch(ProjectId.of(id)).orElse(null));
+                projectGitBranchQueryService.currentBranch(ProjectId.of(id), currentUser(request))
+                        .orElse(null));
     }
 
     /**
@@ -87,7 +99,9 @@ public class ProjectController {
      * insert 回填前后返回的 JSON 会不一样。
      */
     @PostMapping
-    public ProjectResponse create(@RequestBody ProjectCreateRequest request) {
+    public ProjectResponse create(@RequestBody ProjectCreateRequest request,
+                                  HttpServletRequest servletRequest) {
+        UserId ownerId = currentUser(servletRequest);
         Project project = projectRegistrationService.register(new RegisterProjectCommand(
                 request.code(),
                 request.name(),
@@ -95,17 +109,43 @@ public class ProjectController {
                 // 技术栈与验证方式还没有入口，等情况出现时在请求体、画像、响应三处一起加
                 null,
                 null,
-                DecisionLevel.parse(request.defaultDecisionLevel())));
-        return ProjectResponse.from(projectProfileRepository.findById(project.getId())
+                DecisionLevel.parse(request.defaultDecisionLevel())), ownerId);
+        return ProjectResponse.from(projectProfileRepository.findById(project.getId(), ownerId)
                 .orElseThrow(() -> new EntityNotFoundException("项目刚注册就查不到了：" + project.getId())));
+    }
+
+    /** 编辑项目画像。标识不可变，路径必须仍是本机存在的目录。 */
+    @PutMapping("/{id}")
+    public ProjectResponse update(@PathVariable long id,
+                                  @RequestBody ProjectUpdateRequest request,
+                                  HttpServletRequest servletRequest) {
+        if (request.enabled() == null) {
+            throw new IllegalArgumentException("缺少 enabled");
+        }
+        UserId ownerId = currentUser(servletRequest);
+        Project project = projectUpdateService.update(ProjectId.of(id), new UpdateProjectCommand(
+                request.name(),
+                request.path(),
+                DecisionLevel.parse(request.defaultDecisionLevel()),
+                request.enabled()), ownerId);
+        return ProjectResponse.from(projectProfileRepository.findById(project.getId(), ownerId)
+                .orElseThrow(() -> new EntityNotFoundException("项目刚更新就查不到了：" + project.getId())));
     }
 
     /** 手动重新生成项目资料；同一项目生成中时调度器会忽略重复请求。 */
     @PostMapping("/{id}/summary/regenerate")
-    public ProjectResponse regenerateSummary(@PathVariable long id) {
+    public ProjectResponse regenerateSummary(@PathVariable long id, HttpServletRequest request) {
+        UserId ownerId = currentUser(request);
         ProjectId projectId = ProjectId.of(id);
+        projectProfileRepository.findById(projectId, ownerId)
+                .orElseThrow(() -> new EntityNotFoundException("项目不存在：" + id));
         projectSummaryGenerationService.schedule(projectId);
-        return ProjectResponse.from(projectProfileRepository.findById(projectId)
+        return ProjectResponse.from(projectProfileRepository.findById(projectId, ownerId)
                 .orElseThrow(() -> new EntityNotFoundException("项目不存在：" + id)));
+    }
+
+    private static UserId currentUser(HttpServletRequest request) {
+        AuthenticatedUser user = AuthSessionInterceptor.currentUser(request);
+        return UserId.of(user.id());
     }
 }

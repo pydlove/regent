@@ -1,0 +1,15 @@
+{
+  "name": "regent-desktop",
+  "version": "1.0.2",
+  "description": "Regent AI 桌面客户端",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "node scripts/start.cjs .",
+    "build:release": "node scripts/build-release.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "44.9.0"
+  }
+}

@@ -14,12 +14,14 @@ import java.time.LocalDateTime;
 public class ProjectData {
 
     private Long id;
+    private Long ownerId;
     private String code;
     private String name;
     private String path;
     private String techStack;
     private String verifyMethod;
     private String defaultDecisionLevel;
+    private Boolean enabled;
     private String summaryStatus;
     private String summary;
     private String summaryError;

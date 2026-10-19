@@ -19,19 +19,14 @@ import java.util.HexFormat;
 public class Deployment {
 
     private static final int MAX_NAME_LENGTH = 128;
-    private static final int MAX_HOST_LENGTH = 255;
-    private static final int MAX_USERNAME_LENGTH = 32;
     private static final int MAX_REMOTE_DIRECTORY_LENGTH = 512;
     private static final int MAX_FILENAME_LENGTH = 255;
     public static final int MAX_SCRIPT_LENGTH = 512 * 1024;
 
     private DeploymentId id;
     private final ProjectId projectId;
+    private DeploymentServerId serverId;
     private String name;
-    private String host;
-    private int port;
-    private String username;
-    private DeploymentAuthType authType;
     private String remoteDirectory;
     private String scriptFilename;
     private String scriptContent;
@@ -41,11 +36,8 @@ public class Deployment {
 
     private Deployment(DeploymentId id,
                        ProjectId projectId,
+                       DeploymentServerId serverId,
                        String name,
-                       String host,
-                       int port,
-                       String username,
-                       DeploymentAuthType authType,
                        String remoteDirectory,
                        String scriptFilename,
                        String scriptContent,
@@ -54,53 +46,43 @@ public class Deployment {
                        Instant updatedAt) {
         this.id = id;
         this.projectId = requireNotNull(projectId, "归属项目");
+        this.serverId = requireNotNull(serverId, "部署服务器");
         this.createdAt = requireNotNull(createdAt, "创建时间").truncatedTo(ChronoUnit.MILLIS);
         this.updatedAt = requireNotNull(updatedAt, "更新时间").truncatedTo(ChronoUnit.MILLIS);
-        apply(name, host, port, username, authType, remoteDirectory,
-                scriptFilename, scriptContent, scriptHash);
+        apply(name, serverId, remoteDirectory, scriptFilename, scriptContent, scriptHash);
     }
 
     public static Deployment create(ProjectId projectId,
+                                    DeploymentServerId serverId,
                                     String name,
-                                    String host,
-                                    int port,
-                                    String username,
-                                    DeploymentAuthType authType,
                                     String remoteDirectory,
                                     String scriptFilename,
                                     String scriptContent) {
         Instant now = now();
-        return new Deployment(null, projectId, name, host, port, username, authType, remoteDirectory,
+        return new Deployment(null, projectId, serverId, name, remoteDirectory,
                 scriptFilename, scriptContent, null, now, now);
     }
 
     public static Deployment restore(DeploymentId id,
                                      ProjectId projectId,
+                                     DeploymentServerId serverId,
                                      String name,
-                                     String host,
-                                     int port,
-                                     String username,
-                                     DeploymentAuthType authType,
                                      String remoteDirectory,
                                      String scriptFilename,
                                      String scriptContent,
                                      String scriptHash,
                                      Instant createdAt,
                                      Instant updatedAt) {
-        return new Deployment(requireNotNull(id, "部署 ID"), projectId, name, host, port, username,
-                authType, remoteDirectory, scriptFilename, scriptContent, scriptHash,
-                createdAt, updatedAt);
+        return new Deployment(requireNotNull(id, "部署 ID"), projectId, serverId, name,
+                remoteDirectory, scriptFilename, scriptContent, scriptHash, createdAt, updatedAt);
     }
 
     public void update(String name,
-                       String host,
-                       int port,
-                       String username,
-                       DeploymentAuthType authType,
+                       DeploymentServerId serverId,
                        String remoteDirectory,
                        String scriptFilename,
                        String scriptContent) {
-        apply(name, host, port, username, authType, remoteDirectory,
+        apply(name, serverId, remoteDirectory,
                 scriptFilename, scriptContent, null);
         this.updatedAt = now();
     }
@@ -116,24 +98,18 @@ public class Deployment {
         if (id == null) {
             throw new DomainException("部署尚未持久化，不能执行");
         }
-        return new DeploymentSnapshot(id, projectId, name, host, port, username, authType,
+        return new DeploymentSnapshot(id, projectId, serverId, name,
                 remoteDirectory, scriptFilename, scriptContent, scriptHash);
     }
 
     private void apply(String name,
-                       String host,
-                       int port,
-                       String username,
-                       DeploymentAuthType authType,
+                       DeploymentServerId serverId,
                        String remoteDirectory,
                        String scriptFilename,
                        String scriptContent,
                        String scriptHash) {
         this.name = requireName(name);
-        this.host = requireHost(host);
-        this.port = requirePort(port);
-        this.username = requireUsername(username);
-        this.authType = requireNotNull(authType, "认证方式");
+        this.serverId = requireNotNull(serverId, "部署服务器");
         this.remoteDirectory = requireRemoteDirectory(remoteDirectory);
         applyScript(scriptFilename, scriptContent, scriptHash);
     }
@@ -159,27 +135,6 @@ public class Deployment {
         if (value.length() > MAX_NAME_LENGTH) {
             throw new DomainException(
                     "部署名称超长（上限 " + MAX_NAME_LENGTH + " 字符）：" + value.length());
-        }
-        return value;
-    }
-
-    private static String requireHost(String host) {
-        String value = requireText(host, "服务器地址").trim();
-        if (value.length() > MAX_HOST_LENGTH) {
-            throw new DomainException(
-                    "服务器地址超长（上限 " + MAX_HOST_LENGTH + " 字符）：" + value.length());
-        }
-        if (!value.matches("[A-Za-z0-9._:\\[\\]-]+")) {
-            throw new DomainException("服务器地址格式不正确：" + value);
-        }
-        return value;
-    }
-
-    private static String requireUsername(String username) {
-        String value = requireText(username, "登录用户").trim();
-        if (value.length() > MAX_USERNAME_LENGTH
-                || !value.matches("[A-Za-z0-9._-]+")) {
-            throw new DomainException("SSH 用户名格式不正确：" + value);
         }
         return value;
     }
@@ -215,13 +170,6 @@ public class Deployment {
             throw new DomainException("部署脚本文件名不能包含路径分隔符：" + value);
         }
         return value;
-    }
-
-    private static int requirePort(int port) {
-        if (port < 1 || port > 65535) {
-            throw new DomainException("SSH 端口必须在 1–65535 之间：" + port);
-        }
-        return port;
     }
 
     private static String sha256(String content) {
@@ -260,24 +208,12 @@ public class Deployment {
         return projectId;
     }
 
+    public DeploymentServerId getServerId() {
+        return serverId;
+    }
+
     public String getName() {
         return name;
-    }
-
-    public String getHost() {
-        return host;
-    }
-
-    public int getPort() {
-        return port;
-    }
-
-    public String getUsername() {
-        return username;
-    }
-
-    public DeploymentAuthType getAuthType() {
-        return authType;
     }
 
     public String getRemoteDirectory() {

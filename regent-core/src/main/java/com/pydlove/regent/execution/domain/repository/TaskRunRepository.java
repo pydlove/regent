@@ -3,6 +3,7 @@ package com.pydlove.regent.execution.domain.repository;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskRunId;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 
 import java.time.Instant;
@@ -18,6 +19,10 @@ import java.util.Optional;
 public interface TaskRunRepository {
 
     Optional<TaskRun> findById(TaskRunId id);
+
+    default Optional<TaskRun> findByIdOwned(TaskRunId id, UserId ownerId) {
+        return findById(id);
+    }
 
     /** 最近一次尝试。调度器靠它判断「任务是不是停在待续跑上」。 */
     Optional<TaskRun> findLatestByTask(TaskId taskId);

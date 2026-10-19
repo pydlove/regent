@@ -4,6 +4,7 @@ import com.pydlove.regent.deployment.domain.model.DeploymentId;
 import com.pydlove.regent.deployment.domain.model.DeploymentRun;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunId;
 import com.pydlove.regent.deployment.domain.repository.DeploymentRunRepository;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.shared.domain.DomainException;
 import org.springframework.stereotype.Repository;
 
@@ -23,6 +24,12 @@ public class MyBatisDeploymentRunRepository implements DeploymentRunRepository {
     @Override
     public Optional<DeploymentRun> findById(DeploymentRunId id) {
         return Optional.ofNullable(mapper.selectById(id.value()))
+                .map(DeploymentDataMapper::toDomain);
+    }
+
+    @Override
+    public Optional<DeploymentRun> findByIdOwned(DeploymentRunId id, UserId ownerId) {
+        return Optional.ofNullable(mapper.selectByIdOwned(id.value(), ownerId.value()))
                 .map(DeploymentDataMapper::toDomain);
     }
 

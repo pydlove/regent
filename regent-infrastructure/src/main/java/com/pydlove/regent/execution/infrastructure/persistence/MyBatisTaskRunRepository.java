@@ -4,6 +4,7 @@ import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskRunId;
 import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.shared.domain.DomainException;
 import org.springframework.stereotype.Repository;
@@ -27,6 +28,12 @@ public class MyBatisTaskRunRepository implements TaskRunRepository {
     @Override
     public Optional<TaskRun> findById(TaskRunId id) {
         return Optional.ofNullable(taskRunMapper.selectById(id.value()))
+                .map(TaskRunDataMapper::toDomain);
+    }
+
+    @Override
+    public Optional<TaskRun> findByIdOwned(TaskRunId id, UserId ownerId) {
+        return Optional.ofNullable(taskRunMapper.selectByIdOwned(id.value(), ownerId.value()))
                 .map(TaskRunDataMapper::toDomain);
     }
 

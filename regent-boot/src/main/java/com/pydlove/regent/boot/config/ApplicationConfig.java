@@ -7,12 +7,14 @@ import com.pydlove.regent.bug.domain.repository.BugAttachmentRepository;
 import com.pydlove.regent.bug.domain.repository.BugQueryRepository;
 import com.pydlove.regent.bug.domain.repository.BugRepository;
 import com.pydlove.regent.execution.application.command.BugFixDispatchService;
+import com.pydlove.regent.execution.application.command.TaskAdjustmentService;
 import com.pydlove.regent.execution.application.command.TaskCommandService;
 import com.pydlove.regent.execution.application.command.TaskDispatchService;
 import com.pydlove.regent.execution.application.command.TaskDraftService;
 import com.pydlove.regent.execution.application.query.TaskQueryService;
 import com.pydlove.regent.execution.application.query.TaskRunQueryService;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
+import com.pydlove.regent.execution.domain.repository.TaskAdjustmentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskDraftRepository;
 import com.pydlove.regent.execution.domain.repository.TaskQueryRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
@@ -25,8 +27,10 @@ import com.pydlove.regent.governance.domain.repository.DecisionQueryRepository;
 import com.pydlove.regent.governance.domain.repository.DecisionRepository;
 import com.pydlove.regent.governance.domain.repository.DecisionRuleRepository;
 import com.pydlove.regent.project.application.command.ProjectRegistrationService;
+import com.pydlove.regent.project.application.command.ProjectUpdateService;
 import com.pydlove.regent.project.application.command.EnvironmentEntryService;
 import com.pydlove.regent.project.application.query.DirectoryListingService;
+import com.pydlove.regent.project.application.query.ProjectAccessService;
 import com.pydlove.regent.project.application.query.ProjectGitBranchQueryService;
 import com.pydlove.regent.project.domain.port.ProjectSummaryScheduler;
 import com.pydlove.regent.project.domain.repository.EnvironmentEntryRepository;
@@ -97,6 +101,14 @@ public class ApplicationConfig {
     }
 
     @Bean
+    public TaskAdjustmentService taskAdjustmentService(
+            TaskRepository taskRepository,
+            TaskAdjustmentRepository adjustmentRepository,
+            TransactionRunner transactionRunner) {
+        return new TaskAdjustmentService(taskRepository, adjustmentRepository, transactionRunner);
+    }
+
+    @Bean
     public TaskDraftService taskDraftService(TaskDraftRepository taskDraftRepository,
                                              ProjectProfileRepository projectProfileRepository) {
         return new TaskDraftService(taskDraftRepository, projectProfileRepository);
@@ -109,6 +121,16 @@ public class ApplicationConfig {
             TransactionRunner transactionRunner) {
         return new ProjectRegistrationService(
                 projectRepository, projectSummaryScheduler, transactionRunner);
+    }
+
+    @Bean
+    public ProjectAccessService projectAccessService(ProjectProfileRepository projectProfileRepository) {
+        return new ProjectAccessService(projectProfileRepository);
+    }
+
+    @Bean
+    public ProjectUpdateService projectUpdateService(ProjectRepository projectRepository) {
+        return new ProjectUpdateService(projectRepository);
     }
 
     @Bean

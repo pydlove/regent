@@ -61,20 +61,32 @@ const stepClass =
 <template>
   <div
     class="grid h-footer shrink-0 grid-cols-[1fr_auto] items-center gap-3 border-t border-separator bg-window px-3 lg:px-5"
+    role="navigation"
+    aria-label="分页"
   >
-    <p class="justify-self-start tnum text-caption text-label-secondary">
+    <p class="justify-self-start tnum text-caption leading-none text-label-secondary" aria-live="polite">
       <template v-if="total > 0">{{ rangeStart }}–{{ rangeEnd }} / 共 {{ total }} 条</template>
       <template v-else>没有可显示的记录</template>
     </p>
 
     <div class="justify-self-end flex items-center gap-3">
-      <Select v-model="sizeModel" :items="sizeItems" class="w-[88px]" :disabled="total === 0" />
+      <Select
+        v-model="sizeModel"
+        :items="sizeItems"
+        variant="outline"
+        class="w-[88px]"
+        :disabled="total === 0"
+      />
 
-      <span class="tnum whitespace-nowrap text-caption text-label-secondary">
+      <span
+        class="tnum inline-flex h-control min-w-9 items-center justify-center whitespace-nowrap px-1 text-caption leading-none text-label-secondary"
+      >
         {{ page }} / {{ pageCount }}
       </span>
 
-      <div class="flex h-control items-center overflow-hidden rounded-control border border-separator">
+      <div
+        class="flex h-control items-center overflow-hidden rounded-control border border-separator bg-content"
+      >
         <button
           type="button"
           :class="stepClass"

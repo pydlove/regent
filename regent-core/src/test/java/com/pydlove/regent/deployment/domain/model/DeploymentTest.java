@@ -14,21 +14,18 @@ class DeploymentTest {
     @Test
     @DisplayName("创建部署时规范化名称、服务器并计算脚本摘要")
     void createsDeployment() {
+        DeploymentServerId serverId = DeploymentServerId.of(9L);
         Deployment deployment = Deployment.create(
                 ProjectId.of(7L),
+                serverId,
                 "  生产 API  ",
-                " api.example.com ",
-                22,
-                " root ",
-                DeploymentAuthType.KEY,
                 " /opt/regent ",
                 "deploy.sh",
                 "#!/usr/bin/env bash\necho ok\n");
 
         assertEquals("生产 API", deployment.getName());
         assertEquals(ProjectId.of(7L), deployment.getProjectId());
-        assertEquals("api.example.com", deployment.getHost());
-        assertEquals("root", deployment.getUsername());
+        assertEquals(serverId, deployment.getServerId());
         assertEquals("/opt/regent", deployment.getRemoteDirectory());
         assertNotNull(deployment.getScriptHash());
         assertEquals(64, deployment.getScriptHash().length());
@@ -42,19 +39,16 @@ class DeploymentTest {
     }
 
     @Test
-    @DisplayName("脚本文件名不能带路径分隔符，端口必须在合法范围")
-    void rejectsInvalidFilenameAndPort() {
+    @DisplayName("脚本文件名不能带路径分隔符")
+    void rejectsInvalidFilename() {
         assertThrows(DomainException.class, () -> Deployment.create(
-                ProjectId.of(7L), "生产", "host", 22, "root",
-                DeploymentAuthType.KEY, "/opt", "../deploy.sh", "echo ok"));
-        assertThrows(DomainException.class, () -> Deployment.create(
-                ProjectId.of(7L), "生产", "host", 0, "root",
-                DeploymentAuthType.KEY, "/opt", "deploy.sh", "echo ok"));
+                ProjectId.of(7L), DeploymentServerId.of(9L),
+                "生产", "/opt", "../deploy.sh", "echo ok"));
     }
 
     private static Deployment deployment(String remoteDirectory) {
         return Deployment.create(
-                ProjectId.of(7L), "生产", "host", 22, "root", DeploymentAuthType.KEY,
-                remoteDirectory, "deploy.sh", "echo ok");
+                ProjectId.of(7L), DeploymentServerId.of(9L),
+                "生产", remoteDirectory, "deploy.sh", "echo ok");
     }
 }

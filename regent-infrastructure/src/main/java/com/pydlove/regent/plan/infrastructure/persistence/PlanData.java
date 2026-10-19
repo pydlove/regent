@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 public class PlanData {
 
     private Long id;
+    private Long userId;
     private String name;
     private String status;
     private LocalDateTime scheduledAt;

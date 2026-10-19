@@ -13,24 +13,31 @@
     </select>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO project (code, name, path, tech_stack, verify_method, default_decision_level,
+        INSERT INTO project (owner_id, code, name, path, tech_stack, verify_method, default_decision_level,
                              enabled, deleted, summary_status, summary, summary_error,
                              summary_generated_at, created_at, updated_at)
-        VALUES (#{code}, #{name}, #{path}, #{techStack}, #{verifyMethod}, #{defaultDecisionLevel},
+        VALUES (#{ownerId}, #{code}, #{name}, #{path}, #{techStack}, #{verifyMethod}, #{defaultDecisionLevel},
                 1, 0, #{summaryStatus}, #{summary}, #{summaryError}, #{summaryGeneratedAt},
                 #{createdAt}, #{updatedAt})
     </insert>
 
     <select id="selectById" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectData">
-        SELECT id, code, name, path, tech_stack, verify_method, default_decision_level,
+        SELECT id, owner_id, code, name, path, tech_stack, verify_method, default_decision_level, enabled,
                summary_status, summary, summary_error, summary_generated_at, created_at, updated_at
         FROM project
         WHERE id = #{id} AND deleted = 0
     </select>
 
+    <select id="selectByIdOwned" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectData">
+        SELECT id, owner_id, code, name, path, tech_stack, verify_method, default_decision_level, enabled,
+               summary_status, summary, summary_error, summary_generated_at, created_at, updated_at
+        FROM project
+        WHERE id = #{id} AND owner_id = #{ownerId} AND deleted = 0
+    </select>
+
     <select id="selectBySummaryStatus"
             resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectData">
-        SELECT id, code, name, path, tech_stack, verify_method, default_decision_level,
+        SELECT id, owner_id, code, name, path, tech_stack, verify_method, default_decision_level, enabled,
                summary_status, summary, summary_error, summary_generated_at, created_at, updated_at
         FROM project
         WHERE summary_status = #{summaryStatus} AND deleted = 0
@@ -43,6 +50,16 @@
             summary = #{summary},
             summary_error = #{summaryError},
             summary_generated_at = #{summaryGeneratedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="updateDetails">
+        UPDATE project
+        SET name = #{name},
+            path = #{path},
+            default_decision_level = #{defaultDecisionLevel},
+            enabled = #{enabled},
             updated_at = #{updatedAt}
         WHERE id = #{id} AND deleted = 0
     </update>

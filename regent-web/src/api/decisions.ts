@@ -5,6 +5,7 @@ import type { DecisionLevel } from '@/types/task'
 export type DecisionListParams = {
   level?: DecisionLevel | 'ALL'
   scope?: 'ALL' | 'PENDING' | 'RESOLVED'
+  projectId?: number | null
   keyword?: string
   page?: number
   size?: number
@@ -14,6 +15,7 @@ export const listDecisions = (params: DecisionListParams = {}) =>
   get<PageResponse<DecisionSummary>>('/decisions', {
     level: params.level === 'ALL' ? undefined : params.level,
     scope: params.scope,
+    projectId: params.projectId,
     keyword: params.keyword,
     page: params.page,
     size: params.size,

@@ -7,6 +7,9 @@ import com.pydlove.regent.governance.domain.repository.DecisionPage;
 import com.pydlove.regent.governance.domain.repository.DecisionQuery;
 import com.pydlove.regent.governance.interfaces.dto.DecisionReviewRequest;
 import com.pydlove.regent.governance.interfaces.dto.DecisionSummaryResponse;
+import com.pydlove.regent.identity.application.query.AuthenticatedUser;
+import com.pydlove.regent.identity.domain.model.UserId;
+import com.pydlove.regent.identity.interfaces.rest.AuthSessionInterceptor;
 import com.pydlove.regent.interfaces.dto.PageResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,34 +43,39 @@ public class DecisionController {
     @GetMapping
     public PageResponse<DecisionSummaryResponse> list(@RequestParam(required = false) String level,
                                                       @RequestParam(required = false) String scope,
+                                                      @RequestParam(required = false) Long projectId,
                                                       @RequestParam(required = false) String keyword,
                                                       @RequestParam(required = false) Integer page,
-                                                      @RequestParam(required = false) Integer size) {
-        DecisionPage result = decisionQueryService.list(DecisionQuery.of(level, scope, keyword, page, size));
+                                                      @RequestParam(required = false) Integer size,
+                                                      HttpServletRequest request) {
+        DecisionPage result = decisionQueryService.list(
+                DecisionQuery.of(level, scope, projectId, keyword, page, size, currentUser(request)));
         return PageResponse.of(
                 result.items().stream().map(DecisionSummaryResponse::from).toList(),
                 result.total(), result.page(), result.size());
     }
 
     @GetMapping("/{id}")
-    public DecisionSummaryResponse detail(@PathVariable long id) {
-        return DecisionSummaryResponse.from(decisionQueryService.get(id));
+    public DecisionSummaryResponse detail(@PathVariable long id, HttpServletRequest request) {
+        return DecisionSummaryResponse.from(decisionQueryService.get(id, currentUser(request)));
     }
 
     @PostMapping("/{id}/approve")
     public DecisionSummaryResponse approve(@PathVariable long id,
                                            @RequestBody(required = false) DecisionReviewRequest request,
                                            HttpServletRequest servletRequest) {
+        decisionQueryService.get(id, currentUser(servletRequest));
         decisionApprovalService.approve(id, toCommand(request, servletRequest));
-        return DecisionSummaryResponse.from(decisionQueryService.get(id));
+        return DecisionSummaryResponse.from(decisionQueryService.get(id, currentUser(servletRequest)));
     }
 
     @PostMapping("/{id}/reject")
     public DecisionSummaryResponse reject(@PathVariable long id,
                                           @RequestBody(required = false) DecisionReviewRequest request,
                                           HttpServletRequest servletRequest) {
+        decisionQueryService.get(id, currentUser(servletRequest));
         decisionApprovalService.reject(id, toCommand(request, servletRequest));
-        return DecisionSummaryResponse.from(decisionQueryService.get(id));
+        return DecisionSummaryResponse.from(decisionQueryService.get(id, currentUser(servletRequest)));
     }
 
     /**
@@ -80,5 +88,10 @@ public class DecisionController {
         }
         return new ReviewCommand(request.choice(), request.note(), request.token(),
                 servletRequest.getRemoteAddr());
+    }
+
+    private static UserId currentUser(HttpServletRequest request) {
+        AuthenticatedUser user = AuthSessionInterceptor.currentUser(request);
+        return UserId.of(user.id());
     }
 }

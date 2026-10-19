@@ -9,7 +9,11 @@ public interface ProjectProfileMapper {
 
     ProjectProfileRow selectById(@Param("id") long id);
 
+    ProjectProfileRow selectByIdOwned(@Param("id") long id, @Param("ownerId") long ownerId);
+
     ProjectProfileRow selectByCode(@Param("code") String code);
 
     List<ProjectProfileRow> selectAll();
+
+    List<ProjectProfileRow> selectAllOwned(@Param("ownerId") long ownerId);
 }

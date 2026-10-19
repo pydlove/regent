@@ -1,6 +1,9 @@
 package com.pydlove.regent.plugin.interfaces.rest;
 
 import com.pydlove.regent.execution.domain.model.TaskId;
+import com.pydlove.regent.execution.application.query.TaskQueryService;
+import com.pydlove.regent.execution.domain.model.Task;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.plugin.application.command.PluginCommandService;
 import com.pydlove.regent.plugin.application.command.SavePluginCommand;
 import com.pydlove.regent.plugin.application.command.TaskPluginService;
@@ -8,6 +11,7 @@ import com.pydlove.regent.plugin.application.query.PluginQueryService;
 import com.pydlove.regent.plugin.domain.model.Plugin;
 import com.pydlove.regent.plugin.domain.model.PluginBinding;
 import com.pydlove.regent.plugin.domain.model.PluginId;
+import com.pydlove.regent.support.TestCurrentUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,7 +43,8 @@ class PluginControllerTest {
         taskPlugins = new RecordingTaskPlugin();
         mockMvc = MockMvcBuilders.standaloneSetup(
                         new PluginController(command, query),
-                        new TaskPluginController(taskPlugins))
+                        new TaskPluginController(taskPlugins, new StubTaskQuery()))
+                .addInterceptors(TestCurrentUser.interceptor())
                 .build();
     }
 
@@ -161,6 +166,18 @@ class PluginControllerTest {
             this.taskId = taskId;
             this.pluginIds = pluginIds;
             return bindings;
+        }
+    }
+
+    private static final class StubTaskQuery extends TaskQueryService {
+
+        private StubTaskQuery() {
+            super(null, null, java.time.ZoneOffset.UTC);
+        }
+
+        @Override
+        public Task get(TaskId id, UserId ownerId) {
+            return null;
         }
     }
 }

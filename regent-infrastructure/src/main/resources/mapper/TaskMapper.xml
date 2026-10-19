@@ -41,12 +41,28 @@
         <if test="keyword != null">
             AND t.title LIKE CONCAT('%', #{keyword}, '%')
         </if>
+        <if test="ownerId != null">
+            AND p.owner_id = #{ownerId}
+        </if>
     </sql>
 
     <select id="selectById" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskData">
         SELECT <include refid="columns"/>
         FROM task t
         WHERE t.id = #{id} AND t.deleted = 0
+    </select>
+
+    <select id="selectByIdOwned" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskData">
+        SELECT t.id, t.project_id, t.requirement_id, t.bug_id, t.source, t.title, t.prompt,
+               t.status, t.priority, t.codex_thread_id, t.branch_name, t.branch_approval_state,
+               t.blocking_decision_id, t.attempt_count, t.started_at, t.finished_at,
+               t.created_at, t.updated_at
+        FROM task t
+        JOIN project p ON p.id = t.project_id
+        WHERE t.id = #{id}
+          AND t.deleted = 0
+          AND p.owner_id = #{ownerId}
+          AND p.deleted = 0
     </select>
 
     <select id="selectByIdForUpdate" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskData">
@@ -99,14 +115,22 @@
     <select id="countListBy" resultType="long">
         SELECT COUNT(*)
         FROM task t
+        JOIN project p ON p.id = t.project_id
         WHERE <include refid="filters"/>
     </select>
 
     <select id="countGroupByStatus" resultType="map">
-        SELECT status, COUNT(*) AS cnt
+        SELECT t.status, COUNT(*) AS cnt
         FROM task t
+        JOIN project p ON p.id = t.project_id
         WHERE t.deleted = 0
-        GROUP BY status
+        <if test="projectId != null">
+            AND t.project_id = #{projectId}
+        </if>
+        <if test="ownerId != null">
+            AND p.owner_id = #{ownerId}
+        </if>
+        GROUP BY t.status
     </select>
 
     <!-- 工作台累计口径与任务列表一致：只汇总未逻辑删除任务的执行记录。 -->
@@ -117,7 +141,70 @@
                COALESCE(SUM(r.token_output), 0)       AS token_output
         FROM task_run r
         JOIN task t ON t.id = r.task_id
+        JOIN project p ON p.id = t.project_id
         WHERE t.deleted = 0
+        <if test="projectId != null">
+            AND t.project_id = #{projectId}
+        </if>
+        <if test="ownerId != null">
+            AND p.owner_id = #{ownerId}
+        </if>
+    </select>
+
+    <!-- Token 在运行收场时才结算，因此按 finished_at 归日；仍在跑、尚未产生消耗的记录不进入明细。 -->
+    <select id="summarizeTokensPerDay"
+            resultType="com.pydlove.regent.execution.infrastructure.persistence.DailyTokenUsageRow">
+        SELECT DATE(DATE_ADD(r.finished_at, INTERVAL #{offsetMinutes} MINUTE)) AS day,
+               COALESCE(SUM(r.token_input), 0)        AS token_input,
+               COALESCE(SUM(r.token_cached_input), 0) AS token_cached_input,
+               COALESCE(SUM(r.token_output), 0)       AS token_output,
+               COUNT(*)                               AS run_count
+        FROM task_run r
+        JOIN task t ON t.id = r.task_id
+        JOIN project p ON p.id = t.project_id
+        WHERE t.deleted = 0
+          AND (r.token_input + r.token_cached_input + r.token_output) &gt; 0
+        <if test="from != null">
+            AND r.finished_at &gt;= #{from}
+        </if>
+        <if test="to != null">
+            AND r.finished_at &lt; #{to}
+        </if>
+        <if test="projectId != null">
+            AND t.project_id = #{projectId}
+        </if>
+        <if test="ownerId != null">
+            AND p.owner_id = #{ownerId}
+        </if>
+        GROUP BY day
+        ORDER BY day
+    </select>
+
+    <select id="summarizeTokensPerHour"
+            resultType="com.pydlove.regent.execution.infrastructure.persistence.HourlyTokenUsageRow">
+        SELECT CAST(DATE_FORMAT(
+                   DATE_ADD(r.finished_at, INTERVAL #{offsetMinutes} MINUTE),
+                   '%Y-%m-%d %H:00:00'
+               ) AS DATETIME) AS bucket_start,
+               COALESCE(SUM(r.token_input), 0)        AS token_input,
+               COALESCE(SUM(r.token_cached_input), 0) AS token_cached_input,
+               COALESCE(SUM(r.token_output), 0)       AS token_output,
+               COUNT(*)                               AS run_count
+        FROM task_run r
+        JOIN task t ON t.id = r.task_id
+        JOIN project p ON p.id = t.project_id
+        WHERE t.deleted = 0
+          AND (r.token_input + r.token_cached_input + r.token_output) &gt; 0
+          AND r.finished_at &gt;= #{from}
+          AND r.finished_at &lt; #{to}
+        <if test="projectId != null">
+            AND t.project_id = #{projectId}
+        </if>
+        <if test="ownerId != null">
+            AND p.owner_id = #{ownerId}
+        </if>
+        GROUP BY bucket_start
+        ORDER BY bucket_start
     </select>
 
     <!--
@@ -132,10 +219,17 @@
                SUM(CASE WHEN t.status = 'DONE' THEN 1 ELSE 0 END)             AS done,
                SUM(CASE WHEN t.status = 'FAILED' THEN 1 ELSE 0 END)           AS failed
         FROM task t
+        JOIN project p ON p.id = t.project_id
         WHERE t.deleted = 0
           AND t.status IN ('DONE', 'FAILED')
           AND t.finished_at >= #{from}
           AND t.finished_at &lt; #{to}
+        <if test="projectId != null">
+          AND t.project_id = #{projectId}
+        </if>
+        <if test="ownerId != null">
+          AND p.owner_id = #{ownerId}
+        </if>
         GROUP BY day
         ORDER BY day
     </select>

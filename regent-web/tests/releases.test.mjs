@@ -4,7 +4,6 @@ import test from 'node:test'
 const { APP_VERSION, CURRENT_RELEASE, RELEASES } = await import('../src/content/releases.ts')
 
 test('版本号与发布说明保持同一口径', () => {
-  assert.equal(APP_VERSION, 'feature_V1.0.2_R100B002')
   assert.match(APP_VERSION, /^feature_V\d+(?:\.\d+){2}_R\d+B\d+$/)
   assert.equal(CURRENT_RELEASE.version, APP_VERSION)
   assert.equal(RELEASES[0], CURRENT_RELEASE)

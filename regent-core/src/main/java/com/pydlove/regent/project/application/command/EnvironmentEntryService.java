@@ -1,5 +1,6 @@
 package com.pydlove.regent.project.application.command;
 
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.EnvironmentEntry;
 import com.pydlove.regent.project.domain.model.EnvironmentId;
 import com.pydlove.regent.project.domain.model.EnvironmentScope;
@@ -30,47 +31,73 @@ public class EnvironmentEntryService {
         return repository.findAll();
     }
 
+    public List<EnvironmentEntry> list(UserId userId) {
+        return repository.findAll(userId);
+    }
+
     public EnvironmentEntry create(SaveEnvironmentCommand command) {
+        return create(command, null);
+    }
+
+    public EnvironmentEntry create(SaveEnvironmentCommand command, UserId userId) {
         requireName(command.description());
-        EnvironmentEntry entry = EnvironmentEntry.create(command.scope(), command.projectId(),
+        EnvironmentEntry entry = EnvironmentEntry.create(userId, command.scope(), command.projectId(),
                 nextKey(), command.value(), command.tags(), command.description(), command.secret());
-        requireProjectExists(entry);
-        requireKeyAvailable(entry, null);
+        requireProjectExists(entry, userId);
+        requireKeyAvailable(entry, null, userId);
         repository.save(entry);
         return entry;
     }
 
     public EnvironmentEntry update(EnvironmentId id, SaveEnvironmentCommand command) {
+        return update(id, command, null);
+    }
+
+    public EnvironmentEntry update(EnvironmentId id, SaveEnvironmentCommand command, UserId userId) {
         requireName(command.description());
-        EnvironmentEntry entry = load(id);
-        String key = keyForUpdate(command, entry);
+        EnvironmentEntry entry = load(id, userId);
+        String key = keyForUpdate(command, entry, userId);
         entry.update(command.scope(), command.projectId(), key, command.value(),
                 command.tags(), command.description(), command.secret());
-        requireProjectExists(entry);
-        requireKeyAvailable(entry, id);
+        requireProjectExists(entry, userId);
+        requireKeyAvailable(entry, id, userId);
         repository.save(entry);
         return entry;
     }
 
     public void delete(EnvironmentId id) {
-        load(id);
+        delete(id, null);
+    }
+
+    public void delete(EnvironmentId id, UserId userId) {
+        load(id, userId);
         repository.delete(id);
     }
 
     private EnvironmentEntry load(EnvironmentId id) {
-        return repository.findById(id)
+        return load(id, null);
+    }
+
+    private EnvironmentEntry load(EnvironmentId id, UserId userId) {
+        return (userId == null ? repository.findById(id) : repository.findById(id, userId))
                 .orElseThrow(() -> new EntityNotFoundException("环境信息不存在：" + id));
     }
 
-    private void requireProjectExists(EnvironmentEntry entry) {
+    private void requireProjectExists(EnvironmentEntry entry, UserId userId) {
         if (entry.getScope() == EnvironmentScope.PROJECT
-                && projectProfileRepository.findById(entry.getProjectId()).isEmpty()) {
+                && (userId == null
+                ? projectProfileRepository.findById(entry.getProjectId())
+                : projectProfileRepository.findById(entry.getProjectId(), userId)).isEmpty()) {
             throw new EntityNotFoundException("项目不存在：" + entry.getProjectId());
         }
     }
 
-    private void requireKeyAvailable(EnvironmentEntry entry, EnvironmentId excludingId) {
-        if (repository.existsByKey(entry.getScope(), entry.getProjectId(), entry.getKey(), excludingId)) {
+    private void requireKeyAvailable(EnvironmentEntry entry, EnvironmentId excludingId, UserId userId) {
+        boolean exists = userId == null
+                ? repository.existsByKey(entry.getScope(), entry.getProjectId(), entry.getKey(), excludingId)
+                : repository.existsByKey(userId, entry.getScope(), entry.getProjectId(),
+                        entry.getKey(), excludingId);
+        if (exists) {
             String owner = entry.getScope() == EnvironmentScope.GLOBAL
                     ? "全局"
                     : "项目 " + entry.getProjectId();
@@ -85,7 +112,11 @@ public class EnvironmentEntryService {
      * 都不会出现两个相同键指向不同用途，执行器和排障时也只需要认一个编号。
      */
     private String nextKey() {
-        int max = repository.findAll().stream()
+        return nextKey(null);
+    }
+
+    private String nextKey(UserId userId) {
+        int max = (userId == null ? repository.findAll() : repository.findAll(userId)).stream()
                 .map(EnvironmentEntry::getKey)
                 .map(AUTO_KEY::matcher)
                 .filter(Matcher::matches)
@@ -95,12 +126,16 @@ public class EnvironmentEntryService {
         return String.format("ENV_%03d", max + 1);
     }
 
-    private String keyForUpdate(SaveEnvironmentCommand command, EnvironmentEntry entry) {
+    private String keyForUpdate(SaveEnvironmentCommand command, EnvironmentEntry entry, UserId userId) {
         String current = entry.getKey();
-        if (!repository.existsByKey(command.scope(), command.projectId(), current, entry.getId())) {
+        boolean exists = userId == null
+                ? repository.existsByKey(command.scope(), command.projectId(), current, entry.getId())
+                : repository.existsByKey(userId, command.scope(), command.projectId(),
+                        current, entry.getId());
+        if (!exists) {
             return current;
         }
-        return nextKey();
+        return nextKey(userId);
     }
 
     private static void requireName(String description) {

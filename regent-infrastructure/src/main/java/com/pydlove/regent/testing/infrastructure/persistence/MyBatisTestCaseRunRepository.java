@@ -1,6 +1,7 @@
 package com.pydlove.regent.testing.infrastructure.persistence;
 
 import com.pydlove.regent.execution.domain.model.TaskId;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.testing.domain.model.TestCaseId;
 import com.pydlove.regent.testing.domain.model.TestCaseRun;
@@ -24,6 +25,12 @@ public class MyBatisTestCaseRunRepository implements TestCaseRunRepository {
     @Override
     public Optional<TestCaseRun> findById(TestCaseRunId id) {
         return Optional.ofNullable(mapper.selectById(id.value()))
+                .map(TestCaseDataMapper::toDomain);
+    }
+
+    @Override
+    public Optional<TestCaseRun> findByIdOwned(TestCaseRunId id, UserId ownerId) {
+        return Optional.ofNullable(mapper.selectByIdOwned(id.value(), ownerId.value()))
                 .map(TestCaseDataMapper::toDomain);
     }
 

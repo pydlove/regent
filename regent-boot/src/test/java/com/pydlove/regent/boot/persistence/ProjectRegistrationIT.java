@@ -6,7 +6,9 @@ import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskSource;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.project.application.command.ProjectRegistrationService;
+import com.pydlove.regent.project.application.command.ProjectUpdateService;
 import com.pydlove.regent.project.application.command.RegisterProjectCommand;
+import com.pydlove.regent.project.application.command.UpdateProjectCommand;
 import com.pydlove.regent.project.application.query.DirectoryListing;
 import com.pydlove.regent.project.application.query.DirectoryListingService;
 import com.pydlove.regent.project.domain.model.Project;
@@ -32,6 +34,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -53,6 +56,9 @@ class ProjectRegistrationIT {
 
     @Autowired
     private ProjectRegistrationService projectRegistrationService;
+
+    @Autowired
+    private ProjectUpdateService projectUpdateService;
 
     @Autowired
     private TaskCommandService taskCommandService;
@@ -111,6 +117,25 @@ class ProjectRegistrationIT {
         assertEquals(ProjectSummaryStatus.READY, stored.summaryStatus());
         assertTrue(stored.summary().contains("IT 项目资料"));
         assertNotNull(stored.summaryGeneratedAt());
+    }
+
+    @Test
+    @DisplayName("编辑项目：名称、路径、阈值与启停状态可以完整往返")
+    void updatesProjectDetails(@TempDir Path workspace) throws Exception {
+        Project project = projectRegistrationService.register(
+                command("it_edit_project", workspace.toString()));
+        Path nextWorkspace = Files.createDirectory(workspace.resolve("next"));
+
+        projectUpdateService.update(project.getId(), new UpdateProjectCommand(
+                "IT 编辑后项目", nextWorkspace.toString(), DecisionLevel.L3, false));
+
+        ProjectProfile stored = projectProfileRepository.findById(project.getId()).orElseThrow();
+        assertEquals("IT 编辑后项目", stored.name());
+        assertEquals(nextWorkspace.toString(), stored.path());
+        assertEquals(DecisionLevel.L3, stored.defaultDecisionLevel());
+        assertFalse(stored.enabled());
+        assertFalse(projectRepository.findById(project.getId()).orElseThrow().isEnabled(),
+                "写侧恢复也必须保留暂停状态");
     }
 
     @Test

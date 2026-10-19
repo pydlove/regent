@@ -10,13 +10,20 @@ public interface DeploymentMapper {
 
     DeploymentRow selectById(@Param("id") long id);
 
+    DeploymentRow selectByIdOwned(@Param("id") long id, @Param("ownerId") long ownerId);
+
     DeploymentRow selectByIdForUpdate(@Param("id") long id);
 
-    List<DeploymentRow> selectAll(@Param("projectId") Long projectId);
+    List<DeploymentRow> selectAll(@Param("projectId") Long projectId,
+                                  @Param("ownerId") Long ownerId);
 
     int countByName(@Param("projectId") long projectId,
                     @Param("name") String name,
                     @Param("excludingId") Long excludingId);
+
+    int countByServerId(@Param("serverId") long serverId);
+
+    List<Long> selectIdsByServerId(@Param("serverId") long serverId);
 
     int insert(DeploymentData data);
 

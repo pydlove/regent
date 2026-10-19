@@ -1,5 +1,6 @@
 package com.pydlove.regent.project.domain.repository;
 
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.model.ProjectSummaryStatus;
 import com.pydlove.regent.shared.domain.DomainException;
@@ -17,6 +18,7 @@ import java.util.Objects;
  * 再把它升级成聚合根，届时这个投影会退化成它的一个查询视图。
  *
  * @param id                   项目 ID
+ * @param ownerId              项目归属账号
  * @param code                 项目唯一标识
  * @param name                 展示名称
  * @param path                 工作区绝对路径
@@ -29,6 +31,7 @@ import java.util.Objects;
  */
 public record ProjectProfile(
         ProjectId id,
+        UserId ownerId,
         String code,
         String name,
         String path,
@@ -42,8 +45,17 @@ public record ProjectProfile(
     /** 兼容只关心执行所需字段的调用方。 */
     public ProjectProfile(ProjectId id, String code, String name, String path,
                           DecisionLevel defaultDecisionLevel, boolean enabled) {
-        this(id, code, name, path, defaultDecisionLevel, enabled,
+        this(id, null, code, name, path, defaultDecisionLevel, enabled,
                 ProjectSummaryStatus.NOT_GENERATED, null, null, null);
+    }
+
+    /** 兼容旧调用方：不带归属时按无主画像处理。 */
+    public ProjectProfile(ProjectId id, String code, String name, String path,
+                          DecisionLevel defaultDecisionLevel, boolean enabled,
+                          ProjectSummaryStatus summaryStatus, String summary,
+                          String summaryError, Instant summaryGeneratedAt) {
+        this(id, null, code, name, path, defaultDecisionLevel, enabled,
+                summaryStatus, summary, summaryError, summaryGeneratedAt);
     }
 
     public ProjectProfile {

@@ -7,13 +7,16 @@ import com.pydlove.regent.deployment.domain.model.DeploymentId;
 import com.pydlove.regent.deployment.domain.model.DeploymentRun;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunId;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunStatus;
+import com.pydlove.regent.deployment.domain.model.DeploymentServer;
+import com.pydlove.regent.deployment.domain.model.DeploymentServerId;
 import com.pydlove.regent.deployment.domain.port.DeploymentExecutor;
-import com.pydlove.regent.deployment.domain.port.DeploymentCredentialStore;
+import com.pydlove.regent.deployment.domain.port.DeploymentServerCredentialStore;
 import com.pydlove.regent.deployment.domain.port.DeploymentLogSink;
 import com.pydlove.regent.deployment.domain.port.DeploymentLogStore;
 import com.pydlove.regent.deployment.domain.port.DeploymentLogWriter;
 import com.pydlove.regent.deployment.domain.repository.DeploymentRepository;
 import com.pydlove.regent.deployment.domain.repository.DeploymentRunRepository;
+import com.pydlove.regent.deployment.domain.repository.DeploymentServerRepository;
 import com.pydlove.regent.project.domain.model.ProjectId;
 
 import java.util.ArrayList;
@@ -65,6 +68,19 @@ public final class DeploymentFakes {
                     .anyMatch(deployment -> deployment.getProjectId().equals(projectId)
                             && deployment.getName().equals(name)
                             && (excludingId == null || !deployment.getId().equals(excludingId)));
+        }
+
+        @Override
+        public List<DeploymentId> findIdsByServerId(DeploymentServerId serverId) {
+            return store.values().stream()
+                    .filter(deployment -> deployment.getServerId().equals(serverId))
+                    .map(Deployment::getId)
+                    .toList();
+        }
+
+        @Override
+        public int countByServerId(DeploymentServerId serverId) {
+            return findIdsByServerId(serverId).size();
         }
 
         @Override
@@ -136,32 +152,83 @@ public final class DeploymentFakes {
         }
     }
 
-    public static final class Credentials implements DeploymentCredentialStore {
+    public static final class Servers implements DeploymentServerRepository {
+
+        private final Map<Long, DeploymentServer> store = new LinkedHashMap<>();
+        private long sequence;
+
+        public DeploymentServer put(DeploymentServer server) {
+            if (server.getId() == null) {
+                server.assignIdentity(DeploymentServerId.of(++sequence));
+            }
+            store.put(server.getId().value(), server);
+            return server;
+        }
+
+        @Override
+        public Optional<DeploymentServer> findById(DeploymentServerId id) {
+            return Optional.ofNullable(store.get(id.value()));
+        }
+
+        @Override
+        public Optional<DeploymentServer> findByIdForUpdate(DeploymentServerId id) {
+            return findById(id);
+        }
+
+        @Override
+        public List<DeploymentServer> findAll(ProjectId projectId) {
+            return store.values().stream()
+                    .filter(server -> projectId == null || server.getProjectId().equals(projectId))
+                    .toList();
+        }
+
+        @Override
+        public boolean existsByName(ProjectId projectId,
+                                    String name,
+                                    DeploymentServerId excludingId) {
+            return store.values().stream()
+                    .anyMatch(server -> server.getProjectId().equals(projectId)
+                            && server.getName().equals(name)
+                            && (excludingId == null || !server.getId().equals(excludingId)));
+        }
+
+        @Override
+        public void save(DeploymentServer server) {
+            put(server);
+        }
+
+        @Override
+        public void delete(DeploymentServerId id) {
+            store.remove(id.value());
+        }
+    }
+
+    public static final class Credentials implements DeploymentServerCredentialStore {
 
         private final Map<Long, String> store = new LinkedHashMap<>();
 
         @Override
-        public void save(DeploymentId deploymentId, String password) {
-            store.put(deploymentId.value(), password);
+        public void save(DeploymentServerId serverId, String password) {
+            store.put(serverId.value(), password);
         }
 
         @Override
-        public boolean exists(DeploymentId deploymentId) {
-            return store.containsKey(deploymentId.value());
+        public boolean exists(DeploymentServerId serverId) {
+            return store.containsKey(serverId.value());
         }
 
         @Override
-        public Optional<String> find(DeploymentId deploymentId) {
-            return Optional.ofNullable(store.get(deploymentId.value()));
+        public Optional<String> find(DeploymentServerId serverId) {
+            return Optional.ofNullable(store.get(serverId.value()));
         }
 
         @Override
-        public void delete(DeploymentId deploymentId) {
-            store.remove(deploymentId.value());
+        public void delete(DeploymentServerId serverId) {
+            store.remove(serverId.value());
         }
 
-        public String password(DeploymentId deploymentId) {
-            return store.get(deploymentId.value());
+        public String password(DeploymentServerId serverId) {
+            return store.get(serverId.value());
         }
     }
 

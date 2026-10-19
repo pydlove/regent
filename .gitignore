@@ -28,12 +28,16 @@ LOG_PATH_UNDEFINED
 
 # ---------- 本地配置与密钥（严禁入库） ----------
 application-local.yml
+doc/数据库文档/env
 application-*-local.yml
 application-test.yml
 *.local.yml
 *.pem
 *.key
 *.keystore
+*.dmg
+*.pkg
+*.msi
 relay-connector.env
 relay.env
 

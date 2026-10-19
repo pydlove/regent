@@ -4,6 +4,7 @@ import com.pydlove.regent.execution.domain.model.AttachmentId;
 import com.pydlove.regent.execution.domain.model.TaskAttachment;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.repository.TaskAttachmentRepository;
+import com.pydlove.regent.identity.domain.model.UserId;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
@@ -32,6 +33,12 @@ public class MyBatisTaskAttachmentRepository implements TaskAttachmentRepository
     @Override
     public Optional<TaskAttachment> findById(AttachmentId id) {
         return Optional.ofNullable(attachmentMapper.selectById(id.value())).map(MyBatisTaskAttachmentRepository::toAttachment);
+    }
+
+    @Override
+    public Optional<TaskAttachment> findByIdOwned(AttachmentId id, UserId ownerId) {
+        return Optional.ofNullable(attachmentMapper.selectByIdOwned(id.value(), ownerId.value()))
+                .map(MyBatisTaskAttachmentRepository::toAttachment);
     }
 
     @Override

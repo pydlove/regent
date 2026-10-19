@@ -91,6 +91,9 @@ regent:
     dir: ${REGENT_ATTACHMENTS_DIR:${regent.home}/attachments}
     # 单张图片上限（字节）。默认 10MB：手机截图、设计稿都够，再大就是该压缩的原图了
     max-bytes: ${REGENT_ATTACHMENT_MAX_BYTES:10485760}
+  downloads:
+    # 无 CDN 的安装包目录。发布时把 latest.json 和安装包放在这里，通过 /api/release/* 下载。
+    dir: ${REGENT_DOWNLOADS_DIR:${regent.home}/downloads}
   execution:
     # 执行器命令。默认取 PATH 里的 codex；本地想干跑就把它指向一个假脚本
     codex-command: ${REGENT_CODEX_COMMAND:codex}
@@ -121,6 +124,8 @@ regent:
     ssh-command: ${REGENT_SSH_COMMAND:ssh}
     # 单次部署的墙钟上限。超时后只终止本机 ssh 进程，远端脚本是否继续取决于远端信号处理。
     timeout: ${REGENT_DEPLOY_TIMEOUT:PT10M}
+    # Codex 只读分析项目并生成部署脚本的墙钟上限。
+    script-generation-timeout: ${REGENT_DEPLOY_SCRIPT_GENERATION_TIMEOUT:PT3M}
     workers: ${REGENT_DEPLOY_WORKERS:2}
     max-log-chars: ${REGENT_DEPLOY_MAX_LOG_CHARS:1048576}
   project:

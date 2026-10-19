@@ -5,6 +5,8 @@ import com.pydlove.regent.execution.domain.model.ExecResult;
 import com.pydlove.regent.execution.domain.model.RunEvent;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.model.Task;
+import com.pydlove.regent.execution.domain.model.TaskAdjustment;
+import com.pydlove.regent.execution.domain.model.TaskAdjustmentStatus;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
@@ -48,6 +50,7 @@ class TaskRunServiceTest {
     private final ExecutionFakes.Tasks tasks = new ExecutionFakes.Tasks();
     private final ExecutionFakes.Runs runs = new ExecutionFakes.Runs();
     private final ExecutionFakes.Events events = new ExecutionFakes.Events();
+    private final ExecutionFakes.Adjustments adjustments = new ExecutionFakes.Adjustments();
     private final ExecutionFakes.Decisions decisions = new ExecutionFakes.Decisions();
     private final ExecutionFakes.Bugs bugs = new ExecutionFakes.Bugs();
     private final ExecutionFakes.Rules rules = new ExecutionFakes.Rules();
@@ -66,9 +69,9 @@ class TaskRunServiceTest {
         events.wire(runs);
         projects.put(ExecutionFakes.Projects.profile(1L, DecisionLevel.L1, true));
         service = new TaskRunService(tasks, runs, events, attachments, projects, environments, plugins,
-                new RunSettlementService(tasks, decisions, new DecisionRaiseService(rules, decisions), bugs,
-                        taskId -> {
-                        }),
+                new RunSettlementService(tasks, runs, adjustments, decisions,
+                        new DecisionRaiseService(rules, decisions), bugs, taskId -> {
+                        }, new ExecutionFakes.Transactions()),
                 executor, branches, Duration.ofMinutes(30));
     }
 
@@ -170,6 +173,31 @@ class TaskRunServiceTest {
 
             assertEquals(RunStatus.SUCCESS, run.getStatus(), "执行本身确实成功了，记录如实写");
             assertEquals(TaskStatus.CANCELLED, tasks.get(1L).getStatus(), "但不能把人工终止覆盖回 DONE");
+        }
+
+        @Test
+        @DisplayName("执行期间新增调整：成功也不收场，带着调整续跑同一会话")
+        void 执行期间新增调整后自动续跑() {
+            claimedTask();
+            executor.onExecute = request -> {
+                if (executor.requests.size() == 1) {
+                    adjustments.save(TaskAdjustment.temporary(TASK, "再补一套边界测试"));
+                }
+            };
+            executor.script(
+                    ExecutionFakes.Executor.success("第一轮做完了"),
+                    ExecutionFakes.Executor.success("调整也处理完了"));
+
+            TaskRun run = service.execute(TASK);
+
+            assertEquals(RunStatus.SUCCESS, run.getStatus());
+            assertEquals(TaskStatus.DONE, tasks.get(1L).getStatus());
+            assertEquals(2, executor.requests.size());
+            assertTrue(executor.requests.get(1).isResume());
+            assertTrue(executor.requests.get(1).prompt().contains("再补一套边界测试"),
+                    executor.requests.get(1).prompt());
+            assertEquals(TaskAdjustmentStatus.APPLIED, adjustments.all().get(0).getStatus());
+            assertEquals(run.getId(), adjustments.all().get(0).getAppliedRunId().orElseThrow());
         }
 
         @Test

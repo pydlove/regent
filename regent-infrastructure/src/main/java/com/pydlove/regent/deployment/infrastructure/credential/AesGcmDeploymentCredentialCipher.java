@@ -32,11 +32,12 @@ final class AesGcmDeploymentCredentialCipher {
         this.keyFile = keyFile;
     }
 
-    String encrypt(long deploymentId, String plaintext) {
+    /** ownerId 是 AAD 绑定 ID；新建服务器凭据使用服务器 ID，迁移凭据沿用旧部署 ID。 */
+    String encrypt(long ownerId, String plaintext) {
         try {
             byte[] iv = new byte[IV_BYTES];
             random.nextBytes(iv);
-            Cipher cipher = cipher(Cipher.ENCRYPT_MODE, deploymentId, iv);
+            Cipher cipher = cipher(Cipher.ENCRYPT_MODE, ownerId, iv);
             byte[] encrypted = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
             Base64.Encoder encoder = Base64.getEncoder();
             return PREFIX + encoder.encodeToString(iv) + "." + encoder.encodeToString(encrypted);
@@ -45,7 +46,7 @@ final class AesGcmDeploymentCredentialCipher {
         }
     }
 
-    String decrypt(long deploymentId, String encoded) {
+    String decrypt(long ownerId, String encoded) {
         if (encoded == null || !encoded.startsWith(PREFIX)) {
             throw new DomainException("部署密码密文版本无法识别");
         }
@@ -57,19 +58,19 @@ final class AesGcmDeploymentCredentialCipher {
             Base64.Decoder decoder = Base64.getDecoder();
             byte[] iv = decoder.decode(parts[0]);
             byte[] encrypted = decoder.decode(parts[1]);
-            Cipher cipher = cipher(Cipher.DECRYPT_MODE, deploymentId, iv);
+            Cipher cipher = cipher(Cipher.DECRYPT_MODE, ownerId, iv);
             return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
         } catch (IllegalArgumentException | GeneralSecurityException e) {
             throw new DomainException("部署密码解密失败，请重新保存密码", e);
         }
     }
 
-    private Cipher cipher(int mode, long deploymentId, byte[] iv) throws GeneralSecurityException {
+    private Cipher cipher(int mode, long ownerId, byte[] iv) throws GeneralSecurityException {
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(mode,
                 new SecretKeySpec(key(), "AES"),
                 new GCMParameterSpec(TAG_BITS, iv));
-        cipher.updateAAD(("deployment:" + deploymentId).getBytes(StandardCharsets.UTF_8));
+        cipher.updateAAD(("deployment:" + ownerId).getBytes(StandardCharsets.UTF_8));
         return cipher;
     }
 

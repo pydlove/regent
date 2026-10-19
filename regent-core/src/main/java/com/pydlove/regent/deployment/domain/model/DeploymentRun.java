@@ -75,16 +75,20 @@ public class DeploymentRun {
         this.createdAt = requireNotNull(createdAt, "创建时间");
     }
 
-    public static DeploymentRun queue(DeploymentSnapshot snapshot) {
+    public static DeploymentRun queue(DeploymentSnapshot snapshot,
+                                      DeploymentServerSnapshot server) {
+        if (!snapshot.projectId().equals(server.projectId())) {
+            throw new DomainException("部署与服务器不属于同一项目");
+        }
         Instant now = now();
         return new DeploymentRun(
                 snapshot.deploymentId(),
                 snapshot.projectId(),
                 snapshot.name(),
-                snapshot.host(),
-                snapshot.port(),
-                snapshot.username(),
-                snapshot.authType(),
+                server.host(),
+                server.port(),
+                server.username(),
+                server.authType(),
                 snapshot.remoteDirectory(),
                 snapshot.scriptFilename(),
                 snapshot.scriptContent(),

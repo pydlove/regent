@@ -4,11 +4,12 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** {@code deployment_credential} 表写侧数据对象。 */
+/** {@code deployment_server_credential} 数据对象。 */
 @Data
-public class DeploymentCredentialData {
+public class DeploymentServerCredentialData {
 
-    private Long deploymentId;
+    private Long serverId;
+    private Long aadId;
     private String ciphertext;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

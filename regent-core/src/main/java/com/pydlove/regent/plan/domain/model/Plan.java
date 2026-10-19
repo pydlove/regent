@@ -1,6 +1,7 @@
 package com.pydlove.regent.plan.domain.model;
 
 import com.pydlove.regent.execution.domain.model.TaskId;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.shared.domain.DomainException;
 
 import java.time.Instant;
@@ -19,6 +20,7 @@ public class Plan {
     public static final int MAX_TASKS = 200;
 
     private PlanId id;
+    private final UserId ownerId;
     private final String name;
     private final List<TaskId> taskIds;
     private PlanStatus status;
@@ -28,13 +30,15 @@ public class Plan {
     private final Instant createdAt;
     private Instant updatedAt;
 
-    private Plan(String name,
+    private Plan(UserId ownerId,
+                 String name,
                  List<TaskId> taskIds,
                  PlanStatus status,
                  Instant scheduledAt,
                  Instant startedAt,
                  Instant finishedAt,
                  Instant createdAt) {
+        this.ownerId = ownerId;
         this.name = requireName(name);
         this.taskIds = requireTasks(taskIds);
         this.status = requireNotNull(status, "计划状态");
@@ -46,13 +50,19 @@ public class Plan {
     }
 
     public static Plan schedule(String name, List<TaskId> taskIds, Instant scheduledAt) {
+        return schedule(name, taskIds, scheduledAt, null);
+    }
+
+    /** 创建计划并记录归属账号；接口侧必须使用这一条。 */
+    public static Plan schedule(String name, List<TaskId> taskIds, Instant scheduledAt, UserId ownerId) {
         Instant now = now();
-        return new Plan(name, taskIds, PlanStatus.SCHEDULED,
+        return new Plan(ownerId, name, taskIds, PlanStatus.SCHEDULED,
                 requireNotNull(scheduledAt, "计划执行时间"), null, null, now);
     }
 
     public static Plan restore(PlanSnapshot snapshot) {
         Plan plan = new Plan(
+                snapshot.ownerId(),
                 snapshot.name(),
                 snapshot.taskIds(),
                 snapshot.status(),
@@ -145,6 +155,10 @@ public class Plan {
 
     public PlanId getId() {
         return id;
+    }
+
+    public UserId getOwnerId() {
+        return ownerId;
     }
 
     public String getName() {

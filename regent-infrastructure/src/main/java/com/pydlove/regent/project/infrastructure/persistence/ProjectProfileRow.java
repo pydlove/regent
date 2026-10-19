@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 public class ProjectProfileRow {
 
     private Long id;
+    private Long ownerId;
     private String code;
     private String name;
     private String path;

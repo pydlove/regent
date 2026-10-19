@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Regent 发布中心</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="toolbar">
+        <div class="brand">
+          <span class="brand-icon" aria-hidden="true">R</span>
+          <span>
+            <strong>Regent 发布中心</strong>
+            <small>本地发布管理</small>
+          </span>
+        </div>
+        <div class="status-line">
+          <span class="status-dot"></span>
+          <span>仅本机访问</span>
+          <code id="git-head">HEAD</code>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="sidebar">
+          <section>
+            <p class="section-label">当前版本</p>
+            <h2 id="current-version">读取中…</h2>
+            <p id="next-version" class="muted"></p>
+          </section>
+          <section class="history-section">
+            <p class="section-label">最近发布</p>
+            <div id="release-history" class="history-list"></div>
+          </section>
+          <div class="local-note">
+            <strong>本地执行</strong>
+            <p>Codex、构建、安装包和发布清单都在这台电脑完成。</p>
+          </div>
+        </aside>
+
+        <main class="main-content">
+          <section class="page-heading">
+            <div>
+              <p class="eyebrow">RELEASE WORKFLOW</p>
+              <h1>制作新版本</h1>
+              <p>填写版本号，让本地 Codex 生成版本内容；确认预览后才会开始构建和发布。</p>
+            </div>
+            <div class="step-indicator" aria-label="发布步骤">
+              <span class="step active">1 生成内容</span>
+              <span class="step">2 审核预览</span>
+              <span class="step">3 确认发布</span>
+            </div>
+          </section>
+
+          <div id="workspace-warning" class="workspace-warning" hidden>
+            当前工作区有未提交改动。版本内容和预览可以生成，但创建 Git 标签前必须先提交代码并刷新页面。
+          </div>
+
+          <section class="form-panel">
+            <label class="field">
+              <span>版本号</span>
+              <input id="version" type="text" spellcheck="false" placeholder="feature_V1.0.2_R100B005" />
+            </label>
+            <label class="field">
+              <span>给 Codex 的补充要求 <em>可选</em></span>
+              <textarea
+                id="instruction"
+                rows="3"
+                placeholder="例如：重点说明自动更新、发布中心和安装体验的变化"
+              ></textarea>
+            </label>
+            <div class="form-actions">
+              <button id="generate-button" class="button primary" type="button">
+                生成版本内容
+              </button>
+              <span id="generate-status" class="inline-status"></span>
+            </div>
+          </section>
+
+          <p id="error" class="error-message" role="alert" hidden></p>
+
+          <section id="preview" class="preview-panel" hidden>
+            <div class="preview-heading">
+              <div>
+                <p class="section-label">发布预览</p>
+                <h2 id="preview-version"></h2>
+              </div>
+              <span class="badge">AI 生成 · 等待确认</span>
+            </div>
+
+            <label class="field">
+              <span>版本摘要</span>
+              <textarea id="summary" rows="3"></textarea>
+            </label>
+
+            <div class="highlights-heading">
+              <span>主要更新</span>
+              <button id="add-highlight" class="button small" type="button">添加更新项</button>
+            </div>
+            <div id="highlights" class="highlight-list"></div>
+
+            <div class="release-options">
+              <label class="check-row">
+                <input id="deploy" type="checkbox" checked />
+                <span>发布后同步部署公网前端</span>
+              </label>
+              <label class="check-row">
+                <input id="push-tag" type="checkbox" />
+                <span>发布后推送 Git 标签到 origin</span>
+              </label>
+              <p class="tag-note">
+                发布成功后会创建 annotated tag：
+                <code id="tag-preview"></code>
+              </p>
+            </div>
+
+            <div class="confirm-zone">
+              <label class="check-row confirm-check">
+                <input id="confirm-review" type="checkbox" />
+                <span>我已核对版本号和发布内容，确认开始构建并发布</span>
+              </label>
+              <button id="publish-button" class="button primary large" type="button" disabled>
+                确认发布
+              </button>
+            </div>
+          </section>
+
+          <section id="job-panel" class="job-panel" hidden>
+            <div class="job-heading">
+              <div>
+                <p class="section-label">发布进度</p>
+                <h2 id="job-title">正在构建</h2>
+              </div>
+              <span id="job-status" class="badge">执行中</span>
+            </div>
+            <pre id="job-log" class="job-log"></pre>
+          </section>
+        </main>
+      </div>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>

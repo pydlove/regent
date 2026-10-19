@@ -1,5 +1,6 @@
 package com.pydlove.regent.plan.domain.repository;
 
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.plan.domain.model.Plan;
 import com.pydlove.regent.plan.domain.model.PlanId;
 
@@ -12,10 +13,18 @@ public interface PlanRepository {
 
     Optional<Plan> findById(PlanId id);
 
+    default Optional<Plan> findByIdOwned(PlanId id, UserId ownerId) {
+        return findById(id);
+    }
+
     /** 同一计划的人工触发与定时扫描可能并发，启动事务内用行锁重新读取。 */
     Optional<Plan> findByIdForUpdate(PlanId id);
 
     List<Plan> findAll();
+
+    default List<Plan> findAll(UserId ownerId) {
+        return findAll();
+    }
 
     List<Plan> findDue(Instant now, int limit);
 

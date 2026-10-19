@@ -1,5 +1,6 @@
 package com.pydlove.regent.project.domain.model;
 
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 
@@ -10,9 +11,8 @@ import java.util.regex.Pattern;
  * 项目 —— 执行链路的工作区载体：{@code path} 决定 codex 在哪里跑，
  * {@code defaultDecisionLevel} 决定多高的决策必须惊动人。
  *
- * <p>{@code ProjectProfile} 是它的只读投影（执行链路取画像用），本聚合只在「项目注册」
- * 这一个写用例里出场。改名、暂停、删除这些动作等真有入口时再加方法 —— 现在不写 setter，
- * 因为一个「什么都能改」的类，等于没有守卫。
+ * <p>{@code ProjectProfile} 是它的只读投影（执行链路取画像用）。标识一经创建不可修改；
+ * 名称、工作区路径、决策阈值与启停状态只能通过带守卫的领域方法变更。
  */
 public class Project {
 
@@ -30,13 +30,14 @@ public class Project {
 
     /** 尚未持久化时为 null，由仓储 insert 后通过 {@link #assignIdentity} 回填。 */
     private ProjectId id;
+    private final UserId ownerId;
     private final String code;
-    private final String name;
-    private final String path;
+    private String name;
+    private String path;
     private final String techStack;
     private final String verifyMethod;
-    private final DecisionLevel defaultDecisionLevel;
-    private final boolean enabled;
+    private DecisionLevel defaultDecisionLevel;
+    private boolean enabled;
     private ProjectSummaryStatus summaryStatus;
     private String summary;
     private String summaryError;
@@ -44,19 +45,21 @@ public class Project {
     private final Instant createdAt;
     private Instant updatedAt;
 
-    private Project(ProjectId id, String code, String name, String path, String techStack,
+    private Project(ProjectId id, UserId ownerId, String code, String name, String path, String techStack,
                     String verifyMethod, DecisionLevel defaultDecisionLevel,
-                    ProjectSummaryStatus summaryStatus, String summary, String summaryError,
+                    boolean enabled, ProjectSummaryStatus summaryStatus,
+                    String summary, String summaryError,
                     Instant summaryGeneratedAt,
                     Instant createdAt, Instant updatedAt) {
         this.id = id;
+        this.ownerId = ownerId;
         this.code = requireCode(code);
         this.name = requireName(name);
         this.path = requirePath(path);
         this.techStack = optionalText(techStack, MAX_TECH_STACK, "技术栈");
         this.verifyMethod = optionalText(verifyMethod, MAX_VERIFY_METHOD, "验证方式");
         this.defaultDecisionLevel = requireNotNull(defaultDecisionLevel, "项目自动决策阈值");
-        this.enabled = true;
+        this.enabled = enabled;
         this.summaryStatus = requireNotNull(summaryStatus, "项目资料状态");
         this.summary = optionalText(summary, MAX_SUMMARY, "项目资料");
         this.summaryError = optionalText(summaryError, MAX_SUMMARY_ERROR, "项目资料失败原因");
@@ -69,21 +72,43 @@ public class Project {
     public static Project register(String code, String name, String path,
                                    String techStack, String verifyMethod,
                                    DecisionLevel defaultDecisionLevel) {
+        return register(code, name, path, techStack, verifyMethod, defaultDecisionLevel, null);
+    }
+
+    /** 注册新项目，并记录它所属的账号。 */
+    public static Project register(String code, String name, String path,
+                                   String techStack, String verifyMethod,
+                                   DecisionLevel defaultDecisionLevel, UserId ownerId) {
         Instant now = Instant.now();
-        return new Project(null, code, name, path, techStack, verifyMethod,
-                defaultDecisionLevel, ProjectSummaryStatus.NOT_GENERATED, null, null, null, now, now);
+        return new Project(null, ownerId, code, name, path, techStack, verifyMethod,
+                defaultDecisionLevel, true, ProjectSummaryStatus.NOT_GENERATED,
+                null, null, null, now, now);
     }
 
     /** 从数据库恢复项目。只允许基础设施的数据转换调用。 */
     public static Project restore(ProjectId id, String code, String name, String path,
                                   String techStack, String verifyMethod,
                                   DecisionLevel defaultDecisionLevel,
+                                  boolean enabled,
                                   ProjectSummaryStatus summaryStatus, String summary,
                                   String summaryError, Instant summaryGeneratedAt,
                                   Instant createdAt, Instant updatedAt) {
-        return new Project(requireNotNull(id, "项目 ID"), code, name, path, techStack, verifyMethod,
-                defaultDecisionLevel, summaryStatus, summary, summaryError, summaryGeneratedAt,
-                createdAt, updatedAt);
+        return restore(id, null, code, name, path, techStack, verifyMethod,
+                defaultDecisionLevel, enabled, summaryStatus, summary, summaryError,
+                summaryGeneratedAt, createdAt, updatedAt);
+    }
+
+    /** 从数据库恢复项目，并保留账号归属。 */
+    public static Project restore(ProjectId id, UserId ownerId, String code, String name, String path,
+                                  String techStack, String verifyMethod,
+                                  DecisionLevel defaultDecisionLevel,
+                                  boolean enabled,
+                                  ProjectSummaryStatus summaryStatus, String summary,
+                                  String summaryError, Instant summaryGeneratedAt,
+                                  Instant createdAt, Instant updatedAt) {
+        return new Project(requireNotNull(id, "项目 ID"), ownerId, code, name, path, techStack, verifyMethod,
+                defaultDecisionLevel, enabled, summaryStatus, summary, summaryError,
+                summaryGeneratedAt, createdAt, updatedAt);
     }
 
     /** 持久化后回填数据库生成的主键。重复分配直接报错，避免两行数据悄悄并成一行。 */
@@ -96,6 +121,10 @@ public class Project {
 
     public ProjectId getId() {
         return id;
+    }
+
+    public UserId getOwnerId() {
+        return ownerId;
     }
 
     public String getCode() {
@@ -149,6 +178,21 @@ public class Project {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    /**
+     * 编辑项目画像。先完成全部校验再赋值，避免某个字段非法时对象停在半更新状态。
+     */
+    public void updateDetails(String name, String path, DecisionLevel defaultDecisionLevel,
+                              boolean enabled) {
+        String nextName = requireName(name);
+        String nextPath = requirePath(path);
+        DecisionLevel nextLevel = requireNotNull(defaultDecisionLevel, "项目自动决策阈值");
+        this.name = nextName;
+        this.path = nextPath;
+        this.defaultDecisionLevel = nextLevel;
+        this.enabled = enabled;
+        this.updatedAt = Instant.now();
     }
 
     /** 开始一次生成。失败重试会保留上一版资料，直到新版本成功覆盖。 */

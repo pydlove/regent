@@ -11,6 +11,8 @@ public record DeploymentSummaryResponse(
         long id,
         long projectId,
         String projectName,
+        long serverId,
+        String serverName,
         String name,
         String host,
         int port,
@@ -27,16 +29,19 @@ public record DeploymentSummaryResponse(
 
     public static DeploymentSummaryResponse from(DeploymentOverview overview) {
         Deployment deployment = overview.deployment();
+        var server = overview.server();
         DeploymentRun latest = overview.latestRun();
         return new DeploymentSummaryResponse(
                 deployment.getId().value(),
                 deployment.getProjectId().value(),
                 overview.projectName(),
+                server.getId().value(),
+                server.getName(),
                 deployment.getName(),
-                deployment.getHost(),
-                deployment.getPort(),
-                deployment.getUsername(),
-                deployment.getAuthType().name(),
+                server.getHost(),
+                server.getPort(),
+                server.getUsername(),
+                server.getAuthType().name(),
                 deployment.getRemoteDirectory(),
                 deployment.getScriptFilename(),
                 deployment.getScriptHash(),

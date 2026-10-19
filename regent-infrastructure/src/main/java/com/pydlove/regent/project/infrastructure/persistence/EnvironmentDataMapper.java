@@ -1,5 +1,6 @@
 package com.pydlove.regent.project.infrastructure.persistence;
 
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.EnvironmentEntry;
 import com.pydlove.regent.project.domain.model.EnvironmentId;
 import com.pydlove.regent.project.domain.model.EnvironmentScope;
@@ -20,6 +21,7 @@ public final class EnvironmentDataMapper {
     public static EnvironmentData toData(EnvironmentEntry entry) {
         EnvironmentData data = new EnvironmentData();
         data.setId(entry.getId() == null ? null : entry.getId().value());
+        data.setUserId(entry.getUserId() == null ? null : entry.getUserId().value());
         data.setProjectId(entry.getProjectId() == null ? null : entry.getProjectId().value());
         data.setItemKey(entry.getKey());
         data.setItemValue(entry.getValue());
@@ -38,6 +40,7 @@ public final class EnvironmentDataMapper {
         ProjectId projectId = row.getProjectId() == null ? null : ProjectId.of(row.getProjectId());
         return EnvironmentEntry.restore(
                 EnvironmentId.of(row.getId()),
+                row.getUserId() == null ? null : UserId.of(row.getUserId()),
                 scope,
                 projectId,
                 row.getItemKey(),

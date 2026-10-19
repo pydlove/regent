@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentServerMapper">
+
+    <sql id="serverColumns">
+        id, project_id, name, host, port, ssh_username, auth_type, created_at, updated_at
+    </sql>
+
+    <select id="selectById"
+            resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentServerRow">
+        SELECT <include refid="serverColumns"/>
+        FROM deployment_server
+        WHERE id = #{id} AND deleted = 0
+    </select>
+
+    <select id="selectByIdOwned"
+            resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentServerRow">
+        SELECT <include refid="serverColumns"/>
+        FROM deployment_server
+        WHERE id = #{id}
+          AND deleted = 0
+          AND project_id IN (SELECT id FROM project WHERE owner_id = #{ownerId})
+    </select>
+
+    <select id="selectByIdForUpdate"
+            resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentServerRow">
+        SELECT <include refid="serverColumns"/>
+        FROM deployment_server
+        WHERE id = #{id} AND deleted = 0
+        FOR UPDATE
+    </select>
+
+    <select id="selectAll"
+            resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentServerRow">
+        SELECT <include refid="serverColumns"/>
+        FROM deployment_server
+        WHERE deleted = 0
+        <if test="projectId != null">
+            AND project_id = #{projectId}
+        </if>
+        <if test="ownerId != null">
+            AND project_id IN (SELECT id FROM project WHERE owner_id = #{ownerId})
+        </if>
+        ORDER BY updated_at DESC, id DESC
+    </select>
+
+    <select id="countByName" resultType="int">
+        SELECT COUNT(*)
+        FROM deployment_server
+        WHERE project_id = #{projectId}
+          AND name = #{name}
+          AND deleted = 0
+        <if test="excludingId != null">
+            AND id != #{excludingId}
+        </if>
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO deployment_server (
+            project_id, name, host, port, ssh_username, auth_type, deleted, created_at, updated_at
+        ) VALUES (
+            #{projectId}, #{name}, #{host}, #{port}, #{sshUsername}, #{authType}, 0,
+            #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="update">
+        UPDATE deployment_server
+        SET name = #{name},
+            host = #{host},
+            port = #{port},
+            ssh_username = #{sshUsername},
+            auth_type = #{authType},
+            updated_at = #{updatedAt}
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="softDelete">
+        UPDATE deployment_server
+        SET deleted = 1,
+            updated_at = #{updatedAt}
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+</mapper>

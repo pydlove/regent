@@ -1,12 +1,16 @@
 import { deleteRequest, get, post, postJson, putJson } from '@/api/http'
 import type {
   PageResponse,
+  DailyTokenUsagePoint,
+  HourlyTokenUsagePoint,
   TaskBatchDeleteResult,
   TaskBatchDispatchResult,
+  TaskAdjustment,
   TaskDetail,
   TaskRunSummary,
   TaskSummary,
   TaskTokenUsage,
+  TokenUsageRange,
   TaskTrendPoint,
 } from '@/types/api'
 import type { DecisionLevel, TaskStatus } from '@/types/task'
@@ -38,8 +42,9 @@ export const listTasks = (params: TaskListParams = {}) =>
 
 export const getTask = (id: number) => get<TaskDetail>(`/tasks/${id}`)
 
-/** 近 N 天收场趋势（含今天），后端逐日补零，前端直接画。 */
-export const getTaskTrend = (days = 7) => get<TaskTrendPoint[]>('/tasks/trend', { days })
+/** 近 N 天收场趋势（含今天），后端逐日补零；传 projectId 时只取该项目。 */
+export const getTaskTrend = (days = 7, projectId: number | null = null) =>
+  get<TaskTrendPoint[]>('/tasks/trend', { days, projectId })
 
 export type CreateTaskInput = {
   projectId: number
@@ -66,10 +71,36 @@ export type UpdateTaskInput = {
 export const updateTask = (id: number, input: UpdateTaskInput) =>
   putJson<TaskDetail>(`/tasks/${id}`, input)
 
-export const getTaskStats = () => get<Record<TaskStatus, number>>('/tasks/stats')
+export type AddTaskAdjustmentInput =
+  | { sourceTaskId: number; content?: never }
+  | { sourceTaskId?: never; content: string }
 
-/** 全平台已结算 token 汇总，供工作台展示。 */
-export const getTaskTokenUsage = () => get<TaskTokenUsage>('/tasks/token-usage')
+/** 给执行中的任务追加调整方向；来源任务与临时文本由联合类型保证二选一。 */
+export const addTaskAdjustment = (id: number, input: AddTaskAdjustmentInput) =>
+  postJson<TaskAdjustment>(`/tasks/${id}/adjustments`, input)
+
+/** 调整历史按创建顺序返回，APPLIED 项会带实际下发到的运行记录。 */
+export const listTaskAdjustments = (id: number) =>
+  get<TaskAdjustment[]>(`/tasks/${id}/adjustments`)
+
+export const getTaskStats = (projectId: number | null = null) =>
+  get<Record<TaskStatus, number>>('/tasks/stats', { projectId })
+
+/** 已结算 token 汇总；不传 projectId 时统计全部项目。 */
+export const getTaskTokenUsage = (projectId: number | null = null) =>
+  get<TaskTokenUsage>('/tasks/token-usage', { projectId })
+
+/** 按日期查看已结算 Token；日期范围和切天口径都由后端统一处理。 */
+export const getDailyTokenUsage = (
+  range: TokenUsageRange,
+  projectId: number | null = null,
+) => get<DailyTokenUsagePoint[]>('/tasks/token-usage/daily', { range, projectId })
+
+/** 当天与滚动 24 小时按整点查看 Token；其它范围应走日聚合接口。 */
+export const getHourlyTokenUsage = (
+  range: TokenUsageRange,
+  projectId: number | null = null,
+) => get<HourlyTokenUsagePoint[]>('/tasks/token-usage/hourly', { range, projectId })
 
 /** 失败重试或已终止任务重新执行，统一回到 PENDING。 */
 export const retryTask = (id: number) => post<TaskDetail>(`/tasks/${id}/retry`)

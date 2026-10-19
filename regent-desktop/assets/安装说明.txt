@@ -1,0 +1,78 @@
+Regent {{VERSION}} macOS 安装说明
+================================
+
+一、安装
+
+1. 下载 Regent-{{VERSION}}-macOS.dmg。
+2. 双击 DMG，打开磁盘映像。
+3. 把 Regent.app 拖到 Applications（应用程序）目录。
+4. 不要从 DMG 中直接运行 Regent.app。
+
+二、首次打开
+
+1. 打开“应用程序”，找到 Regent.app。
+2. 右键点击 Regent.app，选择“打开”。
+3. 在安全提示中再次点击“打开”。
+
+如果右键打开仍被系统拦截，请打开“终端”，执行：
+
+    xattr -cr /Applications/Regent.app
+    open /Applications/Regent.app
+
+说明：当前安装包没有 Apple Developer ID 公证，所以首次打开会出现系统安全提示。
+执行上述命令后会清除本次下载产生的隔离标记。该命令只处理 Regent.app，不会关闭
+macOS 的 Gatekeeper。
+
+三、连接 Regent 服务
+
+首次启动会显示“连接你的工作台”页面，需要填写正在使用的 Regent 服务地址。
+
+本机服务地址：
+
+    http://127.0.0.1:12580
+
+公网服务地址：
+
+    http://你的服务器地址:18787
+
+或：
+
+    https://你的域名
+
+填写完成后点击“连接并打开”。地址和登录状态会保存在本机，下次启动直接进入工作台。
+
+四、切换服务地址
+
+在客户端菜单栏选择：
+
+    文件 -> 切换服务地址…
+
+重新填写地址后会打开新的工作台。账号、项目和任务数据仍由对应的 Regent 服务管理，
+客户端本身不保存业务数据。
+
+五、卸载
+
+1. 退出 Regent.app。
+2. 打开“应用程序”，把 Regent.app 移到废纸篓。
+3. 如需同时清除本机登录状态，可在“终端”执行：
+
+    rm -rf "$HOME/Library/Application Support/regent-desktop"
+
+六、常见问题
+
+问题：提示“Apple 无法验证 Regent.app”。
+
+处理：先确认运行的是 /Applications/Regent.app，而不是 DMG 内的副本；然后执行：
+
+    xattr -cr /Applications/Regent.app
+    open /Applications/Regent.app
+
+问题：连接服务失败。
+
+处理：先在浏览器中打开同一个 Regent 地址，确认能正常登录；再检查地址是否包含
+http:// 或 https://，以及手机或电脑当前网络是否能访问该服务。
+
+问题：登录后需要重新输入账号。
+
+处理：客户端使用独立且持久的登录会话。确认没有手动清理
+~/Library/Application Support/regent-desktop，也没有在服务端退出全部会话。

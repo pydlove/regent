@@ -3,6 +3,10 @@ package com.pydlove.regent.execution.interfaces.rest;
 import com.pydlove.regent.execution.application.query.TaskRunQueryService;
 import com.pydlove.regent.execution.domain.model.TaskRunId;
 import com.pydlove.regent.execution.interfaces.dto.TaskRunDetailResponse;
+import com.pydlove.regent.identity.application.query.AuthenticatedUser;
+import com.pydlove.regent.identity.domain.model.UserId;
+import com.pydlove.regent.identity.interfaces.rest.AuthSessionInterceptor;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -26,8 +30,12 @@ public class RunController {
     }
 
     @GetMapping("/{id}")
-    public TaskRunDetailResponse detail(@PathVariable long id) {
+    public TaskRunDetailResponse detail(@PathVariable long id, HttpServletRequest request) {
         TaskRunId runId = TaskRunId.of(id);
-        return TaskRunDetailResponse.of(taskRunQueryService.get(runId), taskRunQueryService.events(runId));
+        AuthenticatedUser user = AuthSessionInterceptor.currentUser(request);
+        UserId ownerId = UserId.of(user.id());
+        return TaskRunDetailResponse.of(
+                taskRunQueryService.get(runId, ownerId),
+                taskRunQueryService.events(runId));
     }
 }

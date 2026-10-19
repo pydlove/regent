@@ -16,6 +16,7 @@ deploy/remote/    公网服务器：构建并部署无状态中继与静态前�
 | `start-frontend.sh` | 只起前端（vite dev）。缺 `node_modules` 时先 `npm install` |
 | `start-relay.sh` | 起公网中继连接器；未配置 `~/.regent/relay-connector.env` 时安全跳过 |
 | `connect-relay.sh` | 配对中继：读取服务器共享密钥 → 写 `~/.regent/relay-connector.env` → 重启连接器 → 探活 |
+| `backend-agent.sh` | 把后端交给 launchd 托管（`install` / `uninstall` / `restart` / `status`），开机自启、崩溃重启 |
 | `relay-agent.sh` | 把连接器交给 launchd 托管（`install` / `uninstall` / `restart` / `status`），开机自启、崩溃自动重启 |
 | `stop-all.sh` | 按 pid 停，pid 文件丢了就按端口兜底 |
 | `restart.sh` | 构建后端 → `stop-all` → 等 2 秒 → `start-all` |
@@ -25,6 +26,7 @@ deploy/remote/    公网服务器：构建并部署无状态中继与静态前�
 ./deploy/local/start-all.sh     # 起
 ./deploy/local/status.sh        # 看
 ./deploy/local/restart.sh       # 重新构建并重启（前端 vite 自己热更新）
+./deploy/local/backend-agent.sh install   # 可选：后端交给 launchd 常驻
 ./deploy/local/stop-all.sh      # 停
 ```
 
@@ -62,7 +64,10 @@ deploy/remote/    公网服务器：构建并部署无状态中继与静态前�
   只有端口在听才算真的在跑。`status.sh` 因此先 `lsof` 再回落到 pid 文件。
 - **前端直接起 `node_modules/.bin/vite`，不走 `npm run dev`。** npm 会多套一层壳进程，
   pid 文件记的是壳的号；停服务时杀掉壳、真正监听端口的 node 还活着，只能靠端口兜底补救。
-- **后端 jar 不存在时自动 `mvn package`。** 首次克隆后直接 `start-all.sh` 也能跑起来。
+- **后端 jar 不存在时自动 `mvn package`，启动前复制到 `~/.regent/app/regent-boot.jar`。**
+  首次克隆后直接 `start-all.sh` 也能跑起来。不直接运行 `target/` 里的构建产物，
+  是因为下一次 `mvn clean` 会删掉 JVM 正在使用的 fat jar，导致类加载和 ServiceLoader
+  在运行中途随机失败（典型表现：发验证码报「服务端未预期错误」）。
 - **`restart.sh` 先构建后端再停服务。** 构建失败时旧实例继续运行，避免源码已改但后端仍跑旧 jar，
   也避免构建失败后本地服务处于停止状态。
 - 数据库凭据读 `regent-boot/src/main/resources/application-local.yml`（已 gitignore），
@@ -90,7 +95,27 @@ deploy/remote/    公网服务器：构建并部署无状态中继与静态前�
 ./deploy/remote/deploy.sh
 ```
 
-直接运行后依次询问四项连接信息，带默认值的直接回车即可：
+也支持直接在命令行传入连接信息，且兼容 `sh` 启动：
+
+```bash
+sh deploy/remote/deploy.sh -H 1.2.3.4 -p '你的SSH密码'
+bash deploy/remote/deploy.sh -H example.com -P 22 -u root -k ~/.ssh/id_rsa
+```
+
+可用参数：
+
+| 参数 | 说明 |
+|---|---|
+| `-H, --host` | 服务器 IP 或域名，必填 |
+| `-p, --password` | SSH 密码；会进入命令历史，生产环境优先使用密钥 |
+| `-k, --key` | SSH 私钥路径，默认 `~/.ssh/id_rsa` |
+| `-P, --port` | SSH 端口，默认 `22` |
+| `-u, --user` | SSH 用户名，默认 `root` |
+| `-r, --remote-base` | 服务器安装目录，默认 `/root/app/regent-relay` |
+| `--skip-local-connector` | 只部署服务器，不重新配对本机连接器 |
+| `-h, --help` | 显示帮助 |
+
+不传参数时仍会交互询问四项连接信息，带默认值的直接回车即可：
 
 | 输入项 | 默认 | 说明 |
 |---|---|---|
@@ -122,6 +147,10 @@ Nginx 是自动配置的（第 7/7 步）：脚本探测服务器上的 `nginx.c
 不会再留下一个静态页面能打开、但所有 API 都报 `RELAY_OFFLINE` 的假成功。
 所以「部署完还要手工配连接器」这步已经没有了。仍需手工的只有一件事：
 **云厂商安全组放行 `18787/tcp`**。
+
+> 公网 Nginx 会拒绝 `/api/agent/**`。外部执行者协议是给本机 codex/CLI 的免登录入口，
+> 只按项目标识找活，不能暴露到公网，否则会绕过账户数据隔离。本机直连
+> `http://127.0.0.1:8787/api/agent/**` 不受影响。
 之后手机访问 `http://<服务器IP>:18787`；本机连接器的 `REGENT_RELAY_SERVER_URL`
 填同一地址。若后续套域名与 HTTPS，把连接器地址换成 `https://域名` 即可，无需改其它配置。
 只想重配连接器、不重新部署前端与中继时，单独跑 `./deploy/local/connect-relay.sh`。

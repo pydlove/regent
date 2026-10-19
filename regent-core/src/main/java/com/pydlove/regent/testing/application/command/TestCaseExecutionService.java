@@ -205,7 +205,7 @@ public class TestCaseExecutionService implements TestCaseExecutionScheduler {
                 continue;
             }
             EnvironmentContext environment = EnvironmentContext.resolve(
-                    environmentEntryRepository.findApplicableTo(project.id()));
+                    environmentEntryRepository.findApplicableTo(project.ownerId(), project.id()));
             run.begin();
             runRepository.save(run);
 

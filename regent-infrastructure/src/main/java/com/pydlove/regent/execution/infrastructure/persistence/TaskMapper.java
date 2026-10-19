@@ -15,6 +15,8 @@ public interface TaskMapper {
 
     TaskData selectById(@Param("id") long id);
 
+    TaskData selectByIdOwned(@Param("id") long id, @Param("ownerId") long ownerId);
+
     TaskData selectByIdForUpdate(@Param("id") long id);
 
     List<TaskData> selectRunning();
@@ -24,6 +26,7 @@ public interface TaskMapper {
                                      @Param("projectId") Long projectId,
                                      @Param("taskId") Long taskId,
                                      @Param("keyword") String keyword,
+                                     @Param("ownerId") Long ownerId,
                                      @Param("size") int size,
                                      @Param("offset") int offset);
 
@@ -31,19 +34,38 @@ public interface TaskMapper {
                      @Param("level") String level,
                      @Param("projectId") Long projectId,
                      @Param("taskId") Long taskId,
-                     @Param("keyword") String keyword);
+                     @Param("keyword") String keyword,
+                     @Param("ownerId") Long ownerId);
 
     /** 返回 {@code status -> count}，缺失的状态不会出现在结果里。 */
-    List<Map<String, Object>> countGroupByStatus();
+    List<Map<String, Object>> countGroupByStatus(@Param("projectId") Long projectId,
+                                                 @Param("ownerId") Long ownerId);
 
-    /** 汇总全部有效任务已结算的 token。 */
-    TokenUsageRow summarizeTokens();
+    /** 汇总有效任务已结算的 token；projectId 为空时汇总全部项目。 */
+    TokenUsageRow summarizeTokens(@Param("projectId") Long projectId,
+                                  @Param("ownerId") Long ownerId);
+
+    List<DailyTokenUsageRow> summarizeTokensPerDay(
+            @Param("projectId") Long projectId,
+            @Param("ownerId") Long ownerId,
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("offsetMinutes") int offsetMinutes);
+
+    List<HourlyTokenUsageRow> summarizeTokensPerHour(
+            @Param("projectId") Long projectId,
+            @Param("ownerId") Long ownerId,
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("offsetMinutes") int offsetMinutes);
 
     /**
      * 按天统计收场任务。{@code from} / {@code to} 是 UTC 字面量边界（左闭右开），
      * {@code offsetMinutes} 只用于把 UTC 字面量平移回调用方时区再取日期。
      */
-    List<DailyCompletionRow> countCompletionPerDay(@Param("from") LocalDateTime from,
+    List<DailyCompletionRow> countCompletionPerDay(@Param("projectId") Long projectId,
+                                                   @Param("ownerId") Long ownerId,
+                                                   @Param("from") LocalDateTime from,
                                                    @Param("to") LocalDateTime to,
                                                    @Param("offsetMinutes") int offsetMinutes);
 

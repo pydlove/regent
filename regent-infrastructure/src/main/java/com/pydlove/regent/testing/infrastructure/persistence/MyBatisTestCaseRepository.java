@@ -1,5 +1,6 @@
 package com.pydlove.regent.testing.infrastructure.persistence;
 
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.testing.domain.model.TestCase;
@@ -31,6 +32,12 @@ public class MyBatisTestCaseRepository implements TestCaseRepository {
     }
 
     @Override
+    public Optional<TestCase> findByIdOwned(TestCaseId id, UserId ownerId) {
+        return Optional.ofNullable(mapper.selectByIdOwned(id.value(), ownerId.value()))
+                .map(TestCaseDataMapper::toDomain);
+    }
+
+    @Override
     public Optional<TestCase> findByIdForUpdate(TestCaseId id) {
         return Optional.ofNullable(mapper.selectByIdForUpdate(id.value()))
                 .map(TestCaseDataMapper::toDomain);
@@ -39,6 +46,13 @@ public class MyBatisTestCaseRepository implements TestCaseRepository {
     @Override
     public List<TestCase> findAll() {
         return mapper.selectAll().stream().map(TestCaseDataMapper::toDomain).toList();
+    }
+
+    @Override
+    public List<TestCase> findAll(UserId ownerId) {
+        return mapper.selectAllOwned(ownerId.value()).stream()
+                .map(TestCaseDataMapper::toDomain)
+                .toList();
     }
 
     @Override

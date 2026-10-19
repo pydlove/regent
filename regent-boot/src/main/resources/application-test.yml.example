@@ -5,7 +5,7 @@ spring:
   datasource:
     url: jdbc:mysql://127.0.0.1:3306/regent_test?characterEncoding=UTF-8&connectionTimeZone=UTC&useSSL=false&allowPublicKeyRetrieval=true
     username: regent
-    password: 在此填入本地密码
+    password: 'ENC(v1:在此填入由 ConfigEncryptionTool 生成的密文)'
   flyway:
     # 仅测试 profile 允许 clean，用于重建干净的测试库
     clean-disabled: false

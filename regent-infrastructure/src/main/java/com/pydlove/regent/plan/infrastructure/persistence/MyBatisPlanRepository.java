@@ -1,5 +1,6 @@
 package com.pydlove.regent.plan.infrastructure.persistence;
 
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.plan.domain.model.Plan;
 import com.pydlove.regent.plan.domain.model.PlanId;
 import com.pydlove.regent.plan.domain.repository.PlanRepository;
@@ -28,6 +29,12 @@ public class MyBatisPlanRepository implements PlanRepository {
     }
 
     @Override
+    public Optional<Plan> findByIdOwned(PlanId id, UserId ownerId) {
+        return Optional.ofNullable(mapper.selectByIdOwned(id.value(), ownerId.value()))
+                .map(this::toDomain);
+    }
+
+    @Override
     public Optional<Plan> findByIdForUpdate(PlanId id) {
         return Optional.ofNullable(mapper.selectByIdForUpdate(id.value())).map(this::toDomain);
     }
@@ -35,6 +42,11 @@ public class MyBatisPlanRepository implements PlanRepository {
     @Override
     public List<Plan> findAll() {
         return mapper.selectAll().stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public List<Plan> findAll(UserId ownerId) {
+        return mapper.selectAllOwned(ownerId.value()).stream().map(this::toDomain).toList();
     }
 
     @Override

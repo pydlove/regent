@@ -1,4 +1,11 @@
 #!/bin/bash
+
+# 兼容用户习惯的 `sh deploy/remote/deploy.sh ...` 调用。脚本主体依赖 bash 数组
+# 与 pipefail，因此不能真的交给 POSIX sh 执行。
+if [ -z "${BASH_VERSION:-}" ]; then
+    exec /bin/bash "$0" "$@"
+fi
+
 set -euo pipefail
 
 # 非 UTF-8 locale 下，部分 bash（3.2/5.x 均有记录）会把中文首字节并入
@@ -12,9 +19,12 @@ export LC_CTYPE=UTF-8
 # 服务器只运行中继和静态前端；真正的 Regent 仍在本机 127.0.0.1:8787。
 # 本机连接器主动访问服务器，因此服务器不需要反向连接本机。
 #
-# 直接运行即可：会交互询问服务器 IP、SSH 端口、用户名、密码。
-# 非交互场景用 REGENT_SERVER_IP / REGENT_SSH_PORT / REGENT_SERVER_USER /
-# REGENT_SERVER_PASSWORD（密码）或 REGENT_SSH_KEY（密钥）跳过询问。
+# 用法：
+#   bash deploy/remote/deploy.sh -H <IP> -p <密码>
+#   sh   deploy/remote/deploy.sh -H <IP> -P 22 -u root -k ~/.ssh/id_rsa
+#
+# 不传参数时会交互询问。也支持 REGENT_SERVER_IP / REGENT_SSH_PORT /
+# REGENT_SERVER_USER / REGENT_SERVER_PASSWORD / REGENT_SSH_KEY 环境变量。
 # ===================================================================
 
 SERVER_IP="${REGENT_SERVER_IP:-}"
@@ -33,6 +43,81 @@ log_info()  { printf '%b\n' "${GREEN}[INFO]${NC} $*"; }
 log_warn()  { printf '%b\n' "${YELLOW}[WARN]${NC} $*"; }
 log_error() { printf '%b\n' "${RED}[ERROR]${NC} $*"; }
 
+usage() {
+    cat <<'EOF'
+用法：
+  deploy/remote/deploy.sh [选项]
+
+选项：
+  -H, --host <IP>            服务器 IP 或域名
+  -p, --password <密码>      SSH 密码（会出现在命令历史中，生产环境优先用 -k）
+  -k, --key <路径>           SSH 私钥路径，默认 ~/.ssh/id_rsa
+  -P, --port <端口>          SSH 端口，默认 22
+  -u, --user <用户名>        SSH 用户名，默认 root
+  -r, --remote-base <目录>   服务器安装目录，默认 /root/app/regent-relay
+      --skip-local-connector 只部署服务器，不重新配对本机连接器
+  -h, --help                 显示帮助
+
+示例：
+  sh deploy/remote/deploy.sh -H 203.0.113.10 -p 'your-password'
+  bash deploy/remote/deploy.sh -H example.com -P 22 -u root -k ~/.ssh/id_rsa
+EOF
+}
+
+PASSWORD_FROM_COMMAND_LINE=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -H|--host)
+            [ "$#" -ge 2 ] || { log_error "$1 缺少参数"; exit 1; }
+            SERVER_IP="$2"
+            shift 2
+            ;;
+        -p|--password)
+            [ "$#" -ge 2 ] || { log_error "$1 缺少参数"; exit 1; }
+            SERVER_PASSWORD="$2"
+            PASSWORD_FROM_COMMAND_LINE=1
+            shift 2
+            ;;
+        -k|--key)
+            [ "$#" -ge 2 ] || { log_error "$1 缺少参数"; exit 1; }
+            SSH_KEY_PATH="$2"
+            shift 2
+            ;;
+        -P|--port)
+            [ "$#" -ge 2 ] || { log_error "$1 缺少参数"; exit 1; }
+            SSH_PORT="$2"
+            shift 2
+            ;;
+        -u|--user)
+            [ "$#" -ge 2 ] || { log_error "$1 缺少参数"; exit 1; }
+            SERVER_USER="$2"
+            shift 2
+            ;;
+        -r|--remote-base)
+            [ "$#" -ge 2 ] || { log_error "$1 缺少参数"; exit 1; }
+            REMOTE_BASE="$2"
+            shift 2
+            ;;
+        --skip-local-connector)
+            REGENT_SKIP_LOCAL_CONNECTOR=1
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            log_error "未知参数：$1"
+            usage
+            exit 1
+            ;;
+    esac
+done
+
 case "$REMOTE_BASE" in
     /*) ;;
     *) log_error "REGENT_REMOTE_BASE 必须是绝对路径：$REMOTE_BASE"; exit 1 ;;
@@ -45,7 +130,7 @@ if [ -z "$REMOTE_BASE" ] || [ "$REMOTE_BASE" = "/" ]; then
     log_error "REGENT_REMOTE_BASE 不能是根目录"
     exit 1
 fi
-case "/$REMOTE_BASE/" in
+case "$REMOTE_BASE/" in
     *'/../'*|*'/./'*|*'//'*)
         log_error "REGENT_REMOTE_BASE 不能包含 .、.. 或重复斜杠"
         exit 1
@@ -123,6 +208,9 @@ fi
 REMOTE_HOST="$SERVER_USER@$SERVER_IP"
 if [ -n "$SERVER_PASSWORD" ]; then
     log_info "目标：${REMOTE_HOST}（SSH 端口 ${SSH_PORT}，密码认证）"
+    if [ "$PASSWORD_FROM_COMMAND_LINE" = "1" ]; then
+        log_warn "-p 会把密码暴露在命令历史和进程参数中；生产环境优先使用 -k 或 REGENT_SERVER_PASSWORD"
+    fi
 else
     log_info "目标：${REMOTE_HOST}（SSH 端口 ${SSH_PORT}，密钥认证 ${SSH_KEY_PATH}）"
 fi

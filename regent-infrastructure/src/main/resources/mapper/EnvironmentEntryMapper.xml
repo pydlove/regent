@@ -3,7 +3,7 @@
 <mapper namespace="com.pydlove.regent.project.infrastructure.persistence.EnvironmentEntryMapper">
 
     <sql id="columns">
-        id, project_id, item_key, item_value, tags, description, secret, created_at, updated_at
+        id, user_id, project_id, item_key, item_value, tags, description, secret, created_at, updated_at
     </sql>
 
     <select id="selectById" resultType="com.pydlove.regent.project.infrastructure.persistence.EnvironmentRow">
@@ -19,11 +19,34 @@
         ORDER BY project_id IS NOT NULL, item_key, id
     </select>
 
+    <select id="selectByIdOwned" resultType="com.pydlove.regent.project.infrastructure.persistence.EnvironmentRow">
+        SELECT <include refid="columns"/>
+        FROM environment_entry
+        WHERE id = #{id} AND user_id = #{userId} AND deleted = 0
+    </select>
+
+    <select id="selectAllOwned" resultType="com.pydlove.regent.project.infrastructure.persistence.EnvironmentRow">
+        SELECT <include refid="columns"/>
+        FROM environment_entry
+        WHERE user_id = #{userId} AND deleted = 0
+        ORDER BY project_id IS NOT NULL, item_key, id
+    </select>
+
     <select id="selectApplicableTo"
             resultType="com.pydlove.regent.project.infrastructure.persistence.EnvironmentRow">
         SELECT <include refid="columns"/>
         FROM environment_entry
         WHERE deleted = 0
+          AND (project_id IS NULL OR project_id = #{projectId})
+        ORDER BY project_id IS NOT NULL, item_key, id
+    </select>
+
+    <select id="selectApplicableToOwned"
+            resultType="com.pydlove.regent.project.infrastructure.persistence.EnvironmentRow">
+        SELECT <include refid="columns"/>
+        FROM environment_entry
+        WHERE user_id = #{userId}
+          AND deleted = 0
           AND (project_id IS NULL OR project_id = #{projectId})
         ORDER BY project_id IS NOT NULL, item_key, id
     </select>
@@ -46,10 +69,29 @@
         </if>
     </select>
 
+    <select id="countByKeyOwned" resultType="int">
+        SELECT COUNT(*)
+        FROM environment_entry
+        WHERE user_id = #{userId}
+          AND deleted = 0
+          AND item_key = #{itemKey}
+        <choose>
+            <when test="projectId == null">
+                AND project_id IS NULL
+            </when>
+            <otherwise>
+                AND project_id = #{projectId}
+            </otherwise>
+        </choose>
+        <if test="excludingId != null">
+            AND id != #{excludingId}
+        </if>
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO environment_entry (project_id, item_key, item_value, tags, description, secret,
+        INSERT INTO environment_entry (user_id, project_id, item_key, item_value, tags, description, secret,
                                        deleted, created_at, updated_at)
-        VALUES (#{projectId}, #{itemKey}, #{itemValue}, #{tags}, #{description}, #{secret},
+        VALUES (#{userId}, #{projectId}, #{itemKey}, #{itemValue}, #{tags}, #{description}, #{secret},
                 0, #{createdAt}, #{updatedAt})
     </insert>
 

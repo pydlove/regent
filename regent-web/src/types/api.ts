@@ -81,6 +81,34 @@ export type TaskTokenUsage = {
   total: number
 }
 
+export type TokenUsageRange =
+  | 'TODAY'
+  | 'LAST_24_HOURS'
+  | 'LAST_7_DAYS'
+  | 'LAST_14_DAYS'
+  | 'LAST_30_DAYS'
+  | 'ALL'
+
+/** 某自然日的已结算 Token；后端已按当前用户时区切天。 */
+export type DailyTokenUsagePoint = {
+  date: string
+  input: number
+  cachedInput: number
+  output: number
+  total: number
+  runCount: number
+}
+
+/** 当天或近 24 小时的整点 Token 趋势。 */
+export type HourlyTokenUsagePoint = {
+  bucketStart: string
+  input: number
+  cachedInput: number
+  output: number
+  total: number
+  runCount: number
+}
+
 /** 后端的时间一律是 ISO-8601 的 UTC 串（如 2026-10-16T04:41:10.573Z），可空字段用 null。 */
 export type TaskSummary = {
   id: number
@@ -121,6 +149,20 @@ export type TaskDetail = {
   finishedAt: string | null
   createdAt: string
   updatedAt: string
+}
+
+/** 执行期间新增的一条调整方向。 */
+export type TaskAdjustment = {
+  id: number
+  taskId: number
+  source: 'TASK' | 'TEMPORARY'
+  sourceTaskId: number | null
+  sourceTitle: string | null
+  content: string
+  status: 'PENDING' | 'APPLIED'
+  appliedRunId: number | null
+  appliedAt: string | null
+  createdAt: string
 }
 
 /** 当前登录用户尚未提交的任务录入草稿。 */
@@ -432,6 +474,8 @@ export type DeploymentSummary = {
   id: number
   projectId: number
   projectName: string
+  serverId: number
+  serverName: string
   name: string
   host: string
   port: number
@@ -450,6 +494,39 @@ export type DeploymentSummary = {
 export type DeploymentDetail = DeploymentSummary & {
   scriptContent: string
   credentialConfigured: boolean
+}
+
+/** 可复用的部署服务器；密码永远不在响应里。 */
+export type DeploymentServer = {
+  id: number
+  projectId: number
+  name: string
+  host: string
+  port: number
+  username: string
+  authType: DeploymentAuthType
+  credentialConfigured: boolean
+  deploymentCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** 一处部署脚本规范问题，line 从 1 开始。 */
+export type DeploymentScriptIssue = {
+  line: number
+  code: string
+  message: string
+}
+
+export type DeploymentScriptValidation = {
+  valid: boolean
+  issues: DeploymentScriptIssue[]
+}
+
+/** Codex 生成的部署脚本，可直接填入新建部署表单。 */
+export type DeploymentScriptGeneration = {
+  scriptFilename: string
+  scriptContent: string
 }
 
 export type DeploymentRunSummary = {

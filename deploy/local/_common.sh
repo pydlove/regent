@@ -9,7 +9,8 @@ set -euo pipefail
 
 RUNTIME_DIR="${REGENT_HOME:-$HOME/.regent}"
 LOG_DIR="$RUNTIME_DIR/logs"
-mkdir -p "$LOG_DIR"
+APP_DIR="$RUNTIME_DIR/app"
+mkdir -p "$LOG_DIR" "$APP_DIR"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # deploy/local/ → 上溯两级才是项目根
@@ -22,6 +23,9 @@ BACKEND_LOG="$LOG_DIR/backend.log"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
 RELAY_LOG="$LOG_DIR/relay-connector.log"
 RELAY_ENV_FILE="$RUNTIME_DIR/relay-connector.env"
+# 后端从稳定副本启动，不直接跑 target/ 里的构建产物：
+# mvn clean 会删掉正在被 JVM 打开的 fat jar，之后类加载和 ServiceLoader 会随机失败。
+BACKEND_RUNTIME_JAR="$APP_DIR/regent-boot.jar"
 
 BACKEND_PORT=8787
 FRONTEND_PORT=12580
@@ -29,9 +33,14 @@ FRONTEND_PORT=12580
 # 中继连接器的 launchd 标签。托管与 nohup 两套方式必须互斥，
 # 否则同一条配置会被连两份，服务器侧看到的连接数会莫名翻倍。
 RELAY_AGENT_LABEL="com.pydlove.regent.relay-connector"
+BACKEND_AGENT_LABEL="com.pydlove.regent.backend"
 
 relay_agent_loaded() {
     [ "$(uname -s)" = "Darwin" ] && launchctl print "gui/$(id -u)/$RELAY_AGENT_LABEL" >/dev/null 2>&1
+}
+
+backend_agent_loaded() {
+    [ "$(uname -s)" = "Darwin" ] && launchctl print "gui/$(id -u)/$BACKEND_AGENT_LABEL" >/dev/null 2>&1
 }
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; DIM='\033[2m'; NC='\033[0m'

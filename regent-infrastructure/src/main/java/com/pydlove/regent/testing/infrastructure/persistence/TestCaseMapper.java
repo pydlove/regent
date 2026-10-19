@@ -10,9 +10,13 @@ public interface TestCaseMapper {
 
     TestCaseRow selectById(@Param("id") long id);
 
+    TestCaseRow selectByIdOwned(@Param("id") long id, @Param("ownerId") long ownerId);
+
     TestCaseRow selectByIdForUpdate(@Param("id") long id);
 
     List<TestCaseRow> selectAll();
+
+    List<TestCaseRow> selectAllOwned(@Param("ownerId") long ownerId);
 
     List<TestCaseRow> selectByProject(@Param("projectId") long projectId);
 

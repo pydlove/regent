@@ -32,6 +32,7 @@ class BugFixDispatchServiceTest {
     private final ExecutionFakes.Tasks tasks = new ExecutionFakes.Tasks();
     private final ExecutionFakes.Runs runs = new ExecutionFakes.Runs();
     private final ExecutionFakes.Events events = new ExecutionFakes.Events();
+    private final ExecutionFakes.Adjustments adjustments = new ExecutionFakes.Adjustments();
     private final ExecutionFakes.Decisions decisions = new ExecutionFakes.Decisions();
     private final ExecutionFakes.Rules rules = new ExecutionFakes.Rules();
     private final ExecutionFakes.Projects projects = new ExecutionFakes.Projects();
@@ -52,8 +53,9 @@ class BugFixDispatchServiceTest {
         TaskRunService runService = new TaskRunService(tasks, runs, events, attachments, projects,
                 new ExecutionFakes.Environments(),
                 new ExecutionFakes.TaskPlugins(),
-                new RunSettlementService(tasks, decisions, decisionRaiseService, bugs, taskId -> {
-                }),
+                new RunSettlementService(tasks, runs, adjustments, decisions, decisionRaiseService, bugs,
+                        taskId -> {
+                        }, transactions),
                 executor, branches, Duration.ofMinutes(30));
         TaskDispatchService dispatchService = new TaskDispatchService(
                 tasks,

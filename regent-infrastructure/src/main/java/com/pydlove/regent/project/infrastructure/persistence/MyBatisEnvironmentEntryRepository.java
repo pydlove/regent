@@ -1,5 +1,6 @@
 package com.pydlove.regent.project.infrastructure.persistence;
 
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.EnvironmentEntry;
 import com.pydlove.regent.project.domain.model.EnvironmentId;
 import com.pydlove.regent.project.domain.model.EnvironmentScope;
@@ -29,8 +30,21 @@ public class MyBatisEnvironmentEntryRepository implements EnvironmentEntryReposi
     }
 
     @Override
+    public Optional<EnvironmentEntry> findById(EnvironmentId id, UserId userId) {
+        return Optional.ofNullable(mapper.selectByIdOwned(id.value(), userId.value()))
+                .map(EnvironmentDataMapper::toEntry);
+    }
+
+    @Override
     public List<EnvironmentEntry> findAll() {
         return mapper.selectAll().stream().map(EnvironmentDataMapper::toEntry).toList();
+    }
+
+    @Override
+    public List<EnvironmentEntry> findAll(UserId userId) {
+        return mapper.selectAllOwned(userId.value()).stream()
+                .map(EnvironmentDataMapper::toEntry)
+                .toList();
     }
 
     @Override
@@ -41,12 +55,32 @@ public class MyBatisEnvironmentEntryRepository implements EnvironmentEntryReposi
     }
 
     @Override
+    public List<EnvironmentEntry> findApplicableTo(UserId userId, ProjectId projectId) {
+        return mapper.selectApplicableToOwned(userId.value(), projectId.value()).stream()
+                .map(EnvironmentDataMapper::toEntry)
+                .toList();
+    }
+
+    @Override
     public boolean existsByKey(EnvironmentScope scope,
                                ProjectId projectId,
                                String key,
                                EnvironmentId excludingId) {
+        return existsByKey(null, scope, projectId, key, excludingId);
+    }
+
+    @Override
+    public boolean existsByKey(UserId userId,
+                               EnvironmentScope scope,
+                               ProjectId projectId,
+                               String key,
+                               EnvironmentId excludingId) {
         Long projectValue = scope == EnvironmentScope.GLOBAL ? null : projectId.value();
-        return mapper.countByKey(projectValue, key, excludingId == null ? null : excludingId.value()) > 0;
+        Long excludingValue = excludingId == null ? null : excludingId.value();
+        if (userId == null) {
+            return mapper.countByKey(projectValue, key, excludingValue) > 0;
+        }
+        return mapper.countByKeyOwned(userId.value(), projectValue, key, excludingValue) > 0;
     }
 
     @Override

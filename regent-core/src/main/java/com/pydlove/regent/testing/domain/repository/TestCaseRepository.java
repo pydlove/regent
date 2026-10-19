@@ -1,5 +1,6 @@
 package com.pydlove.regent.testing.domain.repository;
 
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.testing.domain.model.TestCase;
 import com.pydlove.regent.testing.domain.model.TestCaseId;
@@ -12,9 +13,17 @@ public interface TestCaseRepository {
 
     Optional<TestCase> findById(TestCaseId id);
 
+    default Optional<TestCase> findByIdOwned(TestCaseId id, UserId ownerId) {
+        return findById(id);
+    }
+
     Optional<TestCase> findByIdForUpdate(TestCaseId id);
 
     List<TestCase> findAll();
+
+    default List<TestCase> findAll(UserId ownerId) {
+        return findAll();
+    }
 
     List<TestCase> findByProject(ProjectId projectId);
 

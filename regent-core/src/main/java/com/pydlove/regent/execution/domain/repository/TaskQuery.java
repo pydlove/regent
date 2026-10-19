@@ -2,6 +2,7 @@ package com.pydlove.regent.execution.domain.repository;
 
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 
@@ -21,7 +22,8 @@ public record TaskQuery(TaskStatus status,
                         TaskId taskId,
                         String keyword,
                         int page,
-                        int size) {
+                        int size,
+                        UserId ownerId) {
 
     public static final int DEFAULT_SIZE = 20;
     public static final int MAX_SIZE = 200;
@@ -30,6 +32,17 @@ public record TaskQuery(TaskStatus status,
         page = Math.max(page, 1);
         size = Math.min(Math.max(size, 1), MAX_SIZE);
         keyword = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
+    }
+
+    /** 兼容内部与测试的无归属查询。接口侧必须使用带 ownerId 的工厂方法。 */
+    public TaskQuery(TaskStatus status,
+                     DecisionLevel level,
+                     ProjectId projectId,
+                     TaskId taskId,
+                     String keyword,
+                     int page,
+                     int size) {
+        this(status, level, projectId, taskId, keyword, page, size, null);
     }
 
     /** 兼容不按任务号筛选的调用方。 */
@@ -50,6 +63,17 @@ public record TaskQuery(TaskStatus status,
                                String keyword,
                                Integer page,
                                Integer size) {
+        return of(status, level, projectId, taskId, keyword, page, size, null);
+    }
+
+    public static TaskQuery of(String status,
+                               String level,
+                               Long projectId,
+                               Long taskId,
+                               String keyword,
+                               Integer page,
+                               Integer size,
+                               UserId ownerId) {
         return new TaskQuery(
                 (status == null || status.isBlank()) ? null : TaskStatus.parse(status),
                 (level == null || level.isBlank()) ? null : DecisionLevel.parse(level),
@@ -58,7 +82,8 @@ public record TaskQuery(TaskStatus status,
                 taskId == null ? null : TaskId.of(taskId),
                 keyword,
                 page == null ? 1 : page,
-                size == null ? DEFAULT_SIZE : size);
+                size == null ? DEFAULT_SIZE : size,
+                ownerId);
     }
 
     /** 兼容不按任务号筛选的调用方。 */
@@ -73,7 +98,7 @@ public record TaskQuery(TaskStatus status,
 
     /** 不带筛选的查询，测试与小工具用。 */
     public static TaskQuery firstPage() {
-        return new TaskQuery(null, null, null, null, 1, DEFAULT_SIZE);
+        return new TaskQuery(null, null, null, null, null, 1, DEFAULT_SIZE, null);
     }
 
     public boolean hasStatusFilter() {

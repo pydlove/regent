@@ -12,6 +12,7 @@ import com.pydlove.regent.governance.domain.model.DecisionRaise;
 import com.pydlove.regent.governance.domain.model.DecisionStatus;
 import com.pydlove.regent.governance.domain.model.ResolvedBy;
 import com.pydlove.regent.governance.domain.repository.DecisionQueryRepository;
+import com.pydlove.regent.governance.domain.repository.DecisionQuery;
 import com.pydlove.regent.governance.domain.repository.DecisionRepository;
 import com.pydlove.regent.governance.domain.repository.DecisionView;
 import com.pydlove.regent.project.domain.model.ProjectId;
@@ -224,5 +225,19 @@ class DecisionApprovalIT {
         assertEquals(DecisionLevel.L2, loaded.getEffectiveLevel());
         assertNull(loaded.getResolvedAt().orElse(null));
         assertTrue(loaded.isReversible());
+    }
+
+    @Test
+    @DisplayName("决策列表可以按项目范围查询")
+    void 按项目筛选决策() {
+        Task task = 阻塞中的任务();
+        待批决策(task);
+
+        assertEquals(1,
+                decisionQueryRepository.findPage(DecisionQuery.of(
+                        null, "ALL", PROBE_PROJECT_ID, null, 1, 20)).total());
+        assertEquals(0,
+                decisionQueryRepository.findPage(DecisionQuery.of(
+                        null, "ALL", PROBE_PROJECT_ID + 1, null, 1, 20)).total());
     }
 }

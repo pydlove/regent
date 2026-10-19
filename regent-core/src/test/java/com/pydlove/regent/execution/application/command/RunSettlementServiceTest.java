@@ -5,6 +5,8 @@ import com.pydlove.regent.bug.domain.model.BugSeverity;
 import com.pydlove.regent.bug.domain.model.BugStatus;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.model.Task;
+import com.pydlove.regent.execution.domain.model.TaskAdjustment;
+import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.governance.application.command.DecisionRaiseService;
 import com.pydlove.regent.project.domain.model.ProjectId;
@@ -17,7 +19,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 修复任务结算与缺陷状态之间的跨聚合编排。 */
 class RunSettlementServiceTest {
@@ -25,13 +29,15 @@ class RunSettlementServiceTest {
     private static final ProjectId PROJECT = ProjectId.of(1L);
 
     private final ExecutionFakes.Tasks tasks = new ExecutionFakes.Tasks();
+    private final ExecutionFakes.Runs runs = new ExecutionFakes.Runs();
+    private final ExecutionFakes.Adjustments adjustments = new ExecutionFakes.Adjustments();
     private final ExecutionFakes.Decisions decisions = new ExecutionFakes.Decisions();
     private final ExecutionFakes.Rules rules = new ExecutionFakes.Rules();
     private final ExecutionFakes.Bugs bugs = new ExecutionFakes.Bugs();
     private final List<Long> scheduledTests = new ArrayList<>();
     private final RunSettlementService settlement = new RunSettlementService(
-            tasks, decisions, new DecisionRaiseService(rules, decisions), bugs,
-            taskId -> scheduledTests.add(taskId.value()));
+            tasks, runs, adjustments, decisions, new DecisionRaiseService(rules, decisions), bugs,
+            taskId -> scheduledTests.add(taskId.value()), new ExecutionFakes.Transactions());
 
     private Task task;
     private Bug bug;
@@ -54,7 +60,7 @@ class RunSettlementServiceTest {
     @Test
     @DisplayName("修复任务成功：任务完成，缺陷进入待验证")
     void 修复任务成功后缺陷待验证() {
-        settlement.finishTask(task.getId(), RunStatus.SUCCESS);
+        settlement.finishAttempt(run(), ExecutionFakes.Executor.success("修复完成"));
 
         assertEquals(TaskStatus.DONE, tasks.findById(task.getId()).orElseThrow().getStatus());
         assertEquals(List.of(task.getId().value()), scheduledTests,
@@ -67,7 +73,7 @@ class RunSettlementServiceTest {
     @Test
     @DisplayName("修复任务失败：缺陷保持修复中，不能替人宣布已修复")
     void 修复任务失败后缺陷保持修复中() {
-        settlement.finishTask(task.getId(), RunStatus.FAILED);
+        settlement.finishAttempt(run(), ExecutionFakes.Executor.failed("修复失败"));
 
         assertEquals(TaskStatus.FAILED, tasks.findById(task.getId()).orElseThrow().getStatus());
         assertEquals(List.of(), scheduledTests, "任务失败不应自动跑测试");
@@ -80,8 +86,43 @@ class RunSettlementServiceTest {
         bug.wontFix("产品决定保留当前导出行为");
         bugs.save(bug);
 
-        settlement.finishTask(task.getId(), RunStatus.SUCCESS);
+        settlement.finishAttempt(run(), ExecutionFakes.Executor.success("修复完成"));
 
         assertEquals(BugStatus.WONTFIX, bugs.findById(bug.getId()).orElseThrow().getStatus());
+    }
+
+    @Test
+    @DisplayName("成功前发现待调整：执行记录与任务都不收场")
+    void 有待调整时延迟完成() {
+        adjustments.save(TaskAdjustment.temporary(task.getId(), "再补一套单元测试"));
+        TaskRun run = run();
+
+        RunSettlementService.AttemptFinish finish =
+                settlement.finishAttempt(run, ExecutionFakes.Executor.success("表面上已完成"));
+
+        assertTrue(finish.deferredForAdjustment());
+        assertEquals(RunStatus.RUNNING, run.getStatus());
+        assertEquals(TaskStatus.RUNNING, task.getStatus());
+    }
+
+    @Test
+    @DisplayName("已下发的调整不再阻止任务完成")
+    void 已下发调整不阻塞完成() {
+        TaskAdjustment adjustment = adjustments.save(
+                TaskAdjustment.temporary(task.getId(), "再补一套单元测试"));
+        TaskRun run = run();
+        adjustment.markApplied(run.getId());
+
+        RunSettlementService.AttemptFinish finish =
+                settlement.finishAttempt(run, ExecutionFakes.Executor.success("完成了"));
+
+        assertFalse(finish.deferredForAdjustment());
+        assertEquals(TaskStatus.DONE, task.getStatus());
+    }
+
+    private TaskRun run() {
+        TaskRun run = TaskRun.start(task.getId(), task.getAttemptCount(), task.getBranchName().orElse(null));
+        runs.save(run);
+        return run;
     }
 }

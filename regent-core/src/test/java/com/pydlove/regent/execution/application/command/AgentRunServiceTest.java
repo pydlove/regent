@@ -4,6 +4,8 @@ import com.pydlove.regent.execution.domain.model.ExecReport;
 import com.pydlove.regent.execution.domain.model.ReportedBug;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.model.Task;
+import com.pydlove.regent.execution.domain.model.TaskAdjustment;
+import com.pydlove.regent.execution.domain.model.TaskAdjustmentStatus;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.execution.domain.port.ExecutorContract;
@@ -48,6 +50,7 @@ class AgentRunServiceTest {
     private final ExecutionFakes.Tasks tasks = new ExecutionFakes.Tasks();
     private final ExecutionFakes.Runs runs = new ExecutionFakes.Runs();
     private final ExecutionFakes.Events events = new ExecutionFakes.Events();
+    private final ExecutionFakes.Adjustments adjustments = new ExecutionFakes.Adjustments();
     private final ExecutionFakes.Decisions decisions = new ExecutionFakes.Decisions();
     private final ExecutionFakes.Bugs bugs = new ExecutionFakes.Bugs();
     private final ExecutionFakes.Rules rules = new ExecutionFakes.Rules();
@@ -73,8 +76,9 @@ class AgentRunServiceTest {
         DecisionRaiseService decisionRaiseService = new DecisionRaiseService(rules, decisions);
         return new AgentRunService(tasks, runs, events, attachments, projects, environments, plugins,
                 decisions, branches, new BranchProvisioningService(branches),
-                new RunSettlementService(tasks, decisions, decisionRaiseService, bugs, taskId -> {
-                }),
+                new RunSettlementService(tasks, runs, adjustments, decisions, decisionRaiseService, bugs,
+                        taskId -> {
+                        }, new ExecutionFakes.Transactions()),
                 contract(), concurrencyGate, lease, "http://127.0.0.1:8787/api/agent/contract");
     }
 
@@ -321,6 +325,51 @@ class AgentRunServiceTest {
         assertEquals(TaskStatus.DONE, tasks.get(work.taskId()).getStatus());
         assertEquals(RunStatus.SUCCESS, runs.get(work.runId()).getStatus());
         assertNull(runs.get(work.runId()).getLeaseExpiresAt(), "收场即解除占用");
+    }
+
+    @Test
+    @DisplayName("认领时带出待调整；上报后才标记已下发")
+    void 外部执行者认领带出调整() {
+        Task task = ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING);
+        tasks.add(task);
+        TaskAdjustment adjustment = adjustments.save(
+                TaskAdjustment.temporary(task.getId(), "把错误提示也改清楚"));
+
+        AgentWorkPackage work = service.claim(AGENT, "sess-1", null, null).orElseThrow();
+
+        assertTrue(work.instruction().contains("把错误提示也改清楚"), work.instruction());
+        assertEquals(TaskAdjustmentStatus.PENDING, adjustment.getStatus(),
+                "工作包刚发出还不能确认执行者收到");
+
+        service.report(work.runId(), AGENT,
+                ExecReport.of("DONE", "调整完了", List.of(), null, List.of()),
+                "sess-1", TokenUsage.ZERO, null);
+
+        assertEquals(TaskAdjustmentStatus.APPLIED, adjustments.all().get(0).getStatus());
+        assertEquals(work.runId(), adjustments.all().get(0).getAppliedRunId().orElseThrow().value());
+    }
+
+    @Test
+    @DisplayName("执行期间新增调整：本次上报先不收场，下一次上报前必须继续")
+    void 外部执行者执行期间新增调整() {
+        AgentWorkPackage work = claimed();
+        adjustments.save(TaskAdjustment.temporary(TaskId.of(work.taskId()), "再补一套接口测试"));
+
+        AgentReportOutcome first = service.report(work.runId(), AGENT,
+                ExecReport.of("DONE", "第一轮做完了", List.of(), null, List.of()),
+                "sess-1", TokenUsage.ZERO, null);
+
+        assertEquals(AgentReportOutcome.Outcome.CONTINUE, first.outcome());
+        assertTrue(first.instruction().contains("再补一套接口测试"), first.instruction());
+        assertEquals(TaskStatus.RUNNING, tasks.get(work.taskId()).getStatus());
+        assertEquals(RunStatus.RUNNING, runs.get(work.runId()).getStatus());
+
+        AgentReportOutcome second = service.report(work.runId(), AGENT,
+                ExecReport.of("DONE", "调整也做完了", List.of(), null, List.of()),
+                "sess-1", TokenUsage.ZERO, null);
+
+        assertEquals(AgentReportOutcome.Outcome.DONE, second.outcome());
+        assertEquals(TaskAdjustmentStatus.APPLIED, adjustments.all().get(0).getStatus());
     }
 
     @Test

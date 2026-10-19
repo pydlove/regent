@@ -9,11 +9,14 @@ import com.pydlove.regent.deployment.domain.model.DeploymentRun;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunId;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunStatus;
 import com.pydlove.regent.deployment.domain.port.DeploymentExecutor;
-import com.pydlove.regent.deployment.domain.port.DeploymentCredentialStore;
+import com.pydlove.regent.deployment.domain.model.DeploymentServer;
+import com.pydlove.regent.deployment.domain.service.DeploymentScriptValidator;
+import com.pydlove.regent.deployment.domain.port.DeploymentServerCredentialStore;
 import com.pydlove.regent.deployment.domain.port.DeploymentLogStore;
 import com.pydlove.regent.deployment.domain.port.DeploymentLogWriter;
 import com.pydlove.regent.deployment.domain.repository.DeploymentRepository;
 import com.pydlove.regent.deployment.domain.repository.DeploymentRunRepository;
+import com.pydlove.regent.deployment.domain.repository.DeploymentServerRepository;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.domain.TransactionRunner;
@@ -32,21 +35,24 @@ public class DeploymentExecutionService {
 
     private final DeploymentRepository deploymentRepository;
     private final DeploymentRunRepository runRepository;
+    private final DeploymentServerRepository serverRepository;
     private final DeploymentExecutor deploymentExecutor;
-    private final DeploymentCredentialStore credentialStore;
+    private final DeploymentServerCredentialStore credentialStore;
     private final DeploymentLogStore logStore;
     private final ExecutorService workers;
     private final TransactionRunner transactionRunner;
 
     public DeploymentExecutionService(DeploymentRepository deploymentRepository,
                                       DeploymentRunRepository runRepository,
+                                      DeploymentServerRepository serverRepository,
                                       DeploymentExecutor deploymentExecutor,
-                                      DeploymentCredentialStore credentialStore,
+                                      DeploymentServerCredentialStore credentialStore,
                                       DeploymentLogStore logStore,
                                       ExecutorService workers,
                                       TransactionRunner transactionRunner) {
         this.deploymentRepository = deploymentRepository;
         this.runRepository = runRepository;
+        this.serverRepository = serverRepository;
         this.deploymentExecutor = deploymentExecutor;
         this.credentialStore = credentialStore;
         this.logStore = logStore;
@@ -61,13 +67,17 @@ public class DeploymentExecutionService {
             if (runRepository.existsActiveByDeployment(id)) {
                 throw new DomainException("该部署已有执行中的任务，请等它结束");
             }
-            String password = deployment.getAuthType() == DeploymentAuthType.PASSWORD
-                    ? credentialStore.find(id)
+            DeploymentServer server = serverRepository.findById(deployment.getServerId())
+                    .orElseThrow(() -> new EntityNotFoundException(
+                            "部署服务器不存在：" + deployment.getServerId().value()));
+            DeploymentScriptValidator.requireValid(deployment.getScriptContent());
+            String password = server.getAuthType() == DeploymentAuthType.PASSWORD
+                    ? credentialStore.find(server.getId())
                             .filter(value -> !value.isEmpty())
                             .orElseThrow(() -> new DomainException(
-                                    "尚未保存 SSH 密码，请先编辑部署配置"))
+                                    "尚未保存 SSH 密码，请先编辑服务器"))
                     : null;
-            DeploymentRun queued = DeploymentRun.queue(deployment.snapshot());
+            DeploymentRun queued = DeploymentRun.queue(deployment.snapshot(), server.snapshot());
             runRepository.save(queued);
             return new Started(queued, password);
         });

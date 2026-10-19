@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ScrollText } from '@lucide/vue'
+import { Maximize2, Minimize2, ScrollText } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 
 import RunStatusBadge from '@/components/business/RunStatusBadge.vue'
@@ -8,6 +8,7 @@ import { translateRunEvents } from '@/components/business/runEvents'
 import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
+import Icon from '@/components/ui/icon/Icon.vue'
 import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
 import type { TaskRunDetail } from '@/types/api'
 import { runIsFailure } from '@/types/task'
@@ -16,7 +17,8 @@ import { formatDuration, formatRelative, formatTokens } from '@/utils/format'
 /*
  * 某一次执行的详情：事实在前，原文在后。
  *
- * 三个页签对应三种读法：「执行过程」是翻成人话的事件流（见 runEvents.ts），默认停在它上面；
+ * 三个页签对应三种读法：「执行过程」是翻成人话的事件流（见 runEvents.ts），默认停在它上面，
+ * 并且最新的事件排在最上面；「原始事件」保持原始 seq 顺序，排错时按时间线逐条核对。
  * 「原始事件」逐条原样呈现，排错时以它为准；「出参原文」是平台读取结论的末条消息。
  *
  * 原始事件页签刻意不做任何加工：payload 原样呈现，是不是 JSON、里面写了什么，由看日志的
@@ -36,9 +38,11 @@ const open = defineModel<boolean>('open', { default: false })
 
 const tab = ref<'process' | 'events' | 'raw'>('process')
 const expanded = ref<number[]>([])
+const fullscreen = ref(false)
 
 // 每次重新打开都回到执行过程、收起全部长条目：上一次翻到哪跟这一次要看的东西没关系
 watch(open, (value) => {
+  fullscreen.value = false
   if (value) {
     tab.value = 'process'
     expanded.value = []
@@ -68,7 +72,8 @@ const leaseLabel = computed(() => {
 /** 人话视图里条目的「谁在说」 */
 const speaker = computed(() => (isExternal.value ? (run.value?.agentName ?? '执行者') : 'codex'))
 
-const humanItems = computed(() => translateRunEvents(props.detail?.events ?? []))
+// 人话视图是给人快速扫「刚刚发生了什么」的，最新在上；原始事件页仍保持正序。
+const humanItems = computed(() => translateRunEvents(props.detail?.events ?? []).slice().reverse())
 
 const tabItems = computed(() => [
   { value: 'process', label: '执行过程' },
@@ -102,12 +107,19 @@ const tokenBreakdown = computed(() => {
   if (!tokens) return '—'
   return `输入 ${formatTokens(tokens.tokenInput)} · 缓存 ${formatTokens(tokens.tokenCachedInput)} · 输出 ${formatTokens(tokens.tokenOutput)}`
 })
+
+const contentHeightClass = computed(() =>
+  fullscreen.value ? 'max-h-[calc(100dvh-260px)]' : 'max-h-[36vh]',
+)
 </script>
 
 <template>
   <Dialog
     v-model:open="open"
     layout="log"
+    size="wide"
+    :fullscreen="fullscreen"
+    :max-height="fullscreen ? 'default' : 'compact'"
     :title="run ? `第 ${run.attemptNo} 次尝试` : '运行记录'"
     :description="run ? `${run.branchName ?? '项目目录'} · ${formatRelative(run.startedAt)} 开始` : '正在读取这次执行的记录'"
     :icon="ScrollText"
@@ -171,7 +183,8 @@ const tokenBreakdown = computed(() => {
 
       <div
         v-if="tab === 'process'"
-        class="mt-2 max-h-[46vh] overflow-y-auto rounded-panel border border-separator-soft bg-content px-3.5 py-1"
+        class="mt-2 overflow-y-auto rounded-panel border border-separator-soft bg-content px-3.5 py-1"
+        :class="contentHeightClass"
       >
         <p v-if="humanItems.length === 0" class="p-2 text-caption text-label-tertiary">
           这次执行没有留下事件流。
@@ -187,7 +200,8 @@ const tokenBreakdown = computed(() => {
 
       <div
         v-else-if="tab === 'events'"
-        class="mt-2 max-h-[46vh] overflow-y-auto rounded-panel border border-separator-soft bg-content p-2"
+        class="mt-2 overflow-y-auto rounded-panel border border-separator-soft bg-content p-2"
+        :class="contentHeightClass"
       >
         <p v-if="detail && detail.events.length === 0" class="p-2 text-caption text-label-tertiary">
           这次执行没有留下事件流。
@@ -224,7 +238,8 @@ const tokenBreakdown = computed(() => {
 
       <div
         v-else
-        class="mt-2 max-h-[46vh] overflow-y-auto rounded-panel border border-separator-soft bg-content p-2.5"
+        class="mt-2 overflow-y-auto rounded-panel border border-separator-soft bg-content p-2.5"
+        :class="contentHeightClass"
       >
         <pre class="whitespace-pre-wrap break-all font-mono text-caption text-label-secondary">{{
           detail?.rawResult ?? '（这次执行没有落盘末条消息）'
@@ -233,6 +248,10 @@ const tokenBreakdown = computed(() => {
     </template>
 
     <template #footer>
+      <Button size="sm" @click="fullscreen = !fullscreen">
+        <Icon :as="fullscreen ? Minimize2 : Maximize2" size="inline" />
+        {{ fullscreen ? '退出全屏' : '全屏查看' }}
+      </Button>
       <Button size="sm" @click="open = false">关闭</Button>
     </template>
   </Dialog>

@@ -3,6 +3,7 @@ package com.pydlove.regent.deployment.infrastructure.persistence;
 import com.pydlove.regent.deployment.domain.model.Deployment;
 import com.pydlove.regent.deployment.domain.model.DeploymentAuthType;
 import com.pydlove.regent.deployment.domain.model.DeploymentId;
+import com.pydlove.regent.deployment.domain.model.DeploymentServerId;
 import com.pydlove.regent.deployment.domain.model.DeploymentRun;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunId;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunStatus;
@@ -22,11 +23,8 @@ public final class DeploymentDataMapper {
         DeploymentData data = new DeploymentData();
         data.setId(deployment.getId() == null ? null : deployment.getId().value());
         data.setProjectId(deployment.getProjectId().value());
+        data.setServerId(deployment.getServerId().value());
         data.setName(deployment.getName());
-        data.setHost(deployment.getHost());
-        data.setPort(deployment.getPort());
-        data.setSshUsername(deployment.getUsername());
-        data.setAuthType(deployment.getAuthType().name());
         data.setRemoteDirectory(deployment.getRemoteDirectory());
         data.setScriptFilename(deployment.getScriptFilename());
         data.setScriptContent(deployment.getScriptContent());
@@ -40,11 +38,8 @@ public final class DeploymentDataMapper {
         return Deployment.restore(
                 DeploymentId.of(row.getId()),
                 ProjectId.of(row.getProjectId()),
+                DeploymentServerId.of(row.getServerId()),
                 row.getName(),
-                row.getHost(),
-                row.getPort(),
-                row.getSshUsername(),
-                DeploymentAuthType.parse(row.getAuthType()),
                 row.getRemoteDirectory(),
                 row.getScriptFilename(),
                 row.getScriptContent(),

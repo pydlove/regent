@@ -7,11 +7,27 @@
         script_filename, script_content, script_hash, enabled, created_at, updated_at
     </sql>
 
+    <sql id="testCaseColumnsOwned">
+        tc.id, tc.project_id, tc.name, tc.test_type, tc.description, tc.command_text,
+        tc.script_filename, tc.script_content, tc.script_hash, tc.enabled,
+        tc.created_at, tc.updated_at
+    </sql>
+
     <select id="selectById"
             resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRow">
         SELECT <include refid="testCaseColumns"/>
         FROM test_case
         WHERE id = #{id} AND deleted = 0
+    </select>
+
+    <select id="selectByIdOwned"
+            resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRow">
+        SELECT <include refid="testCaseColumnsOwned"/>
+        FROM test_case tc
+        JOIN project p ON p.id = tc.project_id
+        WHERE tc.id = #{id}
+          AND tc.deleted = 0
+          AND p.owner_id = #{ownerId}
     </select>
 
     <select id="selectByIdForUpdate"
@@ -28,6 +44,16 @@
         FROM test_case
         WHERE deleted = 0
         ORDER BY enabled DESC, updated_at DESC, id DESC
+    </select>
+
+    <select id="selectAllOwned"
+            resultType="com.pydlove.regent.testing.infrastructure.persistence.TestCaseRow">
+        SELECT <include refid="testCaseColumnsOwned"/>
+        FROM test_case tc
+        JOIN project p ON p.id = tc.project_id
+        WHERE tc.deleted = 0
+          AND p.owner_id = #{ownerId}
+        ORDER BY tc.enabled DESC, tc.updated_at DESC, tc.id DESC
     </select>
 
     <select id="selectByProject"

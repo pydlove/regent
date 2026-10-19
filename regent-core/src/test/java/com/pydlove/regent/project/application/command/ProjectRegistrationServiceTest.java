@@ -1,5 +1,6 @@
 package com.pydlove.regent.project.application.command;
 
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.Project;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.model.ProjectSummaryStatus;
@@ -60,6 +61,11 @@ class ProjectRegistrationServiceTest {
         public void update(Project project) {
             // 替身保存的是同一个对象，状态已就地更新。
         }
+
+        @Override
+        public void updateDetails(Project project) {
+            // 注册用例不会调用编辑写侧。
+        }
     }
 
     private final Registry projects = new Registry();
@@ -77,6 +83,17 @@ class ProjectRegistrationServiceTest {
         assertEquals(ProjectId.of(1L), project.getId());
         assertEquals(1, projects.saved.size());
         assertEquals(workspace.toString(), projects.saved.get(0).getPath());
+    }
+
+    @Test
+    @DisplayName("注册时把项目归到当前账号名下")
+    void recordsOwner(@TempDir Path workspace) {
+        UserId ownerId = UserId.of(42L);
+
+        Project project = service.register(command("app_audit", workspace.toString()), ownerId);
+
+        assertEquals(ownerId, project.getOwnerId());
+        assertEquals(ownerId, projects.saved.get(0).getOwnerId());
     }
 
     @Test

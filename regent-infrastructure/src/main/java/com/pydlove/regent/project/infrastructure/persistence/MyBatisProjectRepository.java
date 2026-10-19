@@ -4,6 +4,7 @@ import com.pydlove.regent.project.domain.model.Project;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.model.ProjectSummaryStatus;
 import com.pydlove.regent.project.domain.repository.ProjectRepository;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.shared.domain.DomainException;
 import org.springframework.stereotype.Repository;
 
@@ -44,6 +45,12 @@ public class MyBatisProjectRepository implements ProjectRepository {
     }
 
     @Override
+    public Optional<Project> findByIdOwned(ProjectId id, UserId ownerId) {
+        return Optional.ofNullable(projectMapper.selectByIdOwned(id.value(), ownerId.value()))
+                .map(ProjectDataMapper::toDomain);
+    }
+
+    @Override
     public List<Project> findBySummaryStatus(ProjectSummaryStatus status) {
         return projectMapper.selectBySummaryStatus(status.name()).stream()
                 .map(ProjectDataMapper::toDomain)
@@ -58,6 +65,17 @@ public class MyBatisProjectRepository implements ProjectRepository {
         ProjectData data = ProjectDataMapper.toData(project);
         if (projectMapper.updateSummary(data) != 1) {
             throw new DomainException("项目不存在或已删除，无法更新项目资料：" + project.getId());
+        }
+    }
+
+    @Override
+    public void updateDetails(Project project) {
+        if (project.getId() == null) {
+            throw new DomainException("未持久化的项目不能更新");
+        }
+        ProjectData data = ProjectDataMapper.toData(project);
+        if (projectMapper.updateDetails(data) != 1) {
+            throw new DomainException("项目不存在或已删除，无法更新：" + project.getId());
         }
     }
 }

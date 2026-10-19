@@ -2,6 +2,7 @@ package com.pydlove.regent.execution.domain.repository;
 
 import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskId;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 
 import java.util.List;
@@ -17,6 +18,11 @@ import java.util.Optional;
 public interface TaskRepository {
 
     Optional<Task> findById(TaskId id);
+
+    /** 只在指定账号名下取任务；接口侧读详情与执行动作前必须过这一层。 */
+    default Optional<Task> findByIdOwned(TaskId id, UserId ownerId) {
+        return findById(id);
+    }
 
     /**
      * 在事务内锁住任务行再判断状态。

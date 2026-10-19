@@ -19,6 +19,7 @@ import com.pydlove.regent.execution.domain.port.ExecutorRuntimeProbe;
 import com.pydlove.regent.execution.domain.port.ExecutorContract;
 import com.pydlove.regent.execution.domain.port.BranchManager;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
+import com.pydlove.regent.execution.domain.repository.TaskAdjustmentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskAttachmentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
@@ -189,13 +190,16 @@ public class ExecutionConfig {
      */
     @Bean
     public RunSettlementService runSettlementService(TaskRepository taskRepository,
+                                                     TaskRunRepository taskRunRepository,
+                                                     TaskAdjustmentRepository adjustmentRepository,
                                                      DecisionRepository decisionRepository,
                                                      DecisionRaiseService decisionRaiseService,
                                                      BugRepository bugRepository,
-                                                     TestCaseExecutionScheduler testCaseExecutionScheduler) {
+                                                     TestCaseExecutionScheduler testCaseExecutionScheduler,
+                                                     TransactionRunner transactionRunner) {
         return new RunSettlementService(
-                taskRepository, decisionRepository, decisionRaiseService, bugRepository,
-                testCaseExecutionScheduler);
+                taskRepository, taskRunRepository, adjustmentRepository, decisionRepository,
+                decisionRaiseService, bugRepository, testCaseExecutionScheduler, transactionRunner);
     }
 
     @Bean

@@ -25,12 +25,23 @@ withDefaults(
     title: string
     description?: string
     layout?: DialogVariantProps['layout']
-    /** 表单弹框的宽度两档；alert 与 log 用不到，见 dialog.variants.ts */
+    /** 弹框宽度：large 用于长表单，wide 只给需要横排查看的日志类弹框 */
     size?: DialogVariantProps['size']
+    /** compact 把最大高度收敛到视口的 80% */
+    maxHeight?: DialogVariantProps['maxHeight']
+    fullscreen?: boolean
     icon?: DialogIcon
     iconTone?: DialogIconProps['tone']
   }>(),
-  { description: '', layout: 'alert', size: 'regular', icon: undefined, iconTone: 'default' },
+  {
+    description: '',
+    layout: 'alert',
+    size: 'regular',
+    maxHeight: 'default',
+    fullscreen: false,
+    icon: undefined,
+    iconTone: 'default',
+  },
 )
 
 const open = defineModel<boolean>('open', { default: false })
@@ -55,6 +66,8 @@ const { zIndex } = useOverlayLayer(open)
         <DialogPanel
           :layout="layout"
           :size="size"
+          :max-height="maxHeight"
+          :fullscreen="fullscreen"
           :icon="icon"
           :icon-tone="iconTone"
           @close="open = false"

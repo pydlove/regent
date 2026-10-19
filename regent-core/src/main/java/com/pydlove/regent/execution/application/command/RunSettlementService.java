@@ -8,11 +8,17 @@ import com.pydlove.regent.execution.domain.model.ExecResult;
 import com.pydlove.regent.execution.domain.model.ReportedBug;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.model.Task;
+import com.pydlove.regent.execution.domain.model.TaskAdjustment;
+import com.pydlove.regent.execution.domain.model.TaskAdjustmentId;
+import com.pydlove.regent.execution.domain.model.TaskAdjustmentSource;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskRun;
+import com.pydlove.regent.execution.domain.model.TaskRunId;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.execution.domain.model.TaskSource;
+import com.pydlove.regent.execution.domain.repository.TaskAdjustmentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
+import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
 import com.pydlove.regent.governance.application.command.DecisionRaiseService;
 import com.pydlove.regent.governance.application.command.RaiseDecisionCommand;
 import com.pydlove.regent.governance.application.command.RaisedDecision;
@@ -22,7 +28,13 @@ import com.pydlove.regent.governance.domain.model.ResolvedBy;
 import com.pydlove.regent.governance.domain.repository.DecisionRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
+import com.pydlove.regent.shared.domain.TransactionRunner;
 import com.pydlove.regent.testing.domain.port.TestCaseExecutionScheduler;
+
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.Optional;
 
 /**
  * 一次尝试的编排大脑 —— 「开局说什么」与「收场怎么算」。
@@ -38,9 +50,8 @@ import com.pydlove.regent.testing.domain.port.TestCaseExecutionScheduler;
  *   <li>任务状态什么时候跟着动（且只在它仍是 RUNNING 时才动 —— 人的终止优先）。</li>
  * </ol>
  *
- * <p>它不认识进程、不认识 JSON、不认识 HTTP，因此放在 application 层；
- * 执行记录本身的收敛（{@code TaskRun.finish}）留给调用方，因为「什么时候算收场」
- * 两条路径并不一样：内部路径一次尝试一行到底，外部路径上报之后可能还要等心跳。
+ * <p>它不认识进程、不认识 JSON、不认识 HTTP，因此放在 application 层。终局收敛把执行记录、
+ * 任务状态与待调整检查放在同一个事务里，避免成功结果刚写完就与新到的调整擦肩而过。
  */
 public class RunSettlementService {
 
@@ -49,21 +60,30 @@ public class RunSettlementService {
                     + "不要重复已经做好的部分，并按约定再次上报。";
 
     private final TaskRepository taskRepository;
+    private final TaskRunRepository taskRunRepository;
+    private final TaskAdjustmentRepository adjustmentRepository;
     private final DecisionRepository decisionRepository;
     private final DecisionRaiseService decisionRaiseService;
     private final BugRepository bugRepository;
     private final TestCaseExecutionScheduler testCaseExecutionScheduler;
+    private final TransactionRunner transactionRunner;
 
     public RunSettlementService(TaskRepository taskRepository,
+                                TaskRunRepository taskRunRepository,
+                                TaskAdjustmentRepository adjustmentRepository,
                                 DecisionRepository decisionRepository,
                                 DecisionRaiseService decisionRaiseService,
                                 BugRepository bugRepository,
-                                TestCaseExecutionScheduler testCaseExecutionScheduler) {
+                                TestCaseExecutionScheduler testCaseExecutionScheduler,
+                                TransactionRunner transactionRunner) {
         this.taskRepository = taskRepository;
+        this.taskRunRepository = taskRunRepository;
+        this.adjustmentRepository = adjustmentRepository;
         this.decisionRepository = decisionRepository;
         this.decisionRaiseService = decisionRaiseService;
         this.bugRepository = bugRepository;
         this.testCaseExecutionScheduler = testCaseExecutionScheduler;
+        this.transactionRunner = transactionRunner;
     }
 
     /**
@@ -99,6 +119,52 @@ public class RunSettlementService {
                 + "\n\n请按此结论继续完成任务，并按约定再次上报。";
     }
 
+    /**
+     * 取当前待下发的调整方向。这里只生成指令，不改状态：调用方真正把指令交给执行器之后再
+     * 标记 APPLIED；执行器没被拉起时，调整仍留在待下发队列。
+     */
+    public Optional<AdjustmentInstruction> pendingAdjustmentInstruction(TaskId taskId) {
+        List<TaskAdjustment> pending = adjustmentRepository.findPendingByTask(taskId);
+        if (pending.isEmpty()) {
+            return Optional.empty();
+        }
+
+        StringBuilder prompt = new StringBuilder("任务执行期间新增了以下调整方向，必须在继续前纳入：\n");
+        int index = 1;
+        for (TaskAdjustment adjustment : pending) {
+            prompt.append('\n').append(index++).append(". ");
+            if (adjustment.getSource() == TaskAdjustmentSource.TASK) {
+                prompt.append("来自任务 #")
+                        .append(adjustment.getSourceTaskId().orElseThrow().value())
+                        .append("「")
+                        .append(adjustment.getSourceTitle().orElse("未命名任务"))
+                        .append("」：\n");
+            } else {
+                prompt.append("临时补充：\n");
+            }
+            prompt.append(adjustment.getContent()).append('\n');
+        }
+        prompt.append("\n请先检查上一轮已经完成的改动，不要推倒重做；按这些新方向补齐实现与验证。\n")
+                .append("如果新方向带来新的风险或不可逆操作，仍按平台上报约定提出决策，不能自行放宽等级。\n")
+                .append("处理完成后按约定再次上报。");
+        return Optional.of(new AdjustmentInstruction(
+                pending.stream().map(TaskAdjustment::getId).toList(),
+                prompt.toString()));
+    }
+
+    /** 执行器确实收到指令后调用；记录是哪次尝试下发的。 */
+    public void markAdjustmentsApplied(List<TaskAdjustmentId> ids, TaskRunId runId) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        transactionRunner.inTransaction(() -> {
+            Instant appliedAt = now();
+            for (TaskAdjustmentId id : ids) {
+                adjustmentRepository.markApplied(id, runId, appliedAt);
+            }
+        });
+    }
+
     /** 决策分级入口。就高不就低、规则命中、不可逆拦截全在 {@link DecisionRaiseService} 里。 */
     public RaisedDecision raise(Task task, ProjectProfile project, ExecResult result) {
         return decisionRaiseService.raise(new RaiseDecisionCommand(
@@ -125,26 +191,47 @@ public class RunSettlementService {
     }
 
     /**
-     * 按执行结果推进任务状态。
+     * 在同一事务里收敛执行记录与任务状态。
      *
-     * <p>每次迁移前重新读一次任务：一次执行可能持续几十分钟，期间人可能在界面上点了「终止」，
-     * 手里那份 {@code Task} 是开局时读的，直接拿它 complete/fail 会把人工终止悄悄覆盖回去。
+     * <p>成功结果先锁任务行，再检查是否还有待下发调整。两步使用与「新增调整」相同的锁顺序：
+     * 若调整先提交，这里会延迟完成；若完成先提交，后到的调整会看到 DONE 并被拒绝。
+     * 这样既不会丢调整，也不会让任务在调整尚未处理时提前收场。
      */
-    public void finishTask(TaskId taskId, RunStatus outcome) {
-        Task fresh = taskRepository.findById(taskId).orElse(null);
-        if (fresh == null || fresh.getStatus() != TaskStatus.RUNNING) {
-            return;
+    public AttemptFinish finishAttempt(TaskRun run, ExecResult result) {
+        if (run == null || result == null) {
+            throw new IllegalArgumentException("执行记录与执行结果不能为空");
         }
-        if (outcome == RunStatus.SUCCESS) {
-            fresh.complete();
-            taskRepository.save(fresh);
-            markBugFixed(fresh);
-            testCaseExecutionScheduler.scheduleAfterTaskCompleted(taskId);
-            return;
-        } else {
-            fresh.fail();
-        }
-        taskRepository.save(fresh);
+        return transactionRunner.inTransaction(() -> {
+            Task fresh = taskRepository.findByIdForUpdate(run.getTaskId()).orElse(null);
+            boolean latest = taskRunRepository.findLatestByTask(run.getTaskId())
+                    .map(latestRun -> latestRun.getId().equals(run.getId()))
+                    .orElse(false);
+            boolean stillRunning = latest && fresh != null && fresh.getStatus() == TaskStatus.RUNNING;
+            if (stillRunning && result.status() == RunStatus.SUCCESS
+                    && adjustmentRepository.hasPending(run.getTaskId())) {
+                return new AttemptFinish(run.getStatus(), fresh.getStatus(), true);
+            }
+
+            run.finish(result);
+            taskRunRepository.save(run);
+            if (!stillRunning) {
+                return new AttemptFinish(run.getStatus(),
+                        fresh == null ? null : fresh.getStatus(), false);
+            }
+            if (run.getStatus() == RunStatus.SUCCESS) {
+                fresh.complete();
+                taskRepository.save(fresh);
+                markBugFixed(fresh);
+                transactionRunner.afterCompletion(
+                        () -> testCaseExecutionScheduler.scheduleAfterTaskCompleted(run.getTaskId()),
+                        () -> {
+                        });
+            } else if (run.getStatus() != RunStatus.INTERRUPTED) {
+                fresh.fail();
+                taskRepository.save(fresh);
+            }
+            return new AttemptFinish(run.getStatus(), fresh.getStatus(), false);
+        });
     }
 
     /** 修复任务成功只把缺陷推进到待验证，是否真正关闭仍由人决定。 */
@@ -220,5 +307,22 @@ public class RunSettlementService {
                 + ",\"status\":\"" + decision.getStatus()
                 + "\",\"effectiveLevel\":\"" + decision.getEffectiveLevel()
                 + "\"}";
+    }
+    private static Instant now() {
+        return Instant.now().truncatedTo(ChronoUnit.MILLIS);
+    }
+
+    /** 一批待下发调整及已经拼好的执行指令。 */
+    public record AdjustmentInstruction(List<TaskAdjustmentId> ids, String prompt) {
+
+        public AdjustmentInstruction {
+            ids = List.copyOf(ids);
+        }
+    }
+
+    /** 一次执行记录收场后的状态；成功但有待调整时会延迟收场。 */
+    public record AttemptFinish(RunStatus runStatus,
+                                TaskStatus taskStatus,
+                                boolean deferredForAdjustment) {
     }
 }

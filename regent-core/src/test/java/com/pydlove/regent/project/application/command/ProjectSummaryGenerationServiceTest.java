@@ -111,5 +111,10 @@ class ProjectSummaryGenerationServiceTest {
         public void update(Project project) {
             rows.put(project.getId().value(), project);
         }
+
+        @Override
+        public void updateDetails(Project project) {
+            rows.put(project.getId().value(), project);
+        }
     }
 }

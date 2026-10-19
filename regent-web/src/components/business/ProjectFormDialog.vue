@@ -3,13 +3,14 @@ import { FolderOpen } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 
 import { ApiError } from '@/api/http'
-import { createProject, listDirectories } from '@/api/projects'
+import { createProject, listDirectories, updateProject } from '@/api/projects'
 import Button from '@/components/ui/button/Button.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import DialogField from '@/components/ui/dialog/DialogField.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import Input from '@/components/ui/input/Input.vue'
 import Select from '@/components/ui/select/Select.vue'
+import Switch from '@/components/ui/switch/Switch.vue'
 
 import DirectoryPickerDialog from './DirectoryPickerDialog.vue'
 import { useToast } from '@/composables/useToast'
@@ -30,7 +31,10 @@ import type { DecisionLevel } from '@/types/task'
  * 表单排法是 macOS 对话框的样子：标签右对齐在左列、控件在右列、说明落在控件下方。
  * 见 DialogField 的注释。
  */
-const emit = defineEmits<{ registered: [project: Project] }>()
+const emit = defineEmits<{
+  registered: [project: Project]
+  updated: [project: Project]
+}>()
 
 const open = defineModel<boolean>('open', { default: false })
 
@@ -38,14 +42,16 @@ const toast = useToast()
 const store = useTaskStore()
 const executionRuntime = useExecutionRuntimeStore()
 // 同一个弹框只挂在 App 上，页面想「知道刚建了什么」得从这个共享位子上读
-const { lastRegistered } = useProjectDialog()
+const { editingProject, lastRegistered, lastUpdated } = useProjectDialog()
 
 const code = ref('')
 const name = ref('')
 const path = ref('')
 const level = ref<string>('L1')
+const enabled = ref(true)
 const error = ref<string | null>(null)
 const saving = ref(false)
+const editing = computed(() => editingProject.value)
 
 const levelOptions = [
   { value: 'L0', label: 'L0 · 完全自主' },
@@ -86,13 +92,15 @@ const canSave = computed(
   () => codeValid.value && name.value.trim().length > 0 && path.value.trim().startsWith('/'),
 )
 
-// 每次打开都清空：上一次填了一半的内容留着，容易被当成占位文字直接提交
+// 注册时清空；编辑时填入当前值。两种模式共用同一个表单，避免字段与校验漂移。
 watch(open, (value) => {
   if (!value) return
-  code.value = ''
-  name.value = ''
-  path.value = ''
-  level.value = 'L1'
+  const project = editingProject.value
+  code.value = project?.code ?? ''
+  name.value = project?.name ?? ''
+  path.value = project?.path ?? ''
+  level.value = project?.defaultDecisionLevel ?? 'L1'
+  enabled.value = project?.enabled ?? true
   error.value = null
   pathError.value = null
   pickerOpen.value = false
@@ -103,25 +111,36 @@ const save = async () => {
   saving.value = true
   error.value = null
   try {
-    const created = await createProject({
-      code: code.value.trim(),
+    const input = {
       name: name.value.trim(),
       path: path.value.trim(),
       defaultDecisionLevel: level.value as DecisionLevel,
-    })
+    }
+    const saved = editingProject.value
+      ? await updateProject(editingProject.value.id, { ...input, enabled: enabled.value })
+      : await createProject({ ...input, code: code.value.trim() })
     // 重新拉而不是本地 push：库里回填了什么（ID、启用状态）由后端说了算，
-    // 而且工具栏的项目下拉要立刻看到这个新项目
+    // 而且工具栏的项目下拉要立刻看到最新名称与状态
     await store.loadProjects()
-    lastRegistered.value = created
     open.value = false
-    emit('registered', created)
-    if (executionRuntime.status?.available === false) {
-      toast.warning(
-        `项目「${created.name}」已注册`,
-        'Codex 尚未就绪，项目资料暂未生成；安装后可在项目页重新生成',
+    if (editingProject.value) {
+      lastUpdated.value = saved
+      emit('updated', saved)
+      toast.success(
+        `项目「${saved.name}」已更新`,
+        saved.enabled ? '项目恢复派发新任务' : '项目已暂停派发，历史任务与资料保持不变',
       )
     } else {
-      toast.success(`项目「${created.name}」已注册`, 'Codex 正在只读分析项目并生成项目资料')
+      lastRegistered.value = saved
+      emit('registered', saved)
+      if (executionRuntime.status?.available === false) {
+        toast.warning(
+          `项目「${saved.name}」已注册`,
+          'Codex 尚未就绪，项目资料暂未生成；安装后可在项目页重新生成',
+        )
+      } else {
+        toast.success(`项目「${saved.name}」已注册`, 'Codex 正在只读分析项目并生成项目资料')
+      }
     }
   } catch (e) {
     // 失败原因留在表单里而不是弹 toast：人正对着这几行输入，改的就是它们
@@ -136,16 +155,26 @@ const save = async () => {
   <Dialog
     v-model:open="open"
     layout="form"
-    title="注册项目"
-    description="项目决定 codex 在哪个目录跑，以及多高的决策必须惊动人。"
+    :title="editing ? '编辑项目' : '注册项目'"
+    :description="editing
+      ? '更新工作区、决策阈值和派发状态；项目标识创建后不可修改。'
+      : '项目决定 codex 在哪个目录跑，以及多高的决策必须惊动人。'"
   >
     <div class="flex flex-col gap-3">
-      <DialogField label="标识" hint="小写字母开头，字母数字下划线，建后不改">
-        <Input v-model="code" placeholder="例如：regent" :invalid="code.length > 0 && !codeValid" />
+      <DialogField
+        label="标识"
+        :hint="editing ? '项目标识创建后不可修改' : '小写字母开头，字母数字下划线，建后不改'"
+      >
+        <Input
+          v-model="code"
+          placeholder="例如：regent"
+          :disabled="editing !== null"
+          :invalid="code.length > 0 && !codeValid"
+        />
       </DialogField>
 
       <DialogField label="名称">
-        <Input v-model="name" placeholder="例如：需求执行平台" />
+        <Input v-model="name" :maxlength="128" placeholder="例如：需求执行平台" />
       </DialogField>
 
       <DialogField label="路径" hint="codex 的工作目录，必须在本机已存在">
@@ -155,6 +184,7 @@ const save = async () => {
           <div class="min-w-0 flex-1">
             <Input
               v-model="path"
+              :maxlength="512"
               placeholder="/Users/you/workspace/my-project"
               :invalid="pathError !== null"
               @blur="checkPath"
@@ -171,16 +201,24 @@ const save = async () => {
         <Select v-model="level" :items="levelOptions" block />
       </DialogField>
 
+      <DialogField
+        v-if="editing"
+        label="派发状态"
+        hint="关闭后不再派发新任务，历史任务与项目资料保持不变"
+      >
+        <Switch v-model="enabled" :label="enabled ? '启用，允许派发' : '已暂停，不派发新任务'" />
+      </DialogField>
+
       <p v-if="error" class="text-caption text-danger">{{ error }}</p>
     </div>
 
-    <!-- 选择器挂在注册弹框里：它只在填路径时需要，开在别处就要多一份「刚才在填哪个项目」的状态 -->
+    <!-- 选择器挂在项目弹框里：它只在填路径时需要，开在别处就要多一份「刚才在填哪个项目」的状态 -->
     <DirectoryPickerDialog v-model:open="pickerOpen" :initial="path" @picked="onPicked" />
 
     <template #footer>
       <Button @click="open = false">取消</Button>
       <Button variant="primary" :disabled="!canSave || saving" @click="save">
-        {{ saving ? '注册中…' : '注册项目' }}
+        {{ saving ? '保存中…' : editing ? '保存修改' : '注册项目' }}
       </Button>
     </template>
   </Dialog>

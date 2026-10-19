@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>连接 Regent 服务</title>
+    <link rel="stylesheet" href="./config.css" />
+  </head>
+  <body>
+    <main class="window">
+      <header class="hero">
+        <span class="logo" aria-hidden="true"><span>R</span><i></i></span>
+        <div>
+          <p class="eyebrow">REGENT AI</p>
+          <h1>连接你的工作台</h1>
+          <p class="subtitle">输入浏览器里正在使用的 Regent 地址。登录状态会安全地保存在本机。</p>
+        </div>
+      </header>
+
+      <form id="server-form">
+        <label for="server-url">服务地址</label>
+        <div class="field">
+          <input
+            id="server-url"
+            name="serverUrl"
+            type="url"
+            inputmode="url"
+            spellcheck="false"
+            autocomplete="url"
+            placeholder="https://regent.example.com"
+            required
+          />
+        </div>
+        <div class="quick-row">
+          <button id="local-button" class="text-button" type="button">使用本机服务</button>
+          <span>默认 http://127.0.0.1:12580</span>
+        </div>
+
+        <p id="error" class="error" role="alert" hidden></p>
+
+        <button id="connect-button" class="primary-button" type="submit">
+          <span id="connect-label">连接并打开</span>
+          <span class="arrow" aria-hidden="true">→</span>
+        </button>
+      </form>
+
+      <footer>
+        <span>支持 HTTP / HTTPS</span>
+        <span>账号与任务数据仍由你的 Regent 服务管理</span>
+      </footer>
+    </main>
+    <script src="./config.js"></script>
+  </body>
+</html>

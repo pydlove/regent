@@ -12,7 +12,7 @@ class DeploymentRunTest {
     @Test
     @DisplayName("部署记录从排队开始，成功后收敛为终态")
     void runsThroughSuccess() {
-        DeploymentRun run = DeploymentRun.queue(snapshot());
+        DeploymentRun run = DeploymentRun.queue(deploymentSnapshot(), serverSnapshot());
         assertEquals(DeploymentRunStatus.QUEUED, run.getStatus());
 
         run.begin();
@@ -27,18 +27,26 @@ class DeploymentRunTest {
     @Test
     @DisplayName("中断可以把未收场的部署收敛掉")
     void interruptsActiveRun() {
-        DeploymentRun run = DeploymentRun.queue(snapshot());
+        DeploymentRun run = DeploymentRun.queue(deploymentSnapshot(), serverSnapshot());
         run.begin();
         run.interrupt("平台重启");
         assertEquals(DeploymentRunStatus.INTERRUPTED, run.getStatus());
         assertTrue(run.getFinishedAt() != null);
     }
 
-    private static DeploymentSnapshot snapshot() {
+    private static DeploymentSnapshot deploymentSnapshot() {
         Deployment deployment = Deployment.create(
-                ProjectId.of(7L), "生产", "api.example.com", 22, "root", DeploymentAuthType.KEY,
+                ProjectId.of(7L), DeploymentServerId.of(9L), "生产",
                 "/opt/app", "deploy.sh", "echo ok");
         deployment.assignIdentity(DeploymentId.of(1L));
         return deployment.snapshot();
+    }
+
+    private static DeploymentServerSnapshot serverSnapshot() {
+        DeploymentServer server = DeploymentServer.create(
+                ProjectId.of(7L), "生产服务器", "api.example.com", 22,
+                "root", DeploymentAuthType.KEY);
+        server.assignIdentity(DeploymentServerId.of(9L));
+        return server.snapshot();
     }
 }

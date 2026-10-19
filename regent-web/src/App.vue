@@ -12,14 +12,16 @@ import {
   ListChecks,
   PanelLeftOpen,
   Plus,
+  RefreshCw,
   ServerCog,
+  Server,
   Settings,
   TriangleAlert,
   Workflow,
 } from '@lucide/vue'
 import { TooltipProvider } from 'reka-ui'
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import AppFooter from '@/components/business/AppFooter.vue'
 import CodexInstallDialog from '@/components/business/CodexInstallDialog.vue'
@@ -27,6 +29,7 @@ import FailedTaskNotifications from '@/components/business/FailedTaskNotificatio
 import ProjectFormDialog from '@/components/business/ProjectFormDialog.vue'
 import UserProfileCard from '@/components/business/UserProfileCard.vue'
 import UserProfileDialog from '@/components/business/UserProfileDialog.vue'
+import { buttonVariants } from '@/components/ui/button/button.variants'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
@@ -43,6 +46,7 @@ import { useAuthStore } from '@/stores/useAuthStore'
 import { useDecisionStore } from '@/stores/useDecisionStore'
 import { useExecutionRuntimeStore } from '@/stores/useExecutionRuntimeStore'
 import { useTaskStore } from '@/stores/useTaskStore'
+import { useWebUpdate } from '@/composables/useWebUpdate'
 
 const { preference, setTheme } = useTheme()
 const route = useRoute()
@@ -77,6 +81,12 @@ const themeOptions = [
 const store = useTaskStore()
 const decisionStore = useDecisionStore()
 const auth = useAuthStore()
+const {
+  latest: latestWebRelease,
+  hasUpdate: hasWebUpdate,
+  dismiss: dismissWebUpdate,
+} = useWebUpdate()
+const reloadPage = () => window.location.reload()
 const executionRuntime = useExecutionRuntimeStore()
 const { openDialog: openCodexInstallDialog } = useCodexInstallDialog()
 
@@ -128,7 +138,8 @@ const navGroups = computed(() => [
         badgeLabel: `共 ${decisionStore.pendingTotal} 条待批决策`,
       },
       { label: '计划', to: '/plans', icon: CalendarClock },
-      { label: '部署', to: '/deployments', icon: ServerCog },
+  { label: '部署', to: '/deployments', icon: ServerCog },
+  { label: '服务器', to: '/servers', icon: Server },
       { label: '测试用例', to: '/test-cases', icon: FlaskConical },
     ],
   },
@@ -151,6 +162,7 @@ watch(
   (authenticated) => {
     if (!authenticated) {
       executionRuntime.clear()
+      store.clearProjectScope()
       return
     }
     void store.loadStats()
@@ -291,17 +303,53 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
           </div>
           <FailedTaskNotifications />
           <Tooltip content="使用说明">
-            <IconButton label="使用说明" size="lg" @click="router.push('/help')">
+            <RouterLink
+              to="/help"
+              aria-label="使用说明"
+              title="使用说明"
+              :class="[buttonVariants({ variant: 'ghost', size: 'lg' }), 'w-control-lg px-0']"
+            >
               <Icon :as="CircleHelp" size="large" />
-            </IconButton>
+            </RouterLink>
           </Tooltip>
           <Tooltip content="设置">
-            <IconButton label="设置" size="lg" @click="router.push('/settings')">
+            <RouterLink
+              to="/settings"
+              aria-label="设置"
+              title="设置"
+              :class="[buttonVariants({ variant: 'ghost', size: 'lg' }), 'w-control-lg px-0']"
+            >
               <Icon :as="Settings" size="large" />
-            </IconButton>
+            </RouterLink>
           </Tooltip>
         </template>
       </Toolbar>
+
+      <div
+        v-if="hasWebUpdate"
+        role="status"
+        class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-accent/25 bg-accent/8 px-4 py-2 text-caption text-label"
+      >
+        <Icon :as="RefreshCw" size="inline" class="shrink-0 text-accent" />
+        <span class="min-w-0 flex-1">
+          工作台有新版本
+          <span class="tnum font-emphasis">{{ latestWebRelease?.version }}</span>，刷新页面即可使用。
+        </span>
+        <button
+          type="button"
+          class="font-emphasis text-accent underline underline-offset-2"
+          @click="reloadPage"
+        >
+          立即刷新
+        </button>
+        <button
+          type="button"
+          class="text-label-secondary hover:text-label"
+          @click="dismissWebUpdate"
+        >
+          稍后
+        </button>
+      </div>
 
       <div
         v-if="executionRuntime.unavailable"

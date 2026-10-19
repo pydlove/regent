@@ -116,7 +116,6 @@ public class TaskRunService {
             return executeRounds(execution);
         } catch (RuntimeException e) {
             failRun(execution.run, execution.recorder, e);
-            settlement.finishTask(taskId, RunStatus.FAILED);
             return execution.run;
         }
     }
@@ -144,7 +143,7 @@ public class TaskRunService {
                 .map(TaskAttachment::storagePath)
                 .toList();
         EnvironmentContext environment = EnvironmentContext.resolve(
-                environmentEntryRepository.findApplicableTo(project.id()));
+                environmentEntryRepository.findApplicableTo(project.ownerId(), project.id()));
         return new Execution(task, project, run, recorder, threadId, prompt, images, plugins, environment);
     }
 
@@ -160,17 +159,27 @@ public class TaskRunService {
     }
 
     private Optional<TaskRun> executeRound(Execution execution) {
+        RunSettlementService.AdjustmentInstruction adjustment =
+                settlement.pendingAdjustmentInstruction(execution.task.getId()).orElse(null);
+        if (adjustment != null) {
+            execution.recorder.record("platform.adjustment", adjustmentPayload(adjustment));
+        }
+        String prompt = execution.prompt
+                + (adjustment == null ? "" : "\n\n---\n\n" + adjustment.prompt());
         ExecResult result = agentExecutor.execute(
                 new ExecRequest(
                         execution.task.getProjectId(),
                         execution.project.path(),
-                        execution.prompt + execution.plugins.promptSection() + execution.environment.promptSection(),
+                        prompt + execution.plugins.promptSection() + execution.environment.promptSection(),
                         execution.threadId,
                         timeout,
                         execution.images,
                         execution.environment.values(),
                         execution.run.getBranchName()),
                 execution.recorder);
+        if (adjustment != null) {
+            settlement.markAdjustmentsApplied(adjustment.ids(), execution.run.getId());
+        }
         execution.threadId = settlement.adoptThreadId(
                 execution.task.getId(), result.threadId(), execution.threadId);
         applyRequestedBranch(execution, result);
@@ -179,7 +188,7 @@ public class TaskRunService {
         if (result.status() == RunStatus.BLOCKED && settlement.stillRunning(execution.task.getId())) {
             return handleBlockedResult(execution, result);
         }
-        return Optional.of(finishTerminal(execution, result));
+        return finishTerminal(execution, result);
     }
 
     private void applyRequestedBranch(Execution execution, ExecResult result) {
@@ -220,16 +229,16 @@ public class TaskRunService {
         return execution.run;
     }
 
-    private TaskRun finishTerminal(Execution execution, ExecResult result) {
-        execution.run.finish(result);
-        taskRunRepository.save(execution.run);
-        if (result.status() == RunStatus.INTERRUPTED) {
-            // 平台关闭打断了进程，不是任务业务失败。任务留在 RUNNING，
-            // 由下次启动的恢复服务放回队列并续跑。
-            return execution.run;
+    private Optional<TaskRun> finishTerminal(Execution execution, ExecResult result) {
+        RunSettlementService.AttemptFinish finish = settlement.finishAttempt(execution.run, result);
+        if (finish.deferredForAdjustment()) {
+            execution.recorder.record("platform.adjustment-deferred",
+                    "{\"reason\":\"success-reported-with-pending-adjustments\"}");
+            execution.prompt = "上一轮执行已结束，但平台收到了新的调整方向。"
+                    + "请接着同一会话继续，不要重新开始。";
+            return Optional.empty();
         }
-        settlement.finishTask(execution.task.getId(), execution.run.getStatus());
-        return execution.run;
+        return Optional.of(execution.run);
     }
 
     private void failRun(TaskRun run, EventRecorder recorder, RuntimeException cause) {
@@ -237,10 +246,9 @@ public class TaskRunService {
             return;
         }
         recorder.record("platform.error", errorPayload(cause));
-        run.finish(new ExecResult(RunStatus.FAILED, null, null, TokenUsage.ZERO,
+        settlement.finishAttempt(run, new ExecResult(RunStatus.FAILED, null, null, TokenUsage.ZERO,
                 "执行编排异常：" + cause.getMessage(), cause.getClass().getSimpleName() + ": " + cause.getMessage(),
                 true, List.of(), List.of(), null));
-        taskRunRepository.save(run);
     }
 
     private Task loadTask(TaskId taskId) {
@@ -278,6 +286,14 @@ public class TaskRunService {
 
     private static String errorPayload(RuntimeException cause) {
         return "{\"error\":\"" + cause.getClass().getSimpleName() + "\"}";
+    }
+
+    private static String adjustmentPayload(RunSettlementService.AdjustmentInstruction adjustment) {
+        return "{\"adjustmentIds\":["
+                + adjustment.ids().stream()
+                .map(id -> Long.toString(id.value()))
+                .collect(java.util.stream.Collectors.joining(","))
+                + "]}";
     }
 
     private static Instant now() {

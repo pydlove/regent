@@ -2,7 +2,9 @@ package com.pydlove.regent.deployment.infrastructure.persistence;
 
 import com.pydlove.regent.deployment.domain.model.Deployment;
 import com.pydlove.regent.deployment.domain.model.DeploymentId;
+import com.pydlove.regent.deployment.domain.model.DeploymentServerId;
 import com.pydlove.regent.deployment.domain.repository.DeploymentRepository;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.shared.domain.DomainException;
 import org.springframework.dao.DuplicateKeyException;
@@ -31,6 +33,12 @@ public class MyBatisDeploymentRepository implements DeploymentRepository {
     }
 
     @Override
+    public Optional<Deployment> findByIdOwned(DeploymentId id, UserId ownerId) {
+        return Optional.ofNullable(mapper.selectByIdOwned(id.value(), ownerId.value()))
+                .map(DeploymentDataMapper::toDomain);
+    }
+
+    @Override
     public Optional<Deployment> findByIdForUpdate(DeploymentId id) {
         return Optional.ofNullable(mapper.selectByIdForUpdate(id.value()))
                 .map(DeploymentDataMapper::toDomain);
@@ -38,7 +46,13 @@ public class MyBatisDeploymentRepository implements DeploymentRepository {
 
     @Override
     public List<Deployment> findAll(ProjectId projectId) {
-        return mapper.selectAll(projectId == null ? null : projectId.value()).stream()
+        return findAll(projectId, null);
+    }
+
+    @Override
+    public List<Deployment> findAll(ProjectId projectId, UserId ownerId) {
+        return mapper.selectAll(projectId == null ? null : projectId.value(),
+                        ownerId == null ? null : ownerId.value()).stream()
                 .map(DeploymentDataMapper::toDomain)
                 .toList();
     }
@@ -47,6 +61,18 @@ public class MyBatisDeploymentRepository implements DeploymentRepository {
     public boolean existsByName(ProjectId projectId, String name, DeploymentId excludingId) {
         return mapper.countByName(projectId.value(), name,
                 excludingId == null ? null : excludingId.value()) > 0;
+    }
+
+    @Override
+    public List<DeploymentId> findIdsByServerId(DeploymentServerId serverId) {
+        return mapper.selectIdsByServerId(serverId.value()).stream()
+                .map(DeploymentId::of)
+                .toList();
+    }
+
+    @Override
+    public int countByServerId(DeploymentServerId serverId) {
+        return mapper.countByServerId(serverId.value());
     }
 
     @Override

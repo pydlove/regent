@@ -2,15 +2,21 @@ package com.pydlove.regent.boot.persistence;
 
 import com.pydlove.regent.execution.domain.model.BranchApprovalState;
 import com.pydlove.regent.execution.domain.model.Task;
+import com.pydlove.regent.execution.domain.model.TaskAdjustment;
+import com.pydlove.regent.execution.domain.model.TaskAdjustmentStatus;
 import com.pydlove.regent.execution.domain.model.TaskId;
+import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
+import com.pydlove.regent.execution.domain.repository.TaskAdjustmentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskListItemPage;
 import com.pydlove.regent.execution.domain.repository.TaskQuery;
 import com.pydlove.regent.execution.domain.repository.TaskQueryRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
+import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
+import com.pydlove.regent.shared.kernel.TokenUsage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,6 +26,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Map;
 
@@ -52,6 +61,12 @@ class TaskPersistenceIT {
 
     @Autowired
     private TaskQueryRepository taskQueryRepository;
+
+    @Autowired
+    private TaskAdjustmentRepository taskAdjustmentRepository;
+
+    @Autowired
+    private TaskRunRepository taskRunRepository;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -233,6 +248,12 @@ class TaskPersistenceIT {
 
         assertEquals(1, page.total(), "另一个项目的任务不该混进来");
         assertEquals(mine.getId().value(), page.items().get(0).id());
+        assertEquals(1L, taskQueryRepository
+                .countGroupByStatus(ProjectId.of(PROBE_PROJECT_ID))
+                .get(TaskStatus.PENDING));
+        assertEquals(1L, taskQueryRepository
+                .countGroupByStatus(ProjectId.of(otherProjectId))
+                .get(TaskStatus.PENDING));
     }
 
     @Test
@@ -255,10 +276,54 @@ class TaskPersistenceIT {
     void 状态分布() {
         taskRepository.save(Task.manual(ProjectId.of(PROBE_PROJECT_ID), "IT 统计任务", "指令", 0));
 
-        Map<TaskStatus, Long> counts = taskQueryRepository.countGroupByStatus();
+        Map<TaskStatus, Long> counts = taskQueryRepository.countGroupByStatus(null);
 
         assertTrue(counts.containsKey(TaskStatus.PENDING));
         assertTrue(counts.get(TaskStatus.PENDING) >= 1);
+    }
+
+    @Test
+    @DisplayName("工作台状态、Token 与趋势查询按项目隔离")
+    void 工作台统计按项目隔离() {
+        long otherProjectId = PROBE_PROJECT_ID + 1;
+        jdbcTemplate.update("""
+                INSERT INTO project (id, code, name, path, default_decision_level, enabled, deleted, created_at, updated_at)
+                VALUES (?, 'it_stats_other', 'IT 统计另一个项目', '/tmp/it-stats-other', 'L1', 1, 0,
+                        UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
+                ON DUPLICATE KEY UPDATE name = VALUES(name)
+                """, otherProjectId);
+
+        Task mine = Task.manual(ProjectId.of(PROBE_PROJECT_ID), "IT 我的统计任务", "指令", 0);
+        Task theirs = Task.manual(ProjectId.of(otherProjectId), "IT 别人的统计任务", "指令", 0);
+        taskRepository.save(mine);
+        taskRepository.save(theirs);
+        mine.dispatch(null);
+        mine.complete();
+        theirs.dispatch(null);
+        theirs.complete();
+        taskRepository.save(mine);
+        taskRepository.save(theirs);
+        jdbcTemplate.update("""
+                INSERT INTO task_run
+                    (task_id, attempt_no, status, token_input, token_cached_input, token_output,
+                     started_at, finished_at, created_at)
+                VALUES
+                    (?, 1, 'SUCCESS', 100, 20, 30,
+                     DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 MINUTE), UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)),
+                    (?, 1, 'SUCCESS', 900, 80, 70,
+                     DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 MINUTE), UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
+                """, mine.getId().value(), theirs.getId().value());
+
+        ProjectId projectId = ProjectId.of(PROBE_PROJECT_ID);
+        assertEquals(1L, taskQueryRepository.countGroupByStatus(projectId).get(TaskStatus.DONE));
+        assertEquals(TokenUsage.of(100, 20, 30), taskQueryRepository.summarizeTokens(projectId));
+
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Shanghai"));
+        var trend = taskQueryRepository.countCompletionPerDay(
+                projectId, today, today, ZoneOffset.ofHours(8));
+        assertEquals(1, trend.size());
+        assertEquals(1L, trend.get(0).done());
+        assertEquals(0L, trend.get(0).failed());
     }
 
     @Test
@@ -343,5 +408,29 @@ class TaskPersistenceIT {
         ghost.assignIdentity(TaskId.of(999_999L));
 
         assertThrows(DomainException.class, () -> taskRepository.save(ghost));
+    }
+
+    @Test
+    @DisplayName("调整方向往返一致，下发后记录执行记录与时间")
+    void 调整方向往返() {
+        Task task = Task.manual(ProjectId.of(PROBE_PROJECT_ID), "IT 调整方向", "原指令", 0);
+        taskRepository.save(task);
+        task.dispatch(null);
+        taskRepository.save(task);
+
+        TaskAdjustment adjustment = taskAdjustmentRepository.save(
+                TaskAdjustment.temporary(task.getId(), "补一套边界测试"));
+
+        assertTrue(taskAdjustmentRepository.hasPending(task.getId()));
+        assertEquals(1, taskAdjustmentRepository.findPendingByTask(task.getId()).size());
+
+        TaskRun run = TaskRun.start(task.getId(), task.getAttemptCount(), null);
+        taskRunRepository.save(run);
+        taskAdjustmentRepository.markApplied(adjustment.getId(), run.getId(), java.time.Instant.now());
+
+        TaskAdjustment loaded = taskAdjustmentRepository.findById(adjustment.getId()).orElseThrow();
+        assertEquals(TaskAdjustmentStatus.APPLIED, loaded.getStatus());
+        assertEquals(run.getId(), loaded.getAppliedRunId().orElseThrow());
+        assertTrue(loaded.getAppliedAt().isPresent());
     }
 }

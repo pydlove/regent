@@ -29,7 +29,7 @@ Regent 换个做法：需求一次性录进平台，平台逐个调起 Codex 执
 | 插件能力库 | 把 Kafka 读取、数据库工具等组件存成固定版本能力包，执行时直接交给 AI 复用 |
 | 项目目录 | 可注册普通目录、单仓库或包含多个 Git 仓库的父目录；只有根目录本身是有效 Git 仓库时才记录分支 |
 | 项目资料 | 注册项目后由 Codex 只读分析工作区，自动生成技术栈、目录、启动验证和风险说明 |
-| 远程部署 | 按项目录入服务器 SSH 信息和加密密码，上传部署脚本后由平台拉起 OpenSSH 执行；运行时只需确认，密码不会进入部署/执行快照或日志 |
+| 远程部署 | 按项目维护可复用服务器和加密密码，远程目录由配置统一提供；脚本保存和执行前会做逐行规范检测，不合规脚本不能运行，密码不会进入部署/执行快照或日志 |
 | 双通道通知 | 邮件为基座，微信/飞书推送为增强，通道失败逐级降级 |
 
 ## 决策分级
@@ -62,8 +62,58 @@ Regent 换个做法：需求一次性录进平台，平台逐个调起 Codex 执
 - 后端 <http://127.0.0.1:8787/actuator/health>
 - 日志 `~/.regent/logs/`（pid 与日志都写 `~/.regent/`，不落仓库）
 
+桌面安装包下载页是公开的 `/download`，登录页和帮助页均有入口。发布时把安装包直链配置到
+`VITE_DOWNLOAD_MACOS_URL` / `VITE_DOWNLOAD_WINDOWS_URL`，或由后端发布清单提供。未发布对应系统
+安装包时页面显示“安装包暂未发布”，并引导直接使用浏览器版，不再跳转外部空页面。
+
+桌面客户端源码在 `regent-desktop/`，使用 Electron 包装现有 Web 工作台。首次启动填写 Regent
+服务地址，客户端会持久化登录状态。构建发布包：
+
+```bash
+cd regent-desktop
+npm install --registry=https://registry.npmmirror.com --strict-ssl=false
+npm run build:release
+```
+
+产物为 macOS 通用架构 `.dmg` 和 Windows x64 `.zip` 便携版。macOS 未公证前首次启动需要
+右键应用选择“打开”；正式对外分发前仍需配置 Apple Developer ID / 公证和 Windows 代码签名证书。
+
+日常发布可直接双击 `scripts/release.command`，按提示输入版本号和更新说明。脚本会自动完成：
+
+- 更新当前版本和历史版本记录；
+- 运行前端类型检查、单测和生产构建；
+- 构建带发布码的 macOS / Windows 安装包；
+- 写入 `~/.regent/downloads/latest.json`；
+- 可选调用公网部署脚本。
+
+桌面客户端检测到新发布码后会提示升级；确认后自动下载安装包、校验 SHA-256、替换客户端并重启。
+
+更完整的本地图形化发布入口：
+
+```bash
+./release-center/start.sh
+```
+
+打开 <http://127.0.0.1:12600/> 后，可输入版本号并调用本机 Codex 生成发布摘要与更新项；
+人工确认后才会执行构建、发布清单写入、公网部署和 Git 标签创建。发布中心由 launchd 托管，
+关闭终端不会退出。
+
+也可以非交互执行：
+
+```bash
+node scripts/release-version.mjs \
+  --version feature_V1.0.2_R100B003 \
+  --notes "修复登录中继与优化安装流程"
+```
+
+没有 CDN 时，把安装包和 `latest.json` 放到后端 `~/.regent/downloads`，执行
+`node scripts/publish-release.mjs --version ... --macos ... --windows ...` 发布；下载页和浏览器更新提醒会读取
+`/api/release/latest`。
+
 需要 JDK 17、Maven 3.9+、Node 20+、本机 MySQL（`regent` / `regent_test` 两个 schema，
 凭据写在已被 gitignore 的 `regent-boot/src/main/resources/application-local.yml`）。
+配置文件中的数据库/邮件密码支持 `ENC(v1:...)` 密文；主密钥从 `REGENT_CONFIG_KEY`
+或 `~/.regent/config.key` 读取，明文凭据和密钥都不进仓库。
 邮箱注册还需要在同一个文件里配置 `spring.mail.*` 的 SMTP 发件账号和授权码；也可以用
 `SPRING_MAIL_HOST`、`SPRING_MAIL_PORT`、`SPRING_MAIL_USERNAME`、`SPRING_MAIL_PASSWORD`
 环境变量覆盖。验证码 5 分钟有效、60 秒内不可重发、同一邮箱每天最多 10 次。
@@ -145,7 +195,7 @@ deploy/                 本地启停脚本 + 远程发布脚本
   AI 主动请求时才在支持的仓库创建隔离分支）、MyBatis 仓储
 - 接口：`GET /api/tasks`（支持 `status` / `projectId` / `keyword` / 分页）、`POST /api/tasks`（人工录入）、
   `PUT /api/tasks/{id}`（编辑指令与优先级，已完成任务拒绝）、
-  `/api/tasks/stats`、`GET /api/tasks/{id}`、
+  `/api/tasks/stats|token-usage|trend`（均可带 `projectId`）、`GET /api/tasks/{id}`、
   `POST /api/tasks/{id}/retry|cancel|dispatch`、`GET /api/tasks/{id}/runs`、`GET /api/runs/{id}`、
   `POST /api/tasks/{id}/attachments`（贴图，`multipart/form-data`）、`GET /api/tasks/{id}/attachments`、
   `GET /api/attachments/{id}/content`（原图）、
@@ -155,11 +205,15 @@ deploy/                 本地启停脚本 + 远程发布脚本
   `POST /api/auth/email-codes`（发送邮箱注册验证码）、`POST /api/auth/register`（邮箱验证码注册）、
   `POST /api/auth/login|logout`、`GET /api/auth/me`（会话认证，登录支持邮箱或旧用户名；
   `rememberMe` 开启 180 天持久登录，剩余有效期过半后自动顺延）、
-  `GET /api/decisions`、`POST /api/decisions/{id}/approve|reject`、
+  `GET /api/decisions`（支持等级 / 范围 / 项目 / 关键词 / 分页）、`POST /api/decisions/{id}/approve|reject`、
   `GET|POST /api/plugins`、`PUT /api/plugins/{id}`、`PUT /api/plugins/{id}/enabled`（插件库与版本）、
   `GET|PUT /api/tasks/{id}/plugins`（任务固定版本绑定）、
-  `GET /api/bugs`（支持范围 / 严重级 / 关键词 / 分页）、`POST /api/bugs`（人工录入）、
+  `GET /api/bugs`（支持范围 / 严重级 / 项目 / 关键词 / 分页）、`POST /api/bugs`（人工录入）、
   `POST /api/bugs/{id}/fix-task`（创建并派发修复任务、回填修复任务号）、
+  `GET|POST /api/deployment-servers`、`GET|PUT|DELETE /api/deployment-servers/{id}`
+  （项目级可复用服务器，密码只写不读）、
+  `GET|POST /api/deployments`、`PUT|DELETE /api/deployments/{id}`、
+  `POST /api/deployments/{id}/run`、`GET /api/deployments/{id}/runs`、
   **外部执行者**：`GET /api/agent/contract(.md)`（协议全文 + 出参 schema）、
   `GET /api/agent/tasks?project=…`（可领清单）、`POST /api/agent/tasks/claim`、
   `POST /api/agent/runs/{id}/heartbeat`、`POST /api/agent/runs/{id}/report`
@@ -167,7 +221,7 @@ deploy/                 本地启停脚本 + 远程发布脚本
   **项目管理页**（项目画像、Codex 生成资料 + 最近任务）与「注册项目」（入口在工具栏项目下拉右边、项目页、
   以及一个项目都没有时的新建任务弹框里；路径能手打、也能从本机目录树里选）、按项目筛选、决策审批闭环、
   **运行记录面板与事件流弹框**、**详情里的附件缩略图与看图弹框**、**执行设置弹框**、
-  **插件库与任务插件绑定**
+  **插件库与任务插件绑定**、**服务器库与部署脚本服务器复用**
 - 测试：`regent-core` 单测（毫秒级反馈回路）+ 适配器 11 个 + 26 条集成测试
   （真 MySQL、真 Git、假 codex 脚本回放 JSONL）+ 7 条 ArchUnit 架构守卫
 

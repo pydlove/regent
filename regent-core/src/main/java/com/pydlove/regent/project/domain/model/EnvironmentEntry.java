@@ -1,5 +1,6 @@
 package com.pydlove.regent.project.domain.model;
 
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.shared.domain.DomainException;
 
 import java.time.Instant;
@@ -23,6 +24,7 @@ public class EnvironmentEntry {
     private static final int MAX_TAG_LENGTH = 32;
 
     private EnvironmentId id;
+    private final UserId userId;
     private EnvironmentScope scope;
     private ProjectId projectId;
     private String key;
@@ -34,6 +36,7 @@ public class EnvironmentEntry {
     private Instant updatedAt;
 
     private EnvironmentEntry(EnvironmentId id,
+                             UserId userId,
                              EnvironmentScope scope,
                              ProjectId projectId,
                              String key,
@@ -44,6 +47,7 @@ public class EnvironmentEntry {
                              Instant createdAt,
                              Instant updatedAt) {
         this.id = id;
+        this.userId = userId;
         apply(scope, projectId, key, value, tags, description, secret);
         this.createdAt = requireNotNull(createdAt, "创建时间");
         this.updatedAt = requireNotNull(updatedAt, "更新时间");
@@ -55,7 +59,7 @@ public class EnvironmentEntry {
                                           String value,
                                           List<String> tags,
                                           String description) {
-        return create(scope, projectId, key, value, tags, description, false);
+        return create(null, scope, projectId, key, value, tags, description, false);
     }
 
     public static EnvironmentEntry create(EnvironmentScope scope,
@@ -65,9 +69,21 @@ public class EnvironmentEntry {
                                           List<String> tags,
                                           String description,
                                           boolean secret) {
+        return create(null, scope, projectId, key, value, tags, description, secret);
+    }
+
+    /** 创建一条归属于指定账号的环境信息。 */
+    public static EnvironmentEntry create(UserId userId,
+                                          EnvironmentScope scope,
+                                          ProjectId projectId,
+                                          String key,
+                                          String value,
+                                          List<String> tags,
+                                          String description,
+                                          boolean secret) {
         Instant now = Instant.now();
         return new EnvironmentEntry(
-                null, scope, projectId, key, value, tags, description, secret, now, now);
+                null, userId, scope, projectId, key, value, tags, description, secret, now, now);
     }
 
     /** 从持久化数据重建，保留原始创建与更新时间。 */
@@ -81,8 +97,23 @@ public class EnvironmentEntry {
                                            boolean secret,
                                            Instant createdAt,
                                            Instant updatedAt) {
+        return restore(id, null, scope, projectId, key, value, tags, description, secret,
+                createdAt, updatedAt);
+    }
+
+    public static EnvironmentEntry restore(EnvironmentId id,
+                                           UserId userId,
+                                           EnvironmentScope scope,
+                                           ProjectId projectId,
+                                           String key,
+                                           String value,
+                                           List<String> tags,
+                                           String description,
+                                           boolean secret,
+                                           Instant createdAt,
+                                           Instant updatedAt) {
         return new EnvironmentEntry(
-                id, scope, projectId, key, value, tags, description, secret, createdAt, updatedAt);
+                id, userId, scope, projectId, key, value, tags, description, secret, createdAt, updatedAt);
     }
 
     public void update(EnvironmentScope scope,
@@ -127,6 +158,10 @@ public class EnvironmentEntry {
 
     public EnvironmentId getId() {
         return id;
+    }
+
+    public UserId getUserId() {
+        return userId;
     }
 
     public EnvironmentScope getScope() {

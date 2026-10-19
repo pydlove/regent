@@ -1,4 +1,4 @@
-import { get, post, postJson } from '@/api/http'
+import { get, post, postJson, putJson } from '@/api/http'
 import type { DirectoryListing, Project, ProjectGitBranch } from '@/types/api'
 import type { DecisionLevel } from '@/types/task'
 
@@ -7,6 +7,10 @@ export type CreateProjectInput = {
   name: string
   path: string
   defaultDecisionLevel: DecisionLevel
+}
+
+export type UpdateProjectInput = Omit<CreateProjectInput, 'code'> & {
+  enabled: boolean
 }
 
 /** 全量项目列表。后端刻意不分页 —— 项目是平台里数量最少的东西。 */
@@ -19,6 +23,10 @@ export const listProjects = () => get<Project[]>('/projects')
  * 而不是等到第一次派发。失败原因原样透传给用户。
  */
 export const createProject = (input: CreateProjectInput) => postJson<Project>('/projects', input)
+
+/** 编辑项目画像；项目标识创建后不可修改。 */
+export const updateProject = (id: number, input: UpdateProjectInput) =>
+  putJson<Project>(`/projects/${id}`, input)
 
 /** 重新调用 Codex 只读分析项目；生成过程本身异步进行。 */
 export const regenerateProjectSummary = (id: number) =>

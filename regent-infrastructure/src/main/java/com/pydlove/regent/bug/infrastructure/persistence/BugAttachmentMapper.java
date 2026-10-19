@@ -11,5 +11,7 @@ public interface BugAttachmentMapper {
 
     BugAttachmentData selectById(@Param("id") long id);
 
+    BugAttachmentData selectByIdOwned(@Param("id") long id, @Param("ownerId") long ownerId);
+
     List<BugAttachmentData> selectByBug(@Param("bugId") long bugId);
 }

@@ -71,6 +71,49 @@ class ProjectTest {
     }
 
     @Test
+    @DisplayName("编辑只改允许的画像字段，项目标识保持不变")
+    void updatesEditableProfileFields() {
+        Project project = register("app_audit", "审计平台", "/tmp/old");
+
+        project.updateDetails("安全审计平台", "/tmp/new", DecisionLevel.L3, false);
+
+        assertEquals("app_audit", project.getCode());
+        assertEquals("安全审计平台", project.getName());
+        assertEquals("/tmp/new", project.getPath());
+        assertEquals(DecisionLevel.L3, project.getDefaultDecisionLevel());
+        assertFalse(project.isEnabled());
+    }
+
+    @Test
+    @DisplayName("编辑校验失败时不留下半更新状态")
+    void rejectsInvalidEditWithoutPartialMutation() {
+        Project project = register("app_audit", "审计平台", "/tmp/old");
+
+        assertThrows(DomainException.class,
+                () -> project.updateDetails("新名称", "relative/path", DecisionLevel.L3, false));
+        assertThrows(DomainException.class,
+                () -> project.updateDetails(" ", "/tmp/new", DecisionLevel.L3, false));
+
+        assertEquals("审计平台", project.getName());
+        assertEquals("/tmp/old", project.getPath());
+        assertEquals(DecisionLevel.L1, project.getDefaultDecisionLevel());
+        assertTrue(project.isEnabled());
+    }
+
+    @Test
+    @DisplayName("从数据库恢复时保留启用状态")
+    void restoresEnabledFlag() {
+        Project project = Project.restore(
+                ProjectId.of(9L), "app_audit", "审计平台", "/tmp/x",
+                null, null, DecisionLevel.L2, false,
+                ProjectSummaryStatus.NOT_GENERATED, null, null, null,
+                java.time.Instant.parse("2026-10-01T00:00:00Z"),
+                java.time.Instant.parse("2026-10-02T00:00:00Z"));
+
+        assertFalse(project.isEnabled());
+    }
+
+    @Test
     @DisplayName("项目资料只能按生成中 → 可用推进，并记录生成时间")
     void completesSummaryFromGeneratingState() {
         Project project = register("app_audit", "审计平台", "/tmp/x");

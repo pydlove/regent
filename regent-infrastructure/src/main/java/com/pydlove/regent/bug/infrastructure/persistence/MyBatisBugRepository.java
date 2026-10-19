@@ -3,6 +3,7 @@ package com.pydlove.regent.bug.infrastructure.persistence;
 import com.pydlove.regent.bug.domain.model.Bug;
 import com.pydlove.regent.bug.domain.model.BugId;
 import com.pydlove.regent.bug.domain.repository.BugRepository;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.shared.domain.DomainException;
 import org.springframework.stereotype.Repository;
 
@@ -21,6 +22,12 @@ public class MyBatisBugRepository implements BugRepository {
     @Override
     public Optional<Bug> findById(BugId id) {
         return Optional.ofNullable(bugMapper.selectDataById(id.value()))
+                .map(BugDataMapper::toDomain);
+    }
+
+    @Override
+    public Optional<Bug> findByIdOwned(BugId id, UserId ownerId) {
+        return Optional.ofNullable(bugMapper.selectDataByIdOwned(id.value(), ownerId.value()))
                 .map(BugDataMapper::toDomain);
     }
 

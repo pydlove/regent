@@ -3,13 +3,19 @@
 <mapper namespace="com.pydlove.regent.plan.infrastructure.persistence.PlanMapper">
 
     <sql id="columns">
-        id, name, status, scheduled_at, started_at, finished_at, created_at, updated_at
+        id, user_id, name, status, scheduled_at, started_at, finished_at, created_at, updated_at
     </sql>
 
     <select id="selectById" resultType="com.pydlove.regent.plan.infrastructure.persistence.PlanData">
         SELECT <include refid="columns"/>
         FROM plan
         WHERE id = #{id}
+    </select>
+
+    <select id="selectByIdOwned" resultType="com.pydlove.regent.plan.infrastructure.persistence.PlanData">
+        SELECT <include refid="columns"/>
+        FROM plan
+        WHERE id = #{id} AND user_id = #{ownerId}
     </select>
 
     <select id="selectByIdForUpdate" resultType="com.pydlove.regent.plan.infrastructure.persistence.PlanData">
@@ -22,6 +28,13 @@
     <select id="selectAll" resultType="com.pydlove.regent.plan.infrastructure.persistence.PlanData">
         SELECT <include refid="columns"/>
         FROM plan
+        ORDER BY created_at DESC, id DESC
+    </select>
+
+    <select id="selectAllOwned" resultType="com.pydlove.regent.plan.infrastructure.persistence.PlanData">
+        SELECT <include refid="columns"/>
+        FROM plan
+        WHERE user_id = #{ownerId}
         ORDER BY created_at DESC, id DESC
     </select>
 
@@ -42,8 +55,8 @@
     </select>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO plan (name, status, scheduled_at, started_at, finished_at, created_at, updated_at)
-        VALUES (#{name}, #{status}, #{scheduledAt}, #{startedAt}, #{finishedAt}, #{createdAt}, #{updatedAt})
+        INSERT INTO plan (user_id, name, status, scheduled_at, started_at, finished_at, created_at, updated_at)
+        VALUES (#{userId}, #{name}, #{status}, #{scheduledAt}, #{startedAt}, #{finishedAt}, #{createdAt}, #{updatedAt})
     </insert>
 
     <insert id="insertTask">

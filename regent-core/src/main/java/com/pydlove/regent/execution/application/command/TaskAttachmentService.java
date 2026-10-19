@@ -5,6 +5,7 @@ import com.pydlove.regent.execution.domain.model.TaskAttachment;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.repository.TaskAttachmentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.domain.port.AttachmentStorage;
 import com.pydlove.regent.shared.kernel.AttachmentScope;
@@ -44,7 +45,11 @@ public class TaskAttachmentService {
     }
 
     public TaskAttachment attach(TaskId taskId, UploadedAttachment file) {
-        requireTask(taskId);
+        return attach(taskId, null, file);
+    }
+
+    public TaskAttachment attach(TaskId taskId, UserId ownerId, UploadedAttachment file) {
+        requireTask(taskId, ownerId);
         ImageUploadPolicy.ValidatedImage image = ImageUploadPolicy.validate(
                 file.filename(), file.contentType(), file.content(), maxBytes);
         String storagePath = storage.store(AttachmentScope.TASK, taskId.value(), image.extension(), image.content());
@@ -53,12 +58,22 @@ public class TaskAttachmentService {
     }
 
     public List<TaskAttachment> list(TaskId taskId) {
-        requireTask(taskId);
+        return list(taskId, null);
+    }
+
+    public List<TaskAttachment> list(TaskId taskId, UserId ownerId) {
+        requireTask(taskId, ownerId);
         return attachmentRepository.findByTask(taskId);
     }
 
     public TaskAttachment load(AttachmentId id) {
-        return attachmentRepository.findById(id)
+        return load(id, null);
+    }
+
+    public TaskAttachment load(AttachmentId id, UserId ownerId) {
+        return (ownerId == null
+                ? attachmentRepository.findById(id)
+                : attachmentRepository.findByIdOwned(id, ownerId))
                 .orElseThrow(() -> new EntityNotFoundException("附件不存在：" + id));
     }
 
@@ -67,8 +82,8 @@ public class TaskAttachmentService {
         return storage.read(attachment.storagePath());
     }
 
-    private void requireTask(TaskId taskId) {
-        taskRepository.findById(taskId)
+    private void requireTask(TaskId taskId, UserId ownerId) {
+        (ownerId == null ? taskRepository.findById(taskId) : taskRepository.findByIdOwned(taskId, ownerId))
                 .orElseThrow(() -> new EntityNotFoundException("任务不存在：" + taskId));
     }
 

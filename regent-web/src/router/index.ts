@@ -20,6 +20,13 @@ const router = createRouter({
       meta: { title: '注册', layout: 'auth' },
     },
     {
+      path: '/download',
+      name: 'download',
+      component: () => import('@/views/DownloadView.vue'),
+      // 下载页是公开页面，但和登录页一样使用独立布局，不套管理端侧边栏
+      meta: { title: '下载', layout: 'auth', public: true },
+    },
+    {
       path: '/',
       // 默认落地在任务页：样式基准页只是设置里的展示分区，不当首屏
       redirect: '/tasks',
@@ -51,6 +58,12 @@ const router = createRouter({
       name: 'deployments',
       component: () => import('@/views/DeploymentsView.vue'),
       meta: { title: '部署' },
+    },
+    {
+      path: '/servers',
+      name: 'servers',
+      component: () => import('@/views/DeploymentServersView.vue'),
+      meta: { title: '服务器' },
     },
     {
       path: '/decisions',
@@ -108,10 +121,11 @@ router.beforeEach(async (to) => {
   }
 
   const authPage = to.meta.layout === 'auth'
-  if (authPage && auth.isAuthenticated) {
+  const publicPage = to.meta.public === true
+  if (authPage && auth.isAuthenticated && !publicPage) {
     return { name: 'tasks' }
   }
-  if (!authPage && !auth.isAuthenticated) {
+  if (!authPage && !publicPage && !auth.isAuthenticated) {
     return {
       name: 'login',
       query: to.fullPath === '/' ? undefined : { redirect: to.fullPath },

@@ -15,7 +15,11 @@ public interface ProjectMapper {
 
     ProjectData selectById(@Param("id") long id);
 
+    ProjectData selectByIdOwned(@Param("id") long id, @Param("ownerId") long ownerId);
+
     List<ProjectData> selectBySummaryStatus(@Param("summaryStatus") String summaryStatus);
 
     int updateSummary(ProjectData data);
+
+    int updateDetails(ProjectData data);
 }

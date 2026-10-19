@@ -10,11 +10,8 @@ public class DeploymentRow {
 
     private Long id;
     private Long projectId;
+    private Long serverId;
     private String name;
-    private String host;
-    private Integer port;
-    private String sshUsername;
-    private String authType;
     private String remoteDirectory;
     private String scriptFilename;
     private String scriptContent;

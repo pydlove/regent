@@ -20,6 +20,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -77,11 +79,43 @@ class BugPersistenceIT {
 
         bugRepository.save(bug);
         BugPage page = bugQueryRepository.findPage(
-                BugQuery.of(null, "OPEN", "分页错位", 1, 20));
+                BugQuery.of(null, "OPEN", null, "分页错位", 1, 20));
+        BugPage scoped = bugQueryRepository.findPage(
+                BugQuery.of(null, "OPEN", PROBE_PROJECT_ID, "分页错位", 1, 20));
+        BugPage otherProject = bugQueryRepository.findPage(
+                BugQuery.of(null, "OPEN", PROBE_PROJECT_ID + 1, "分页错位", 1, 20));
 
         assertEquals(1, page.total());
+        assertEquals(1, scoped.total());
+        assertEquals(0, otherProject.total());
         assertEquals(BugSource.AI_DISCOVERED, page.items().get(0).source());
         assertEquals(task.getId().value(), page.items().get(0).sourceTaskId());
         assertEquals(TaskId.of(page.items().get(0).sourceTaskId()), bug.getSourceTaskId().orElseThrow());
+    }
+
+    @Test
+    @DisplayName("列表按添加顺序升序，先添加的在前")
+    void 列表按添加顺序排序() {
+        String prefix = "IT_BUG_SORT_" + System.nanoTime();
+        insertBug(prefix + "-first", "MINOR", "OPEN", 30);
+        insertBug(prefix + "-second", "MAJOR", "FIXED", 10);
+        insertBug(prefix + "-third", "BLOCKER", "OPEN", 1);
+
+        BugPage page = bugQueryRepository.findPage(
+                BugQuery.of(null, "ALL", PROBE_PROJECT_ID, prefix, 1, 20));
+
+        assertEquals(List.of(
+                prefix + "-first",
+                prefix + "-second",
+                prefix + "-third"), page.items().stream().map(item -> item.title()).toList());
+    }
+
+    private void insertBug(String title, String severity, String status, int minutesAgo) {
+        jdbcTemplate.update("""
+                INSERT INTO bug (project_id, source, title, severity, status, found_at,
+                                 deleted, created_at, updated_at)
+                VALUES (?, 'MANUAL', ?, ?, ?, UTC_TIMESTAMP(3), 0, UTC_TIMESTAMP(3),
+                        DATE_SUB(UTC_TIMESTAMP(3), INTERVAL ? MINUTE))
+                """, PROBE_PROJECT_ID, title, severity, status, minutesAgo);
     }
 }

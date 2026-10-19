@@ -1,28 +1,52 @@
-import { deleteRequest, get, postJson, putJson } from '@/api/http'
+import { deleteRequest, get, postJson, postJsonWithTimeout, putJson } from '@/api/http'
 import type {
   DeploymentDetail,
   DeploymentRunDetail,
   DeploymentRunSummary,
+  DeploymentScriptGeneration,
+  DeploymentScriptValidation,
   DeploymentSummary,
 } from '@/types/api'
 
 export type SaveDeploymentInput = {
   projectId: number
+  serverId: number
   name: string
-  host: string
-  port: number
-  username: string
-  authType: string
   remoteDirectory: string
   scriptFilename: string
   scriptContent: string
-  password: string
 }
 
 export const listDeployments = (projectId?: number | null) =>
   get<DeploymentSummary[]>('/deployments', { projectId })
 
 export const getDeployment = (id: number) => get<DeploymentDetail>(`/deployments/${id}`)
+
+export const validateDeploymentScript = (scriptContent: string) =>
+  postJson<DeploymentScriptValidation>('/deployments/script-validation', { scriptContent })
+
+export type GenerateDeploymentScriptInput = {
+  requestId: string
+  projectId: number
+  serverId: number
+  workspacePath: string
+  remoteDirectory: string
+}
+
+const SCRIPT_GENERATION_TIMEOUT_MS = 4 * 60 * 1000
+
+export const generateDeploymentScript = (input: GenerateDeploymentScriptInput) =>
+  postJsonWithTimeout<DeploymentScriptGeneration>(
+    '/deployments/script-generation',
+    input,
+    SCRIPT_GENERATION_TIMEOUT_MS,
+  )
+
+export const cancelDeploymentScriptGeneration = (requestId: string) =>
+  postJson<boolean>(
+    `/deployments/script-generation/${encodeURIComponent(requestId)}/cancel`,
+    {},
+  )
 
 export const createDeployment = (input: SaveDeploymentInput) =>
   postJson<DeploymentDetail>('/deployments', input)

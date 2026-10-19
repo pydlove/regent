@@ -5,6 +5,7 @@ import com.pydlove.regent.execution.domain.model.ExecResult;
 import com.pydlove.regent.execution.domain.model.RunEvent;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.model.Task;
+import com.pydlove.regent.execution.domain.model.TaskAdjustmentId;
 import com.pydlove.regent.execution.domain.model.TaskAttachment;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskRun;
@@ -98,6 +99,8 @@ public class AgentRunService {
     private final Duration lease;
     private final String contractUrl;
     private final Map<Long, ExecutionConcurrencyGate.Permit> activePermits = new ConcurrentHashMap<>();
+    /** 本次认领实际带出的调整。只有它被再次上报时才标记下发，避免把执行期间新加的方向误记为已处理。 */
+    private final Map<Long, List<TaskAdjustmentId>> deliveredAdjustments = new ConcurrentHashMap<>();
 
     public AgentRunService(TaskRepository taskRepository,
                            TaskRunRepository taskRunRepository,
@@ -262,6 +265,7 @@ public class AgentRunService {
         // 先把会话 ID 记下来再结算：挂起等人时这次会话很可能就结束了，
         // 批准之后要能把它捡回来，否则任务只能从头再跑一遍。
         settlement.adoptThreadId(task.getId(), sessionId, task.getCodexThreadId().orElse(null));
+        markDeliveredAdjustments(run);
 
         ExecResult result = report.toResult(null, sessionId, tokens, rawResult);
         int seq = appendEvent(run, "agent.report", reportPayload(report, result));
@@ -306,21 +310,12 @@ public class AgentRunService {
         }
         String agentName = run.getAgentName() == null ? "未知执行者" : run.getAgentName();
         Instant expiredAt = run.getLeaseExpiresAt();
-        Task task = taskRepository.findById(run.getTaskId()).orElse(null);
 
-        run.finish(new ExecResult(RunStatus.FAILED, null, null, TokenUsage.ZERO,
+        settlement.finishAttempt(run, new ExecResult(RunStatus.FAILED, null, null, TokenUsage.ZERO,
                 "执行者失联：租约在 " + expiredAt + " 到期未续（执行者：" + agentName + "）。"
                         + "工作区已经放开，可以直接重试。",
                 "lease-expired", true, List.of(), List.of(), null));
-        taskRunRepository.save(run);
         appendEvent(run, "platform.lease-expired", "{\"agent\":\"" + json(agentName) + "\"}");
-
-        boolean latest = taskRunRepository.findLatestByTask(run.getTaskId())
-                .map(latestRun -> latestRun.getId().equals(run.getId()))
-                .orElse(false);
-        if (latest) {
-            settlement.finishTask(run.getTaskId(), RunStatus.FAILED);
-        }
         releasePermit(run.getId());
         return true;
     }
@@ -348,8 +343,10 @@ public class AgentRunService {
                             + "可以用心跳等批复，也可以在批复后重新认领继续。",
                     MAX_DECISION_ROUNDS - rounds);
         }
+        String instruction = appendPendingAdjustments(
+                run, settlement.continuationPrompt(raised.decision()));
         return new AgentReportOutcome(AgentReportOutcome.Outcome.CONTINUE, run.getStatus().name(),
-                task.getStatus().name(), settlement.continuationPrompt(raised.decision()),
+                task.getStatus().name(), instruction,
                 raised.decision().getId().value(), raised.decision().getEffectiveLevel().name(),
                 "平台按分级规则替你定了：这一条落在阈值内且可逆。带着结论接着干，"
                         + "几次改动的分界线不是你能自己放宽的。",
@@ -358,16 +355,27 @@ public class AgentRunService {
 
     /** 收场：写结论、按结果推进任务状态。 */
     private AgentReportOutcome settle(TaskRun run, ExecResult result, int seq) {
-        run.finish(result);
-        taskRunRepository.save(run);
-        settlement.finishTask(run.getTaskId(), run.getStatus());
-        Task fresh = loadTask(run.getTaskId());
+        RunSettlementService.AttemptFinish finish = settlement.finishAttempt(run, result);
+        if (finish.deferredForAdjustment()) {
+            appendEvent(run, "platform.adjustment-deferred",
+                    "{\"reason\":\"success-reported-with-pending-adjustments\"}", seq);
+            String instruction = appendPendingAdjustments(run,
+                    "上一轮执行已结束，但平台收到了新的调整方向。请接着同一会话继续，不要重新开始。");
+            return new AgentReportOutcome(AgentReportOutcome.Outcome.CONTINUE,
+                    RunStatus.RUNNING.name(),
+                    finish.taskStatus().name(),
+                    instruction,
+                    null,
+                    null,
+                    "这次上报没有直接收场：任务执行期间又出现了调整方向，平台要求你先纳入调整再结束。",
+                    MAX_DECISION_ROUNDS);
+        }
 
         boolean done = run.getStatus() == RunStatus.SUCCESS;
         return new AgentReportOutcome(
                 done ? AgentReportOutcome.Outcome.DONE : AgentReportOutcome.Outcome.FAILED,
                 run.getStatus().name(),
-                fresh.getStatus().name(),
+                finish.taskStatus() == null ? TaskStatus.CANCELLED.name() : finish.taskStatus().name(),
                 null,
                 null,
                 null,
@@ -384,11 +392,14 @@ public class AgentRunService {
 
     private AgentReportOutcome settleAndRelease(TaskRun run, ExecResult result, int seq) {
         AgentReportOutcome outcome = settle(run, result, seq);
-        releasePermit(run.getId());
+        if (outcome.outcome() != AgentReportOutcome.Outcome.CONTINUE) {
+            releasePermit(run.getId());
+        }
         return outcome;
     }
 
     private void releasePermit(TaskRunId runId) {
+        deliveredAdjustments.remove(runId.value());
         ExecutionConcurrencyGate.Permit permit = activePermits.remove(runId.value());
         if (permit != null) {
             permit.release();
@@ -405,7 +416,7 @@ public class AgentRunService {
         ProjectProfile project = loadProject(task);
         requireWorkspaceFree(project, now);
         EnvironmentContext environment = EnvironmentContext.resolve(
-                environmentEntryRepository.findApplicableTo(project.id()));
+                environmentEntryRepository.findApplicableTo(project.ownerId(), project.id()));
         PluginContext plugins = PluginContext.from(taskPluginRepository.findByTask(task.getId()));
 
         // 指令必须在推进状态之前算：instructionFor 靠「任务有没有会话」判断这是首跑还是续跑，
@@ -437,6 +448,7 @@ public class AgentRunService {
         run.claimBy(agentName, now.plus(lease));
         taskRunRepository.save(run);
         appendEvent(run, "agent.claim", "{\"agent\":\"" + json(agentName) + "\",\"executor\":\"外部执行者\"}");
+        instruction = appendPendingAdjustments(run, instruction);
 
         List<AgentWorkPackage.Image> images = new ArrayList<>();
         for (TaskAttachment attachment : attachmentRepository.findByTask(task.getId())) {
@@ -580,6 +592,35 @@ public class AgentRunService {
             // 见方法注释
         }
         return seq + 1;
+    }
+
+    /**
+     * 把待调整拼进本次指令，并记住它已经随这条租约下发。
+     * 只有下一次上报时才标记 APPLIED，这样执行期间新加的调整不会被误算进上一轮。
+     */
+    private String appendPendingAdjustments(TaskRun run, String instruction) {
+        Optional<RunSettlementService.AdjustmentInstruction> pending =
+                settlement.pendingAdjustmentInstruction(run.getTaskId());
+        if (pending.isEmpty()) {
+            return instruction;
+        }
+        RunSettlementService.AdjustmentInstruction adjustment = pending.orElseThrow();
+        deliveredAdjustments.put(run.getId().value(), adjustment.ids());
+        appendEvent(run, "platform.adjustment", adjustmentPayload(adjustment));
+        return instruction + "\n\n---\n\n" + adjustment.prompt();
+    }
+
+    private void markDeliveredAdjustments(TaskRun run) {
+        List<TaskAdjustmentId> delivered = deliveredAdjustments.remove(run.getId().value());
+        settlement.markAdjustmentsApplied(delivered, run.getId());
+    }
+
+    private static String adjustmentPayload(RunSettlementService.AdjustmentInstruction adjustment) {
+        return "{\"adjustmentIds\":["
+                + adjustment.ids().stream()
+                .map(id -> Long.toString(id.value()))
+                .collect(java.util.stream.Collectors.joining(","))
+                + "]}";
     }
 
     private static String reportPayload(ExecReport report, ExecResult result) {
