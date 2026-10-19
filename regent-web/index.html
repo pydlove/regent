@@ -256,12 +256,24 @@
           hideWhenReady()
         })
 
+        var fallbackTimer = null
+        function scheduleFallback(delay) {
+          window.clearTimeout(fallbackTimer)
+          fallbackTimer = window.setTimeout(function () {
+            pageLoaded = true
+            appReady = true
+            hideWhenReady()
+          }, delay)
+        }
+
+        window.addEventListener('regent:startup-status', function (event) {
+          if (sloganNode && event.detail) sloganNode.textContent = event.detail
+          // 后端重启期间认证请求会持续重试，不能让 8 秒兜底把启动层提前撤掉。
+          scheduleFallback(70000)
+        })
+
         // 主模块异常时也不能把用户永久困在启动层。
-        window.setTimeout(function () {
-          pageLoaded = true
-          appReady = true
-          hideWhenReady()
-        }, 8000)
+        scheduleFallback(8000)
 
         hideWhenReady()
       })()

@@ -11,7 +11,22 @@ import {
   uploadProfileAvatar,
   type RegisterInput,
 } from '@/api/auth'
+import { ApiError } from '@/api/http'
 import type { AuthUser } from '@/types/api'
+import {
+  AUTH_RECOVERY_DELAY_MS,
+  AUTH_RECOVERY_MAX_ATTEMPTS,
+  shouldRetryAuth,
+} from '@/utils/authRecovery'
+
+const sleep = (milliseconds: number) =>
+  new Promise<void>((resolve) => globalThis.setTimeout(resolve, milliseconds))
+
+function announceStartupStatus(message: string): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('regent:startup-status', { detail: message }))
+  }
+}
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<AuthUser | null>(null)
@@ -22,14 +37,28 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => user.value !== null)
 
   const loadCurrentUser = async (): Promise<boolean> => {
-    try {
-      user.value = await getCurrentUser()
-    } catch {
-      user.value = null
-    } finally {
-      initialized.value = true
+    for (let attempt = 1; attempt <= AUTH_RECOVERY_MAX_ATTEMPTS; attempt++) {
+      try {
+        user.value = await getCurrentUser()
+        initialized.value = true
+        return true
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          user.value = null
+          initialized.value = true
+          return false
+        }
+        if (!shouldRetryAuth(error) || attempt === AUTH_RECOVERY_MAX_ATTEMPTS) {
+          user.value = null
+          initialized.value = true
+          return false
+        }
+        announceStartupStatus(`服务正在重启，正在恢复登录…（${attempt}/${AUTH_RECOVERY_MAX_ATTEMPTS}）`)
+        await sleep(AUTH_RECOVERY_DELAY_MS)
+      }
     }
-    return user.value !== null
+    initialized.value = true
+    return false
   }
 
   const login = async (
