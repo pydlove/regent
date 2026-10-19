@@ -20,6 +20,8 @@ public class DeploymentRunRow {
     private String scriptFilename;
     private String scriptContent;
     private String scriptHash;
+    private String executionMode;
+    private String projectScriptPath;
     private String status;
     private Integer exitCode;
     private String summary;

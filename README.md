@@ -108,7 +108,8 @@ node scripts/release-version.mjs \
 
 没有 CDN 时，把安装包和 `latest.json` 放到后端 `~/.regent/downloads`，执行
 `node scripts/publish-release.mjs --version ... --macos ... --windows ...` 发布；下载页和浏览器更新提醒会读取
-`/api/release/latest`。
+`/api/release/latest`。公网安装包由 Nginx 的 `/downloads/` 直接静态下载，`deploy/remote/deploy.sh`
+会把 `~/.regent/downloads` 同步到中继服务器，避免大文件经过中继超时。
 
 需要 JDK 17、Maven 3.9+、Node 20+、本机 MySQL（`regent` / `regent_test` 两个 schema，
 凭据写在已被 gitignore 的 `regent-boot/src/main/resources/application-local.yml`）。

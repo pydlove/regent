@@ -42,10 +42,13 @@ import {
   DEPLOYMENT_SCRIPT_RULES,
   DEPLOYMENT_SCRIPT_TEMPLATE,
   DEPLOYMENT_SCRIPT_VARIABLES,
+  PROJECT_DEPLOYMENT_SCRIPT_RULES,
+  PROJECT_DEPLOYMENT_SCRIPT_VARIABLES,
 } from '@/content/deploymentScript'
 import { useToast } from '@/composables/useToast'
 import type {
   DeploymentDetail,
+  DeploymentExecutionMode,
   DeploymentScriptValidation,
   DeploymentServer,
   DeploymentSummary,
@@ -74,6 +77,8 @@ const remoteDirectory = ref('')
 const remoteDirectoryAutoFilled = ref(false)
 let lastAutoFilledDirectory: string | null = null
 const workspacePath = ref('')
+const executionMode = ref<DeploymentExecutionMode>('REMOTE_SCRIPT')
+const projectScriptPath = ref('')
 const scriptFilename = ref<string | null>(null)
 const scriptContent = ref<string | null>(null)
 const scriptValidation = ref<DeploymentScriptValidation | null>(null)
@@ -114,6 +119,20 @@ const serverItems = computed(() =>
     value: String(server.id),
     label: `${server.name} · ${server.username}@${server.host}:${server.port}`,
   })),
+)
+const executionModeItems = [
+  { value: 'REMOTE_SCRIPT', label: '远端脚本（SSH stdin）' },
+  { value: 'PROJECT_SCRIPT', label: '项目发布脚本（本机构建、上传、重启）' },
+] as const
+const deploymentVariables = computed(() =>
+  executionMode.value === 'PROJECT_SCRIPT'
+    ? PROJECT_DEPLOYMENT_SCRIPT_VARIABLES
+    : DEPLOYMENT_SCRIPT_VARIABLES,
+)
+const deploymentRules = computed(() =>
+  executionMode.value === 'PROJECT_SCRIPT'
+    ? PROJECT_DEPLOYMENT_SCRIPT_RULES
+    : DEPLOYMENT_SCRIPT_RULES,
 )
 const selectedServer = computed(
   () => servers.value.find((server) => String(server.id) === serverId.value) ?? null,
@@ -168,6 +187,7 @@ const canSave = computed(
     serverId.value !== '' &&
     name.value.trim().length > 0 &&
     remoteDirectory.value.trim().length > 0 &&
+    (executionMode.value === 'REMOTE_SCRIPT' || projectScriptPath.value.trim().length > 0) &&
     scriptFilename.value !== null &&
     scriptContent.value !== null &&
     scriptValidation.value?.valid === true &&
@@ -217,6 +237,8 @@ watch(open, async (opened) => {
   workspacePath.value = selectedProject.value?.path ?? ''
   serverId.value =
     props.deployment?.serverId === undefined ? '' : String(props.deployment.serverId)
+  executionMode.value = props.deployment?.executionMode ?? 'REMOTE_SCRIPT'
+  projectScriptPath.value = props.deployment?.projectScriptPath ?? ''
   name.value = props.deployment?.name ?? ''
   remoteDirectory.value = props.deployment?.remoteDirectory ?? ''
   remoteDirectoryAutoFilled.value = false
@@ -231,6 +253,8 @@ watch(open, async (opened) => {
   try {
     const detail = await getDeployment(props.deployment.id)
     serverId.value = String(detail.serverId)
+    executionMode.value = detail.executionMode
+    projectScriptPath.value = detail.projectScriptPath ?? ''
     remoteDirectory.value = detail.remoteDirectory
     scriptFilename.value = detail.scriptFilename
     scriptContent.value = detail.scriptContent
@@ -342,6 +366,17 @@ const importFile = async (event: Event) => {
     const content = await file.text()
     scriptContent.value = content
     scriptFilename.value = file.name
+    if (
+      executionMode.value === 'REMOTE_SCRIPT' &&
+      content.includes('deploy-local.sh') &&
+      content.includes('REGENT_SERVER_IP')
+    ) {
+      executionMode.value = 'PROJECT_SCRIPT'
+      if (!projectScriptPath.value.trim()) {
+        projectScriptPath.value = 'deploy/remote/deploy.sh'
+      }
+      toast.success('已识别为本机完整发布脚本', projectScriptPath.value)
+    }
     if (!name.value.trim()) name.value = file.name.replace(/\.[^.]+$/, '')
     const inferredDirectory = inferDeploymentDirectory(content)
     if (inferredDirectory) {
@@ -509,6 +544,9 @@ const save = async () => {
     remoteDirectory: remoteDirectory.value.trim(),
     scriptFilename: scriptFilename.value ?? '',
     scriptContent: scriptContent.value ?? '',
+    executionMode: executionMode.value,
+    projectScriptPath:
+      executionMode.value === 'PROJECT_SCRIPT' ? projectScriptPath.value.trim() : null,
   }
   try {
     const saved = props.deployment
@@ -648,6 +686,31 @@ const save = async () => {
       </DialogField>
 
       <DialogField
+        label="执行方式"
+        required
+        hint="完整发布选择项目发布脚本；由脚本在本机构建并上传，平台不再把脚本文本送到远端"
+      >
+        <Select
+          v-model="executionMode"
+          :items="[...executionModeItems]"
+          class="w-full"
+        />
+      </DialogField>
+
+      <DialogField
+        v-if="executionMode === 'PROJECT_SCRIPT'"
+        label="项目脚本路径"
+        required
+        hint="相对归属项目根目录，例如 deploy/remote/deploy.sh；上传内容必须与文件一致"
+      >
+        <Input
+          v-model="projectScriptPath"
+          class="w-full font-mono"
+          placeholder="deploy/remote/deploy.sh"
+        />
+      </DialogField>
+
+      <DialogField
         label="归属项目"
         required
         hint="部署列表按顶栏选中的项目查询；创建后不能改归属"
@@ -764,7 +827,7 @@ const save = async () => {
             <span class="min-w-0 flex-1">
               <span class="block text-caption font-emphasis text-label">固定参数契约 · 非交互 bash</span>
               <span class="mt-0.5 block text-caption text-label-tertiary">
-                平台负责 SSH 连接，脚本通过环境变量读取部署上下文
+                远端、本机两种执行方式都使用同一套服务器配置
               </span>
             </span>
             <Icon :as="specOpen ? ChevronUp : ChevronDown" size="inline" class="text-label-tertiary" />
@@ -774,10 +837,22 @@ const save = async () => {
             <div class="flex items-start gap-2 rounded-control bg-window px-2.5 py-2">
               <Icon :as="ServerCog" size="inline" class="mt-0.5 shrink-0 text-accent" />
               <p class="text-caption leading-relaxed text-label-secondary">
-                IP、端口、用户名和认证方式由表单保存，执行时自动注入。脚本无需再实现
-                <code class="font-mono text-label">-H</code>、
-                <code class="font-mono text-label">-u</code> 这类连接参数；SSH 密码只用于连接，
-                不会传给远端脚本。
+                <template v-if="executionMode === 'PROJECT_SCRIPT'">
+                  平台在项目根目录执行指定脚本，并传入
+                  <code class="font-mono text-label">-H</code>
+                  <code class="font-mono text-label">-P</code>
+                  <code class="font-mono text-label">-u</code>
+                  <code class="font-mono text-label">-r</code>；
+                  密码只通过
+                  <code class="font-mono text-label">REGENT_SERVER_PASSWORD</code>
+                  环境变量传递，不出现在命令行和日志中。
+                </template>
+                <template v-else>
+                  IP、端口、用户名和认证方式由表单保存，执行时自动注入。脚本无需再实现
+                  <code class="font-mono text-label">-H</code>、
+                  <code class="font-mono text-label">-u</code> 这类连接参数；SSH 密码只用于连接，
+                  不会传给远端脚本。
+                </template>
               </p>
             </div>
 
@@ -785,7 +860,7 @@ const save = async () => {
               <p class="text-caption font-emphasis text-label">可用环境变量</p>
               <dl class="mt-1.5 divide-y divide-separator-soft">
                 <div
-                  v-for="variable in DEPLOYMENT_SCRIPT_VARIABLES"
+                  v-for="variable in deploymentVariables"
                   :key="variable.name"
                   class="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] gap-3 py-1.5"
                 >
@@ -799,7 +874,7 @@ const save = async () => {
 
             <ul class="mt-3 space-y-1.5">
               <li
-                v-for="rule in DEPLOYMENT_SCRIPT_RULES"
+                v-for="rule in deploymentRules"
                 :key="rule"
                 class="flex gap-2 text-caption leading-relaxed text-label-secondary"
               >
@@ -808,7 +883,10 @@ const save = async () => {
               </li>
             </ul>
 
-            <div class="mt-3 overflow-hidden rounded-control bg-window">
+            <div
+              v-if="executionMode === 'REMOTE_SCRIPT'"
+              class="mt-3 overflow-hidden rounded-control bg-window"
+            >
               <div class="flex items-center gap-2 border-b border-separator-soft px-2.5 py-1.5">
                 <span class="min-w-0 flex-1 text-caption font-emphasis text-label">脚本模板</span>
                 <Button size="sm" variant="ghost" @click="copyTemplate">

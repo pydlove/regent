@@ -23,6 +23,8 @@ public record DeploymentDetailResponse(
         String scriptHash,
         int scriptSize,
         String scriptContent,
+        String executionMode,
+        String projectScriptPath,
         boolean credentialConfigured,
         String latestRunStatus,
         Instant latestRunAt,
@@ -49,6 +51,8 @@ public record DeploymentDetailResponse(
                 deployment.getScriptHash(),
                 deployment.getScriptSize(),
                 deployment.getScriptContent(),
+                deployment.getExecutionMode().name(),
+                deployment.getProjectScriptPath(),
                 overview.credentialConfigured(),
                 latest == null ? null : latest.getStatus().name(),
                 latest == null ? null : latest.getFinishedAt() != null

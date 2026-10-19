@@ -50,7 +50,9 @@ public class DeploymentCommandService {
                     command.name(),
                     command.remoteDirectory(),
                     command.scriptFilename(),
-                    command.scriptContent());
+                    command.scriptContent(),
+                    command.executionMode(),
+                    command.projectScriptPath());
             requireNameAvailable(projectId, deployment.getName(), null);
             deploymentRepository.save(deployment);
             return deployment;
@@ -73,7 +75,9 @@ public class DeploymentCommandService {
                     command.serverId(),
                     command.remoteDirectory(),
                     command.scriptFilename(),
-                    command.scriptContent());
+                    command.scriptContent(),
+                    command.executionMode(),
+                    command.projectScriptPath());
             deploymentRepository.save(deployment);
             return deployment;
         });

@@ -26,6 +26,8 @@ public class DeploymentRun {
     private final String scriptFilename;
     private final String scriptContent;
     private final String scriptHash;
+    private final DeploymentExecutionMode executionMode;
+    private final String projectScriptPath;
     private DeploymentRunStatus status;
     private Integer exitCode;
     private String summary;
@@ -45,6 +47,8 @@ public class DeploymentRun {
                           String scriptFilename,
                           String scriptContent,
                           String scriptHash,
+                          DeploymentExecutionMode executionMode,
+                          String projectScriptPath,
                           DeploymentRunStatus status,
                           Integer exitCode,
                           String summary,
@@ -66,6 +70,10 @@ public class DeploymentRun {
         this.scriptFilename = requireText(scriptFilename, "脚本文件名");
         this.scriptContent = requireText(scriptContent, "部署脚本");
         this.scriptHash = requireText(scriptHash, "脚本摘要");
+        this.executionMode = requireNotNull(executionMode, "部署执行方式");
+        this.projectScriptPath = executionMode == DeploymentExecutionMode.PROJECT_SCRIPT
+                ? requireText(projectScriptPath, "项目脚本路径")
+                : null;
         this.status = requireNotNull(status, "执行状态");
         this.exitCode = exitCode;
         this.summary = truncateSummary(summary);
@@ -93,6 +101,8 @@ public class DeploymentRun {
                 snapshot.scriptFilename(),
                 snapshot.scriptContent(),
                 snapshot.scriptHash(),
+                snapshot.executionMode(),
+                snapshot.projectScriptPath(),
                 DeploymentRunStatus.QUEUED,
                 null,
                 null,
@@ -114,6 +124,8 @@ public class DeploymentRun {
                                         String scriptFilename,
                                         String scriptContent,
                                         String scriptHash,
+                                        DeploymentExecutionMode executionMode,
+                                        String projectScriptPath,
                                         DeploymentRunStatus status,
                                         Integer exitCode,
                                         String summary,
@@ -123,7 +135,8 @@ public class DeploymentRun {
                                         Instant createdAt) {
         DeploymentRun run = new DeploymentRun(deploymentId, projectId, deploymentName, host, port,
                 username, authType, remoteDirectory, scriptFilename, scriptContent, scriptHash,
-                status, exitCode, summary, queuedAt, startedAt, finishedAt, createdAt);
+                executionMode, projectScriptPath, status, exitCode, summary,
+                queuedAt, startedAt, finishedAt, createdAt);
         run.id = requireNotNull(id, "执行记录 ID");
         return run;
     }
@@ -239,6 +252,14 @@ public class DeploymentRun {
 
     public String getScriptHash() {
         return scriptHash;
+    }
+
+    public DeploymentExecutionMode getExecutionMode() {
+        return executionMode;
+    }
+
+    public String getProjectScriptPath() {
+        return projectScriptPath;
     }
 
     public DeploymentRunStatus getStatus() {

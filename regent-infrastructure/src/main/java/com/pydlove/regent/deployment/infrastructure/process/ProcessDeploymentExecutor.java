@@ -1,6 +1,7 @@
 package com.pydlove.regent.deployment.infrastructure.process;
 
 import com.pydlove.regent.deployment.domain.model.DeploymentAuthType;
+import com.pydlove.regent.deployment.domain.model.DeploymentExecutionMode;
 import com.pydlove.regent.deployment.domain.model.DeploymentExecutionRequest;
 import com.pydlove.regent.deployment.domain.model.DeploymentExecutionResult;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunStatus;
@@ -12,23 +13,34 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 /**
- * 通过本机 OpenSSH 执行部署脚本。
+ * 通过本机进程执行部署脚本。
  *
- * <p>脚本从 stdin 传给远程的 {@code bash -s}，不先上传到服务器，也不在命令行里拼接脚本内容。
+ * <p>远端模式把脚本从 stdin 传给服务器的 {@code bash -s}；项目发布模式则在项目根目录执行
+ * 指定的 deploy.sh，由该脚本完成构建、上传和重启。
+ *
+ * <p>远端脚本不会先上传到服务器，也不在命令行里拼接脚本内容。
  * 密码认证借助 SSH 的 askpass 辅助进程：密码放在环境变量里，不出现在 argv、日志或数据库。
  * 密钥认证直接使用本机 ssh-agent / 默认私钥，并设置 BatchMode，避免交互式输入卡住后台线程。
  *
- * <p>远端脚本通过固定的 {@code REGENT_DEPLOY_*} 环境变量读取部署上下文。SSH 密码只用于建立
- * 连接，绝不传给远端脚本；脚本需要业务凭据时应从服务器的密钥管理或受限配置中读取。
+ * <p>远端脚本通过固定的 {@code REGENT_DEPLOY_*} 环境变量读取部署上下文。项目发布脚本通过
+ * argv 接收连接参数，密码仅通过 {@code REGENT_SERVER_PASSWORD} 环境变量传递。两种模式都不会
+ * 把密码写进命令行或日志。
  */
 public class ProcessDeploymentExecutor implements DeploymentExecutor {
 
@@ -46,15 +58,25 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
     public DeploymentExecutionResult execute(DeploymentExecutionRequest request, DeploymentLogSink sink) {
         Path askpass = null;
         Process process = null;
+        boolean projectScript = request.executionMode() == DeploymentExecutionMode.PROJECT_SCRIPT;
+        String launchTarget = projectScript ? "项目发布脚本" : "SSH";
         try {
-            List<String> command = command(request);
+            Path script = projectScript ? resolveProjectScript(request) : null;
+            List<String> command = projectScript ? projectScriptCommand(request, script) : sshCommand(request);
             ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
-            configureEnvironment(builder.environment(), request);
-            if (request.authType() == DeploymentAuthType.PASSWORD) {
-                askpass = createAskpass();
-                builder.environment().put("SSH_ASKPASS", askpass.toString());
-                builder.environment().put("SSH_ASKPASS_REQUIRE", "force");
-                builder.environment().put("DISPLAY", ":0");
+            if (projectScript) {
+                builder.directory(Path.of(request.projectDirectory()).toFile());
+                configureProjectScriptEnvironment(builder.environment(), request);
+                sink.append("[平台] 本机执行项目脚本：" + request.projectScriptPath() + "\n");
+                sink.append("[平台] 本机工具 " + toolSummary(builder.environment()) + "\n");
+            } else {
+                configureRemoteEnvironment(builder.environment(), request);
+                if (request.authType() == DeploymentAuthType.PASSWORD) {
+                    askpass = createAskpass();
+                    builder.environment().put("SSH_ASKPASS", askpass.toString());
+                    builder.environment().put("SSH_ASKPASS_REQUIRE", "force");
+                    builder.environment().put("DISPLAY", ":0");
+                }
             }
 
             process = builder.start();
@@ -63,13 +85,17 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
             reader.setDaemon(true);
             reader.start();
 
-            try (OutputStream stdin = process.getOutputStream()) {
-                stdin.write(request.scriptContent().getBytes(StandardCharsets.UTF_8));
-                stdin.write('\n');
-                stdin.flush();
-            } catch (IOException e) {
-                // 连接提前失败时写 stdin 会报 broken pipe，真正的错误由 stderr 输出承担
-                sink.append("[平台] 脚本写入连接失败：" + messageOf(e) + "\n");
+            if (!projectScript) {
+                try (OutputStream stdin = process.getOutputStream()) {
+                    stdin.write(request.scriptContent().getBytes(StandardCharsets.UTF_8));
+                    stdin.write('\n');
+                    stdin.flush();
+                } catch (IOException e) {
+                    // 连接提前失败时写 stdin 会报 broken pipe，真正的错误由 stderr 输出承担
+                    sink.append("[平台] 脚本写入连接失败：" + messageOf(e) + "\n");
+                }
+            } else {
+                process.getOutputStream().close();
             }
 
             boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
@@ -99,9 +125,9 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
             return new DeploymentExecutionResult(
                     DeploymentRunStatus.INTERRUPTED, null, "部署执行被中断");
         } catch (IOException e) {
-            sink.append("[平台] 无法启动 SSH：" + messageOf(e) + "\n");
+            sink.append("[平台] 无法启动" + launchTarget + "：" + messageOf(e) + "\n");
             return new DeploymentExecutionResult(
-                    DeploymentRunStatus.FAILED, null, "无法启动 SSH：" + messageOf(e));
+                    DeploymentRunStatus.FAILED, null, "无法启动" + launchTarget + "：" + messageOf(e));
         } finally {
             if (askpass != null) {
                 try {
@@ -113,7 +139,7 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
         }
     }
 
-    private List<String> command(DeploymentExecutionRequest request) {
+    private List<String> sshCommand(DeploymentExecutionRequest request) {
         List<String> command = new ArrayList<>();
         command.add(sshCommand);
         command.add("-T");
@@ -143,6 +169,16 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
         command.add(request.username() + "@" + request.host());
         command.add(remoteCommand(request));
         return command;
+    }
+
+    private static List<String> projectScriptCommand(DeploymentExecutionRequest request, Path script) {
+        return List.of(
+                "bash",
+                script.toString(),
+                "-H", request.host(),
+                "-P", Integer.toString(request.port()),
+                "-u", request.username(),
+                "-r", request.remoteDirectory());
     }
 
     private static String remoteCommand(DeploymentExecutionRequest request) {
@@ -175,9 +211,147 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
         return "'" + value.replace("'", "'\"'\"'") + "'";
     }
 
-    private static void configureEnvironment(Map<String, String> environment,
-                                              DeploymentExecutionRequest request) {
+    private static void configureRemoteEnvironment(Map<String, String> environment,
+                                                   DeploymentExecutionRequest request) {
         environment.put(PASSWORD_ENV, request.password() == null ? "" : request.password());
+    }
+
+    private static void configureProjectScriptEnvironment(Map<String, String> environment,
+                                                          DeploymentExecutionRequest request) {
+        environment.put("PATH", localProcessPath(environment.get("PATH")));
+        environment.put("REGENT_DEPLOY_RUN_ID", Long.toString(request.runId().value()));
+        environment.put("REGENT_DEPLOY_PROJECT_ID", Long.toString(request.projectId().value()));
+        environment.put("REGENT_DEPLOY_HOST", request.host());
+        environment.put("REGENT_DEPLOY_PORT", Integer.toString(request.port()));
+        environment.put("REGENT_DEPLOY_USER", request.username());
+        environment.put("REGENT_DEPLOY_AUTH_TYPE", request.authType().name());
+        environment.put("REGENT_DEPLOY_DIRECTORY", request.projectDirectory());
+        environment.put("REGENT_DEPLOY_SCRIPT", request.scriptFilename());
+        environment.put("REGENT_REMOTE_BASE", request.remoteDirectory());
+
+        if (request.authType() == DeploymentAuthType.PASSWORD) {
+            environment.put("REGENT_SERVER_PASSWORD", request.password());
+        } else {
+            environment.remove("REGENT_SERVER_PASSWORD");
+            environment.remove("REGENT_SSH_PASSWORD");
+            environment.remove("SSHPASS");
+            environment.remove("SSH_ASKPASS");
+            environment.remove("SSH_ASKPASS_REQUIRE");
+        }
+    }
+
+    /**
+     * launchd 启动的后端只拿到系统最小 PATH，而部署脚本通常依赖用户安装的 Maven、NVM 和 Homebrew。
+     * 这里按常见版本管理器目录补齐，并保持最后才回退到系统路径。
+     */
+    static String localProcessPath(String inheritedPath) {
+        Set<String> directories = new LinkedHashSet<>();
+        if (inheritedPath != null && !inheritedPath.isBlank()) {
+            for (String entry : inheritedPath.split(":")) {
+                if (!entry.isBlank()) {
+                    directories.add(entry);
+                }
+            }
+        }
+
+        Path home = Path.of(System.getProperty("user.home", ""));
+        addVersionedBinDirectories(directories, home.resolve(".nvm/versions/node"));
+        addVersionedBinDirectories(directories, home.resolve("software/maven"));
+        addDirectory(directories, home.resolve(".sdkman/candidates/maven/current/bin"));
+        addDirectory(directories, home.resolve(".sdkman/candidates/java/current/bin"));
+        addDirectory(directories, home.resolve(".asdf/shims"));
+        addDirectory(directories, home.resolve(".local/share/mise/shims"));
+        addDirectory(directories, home.resolve(".volta/bin"));
+        addDirectory(directories, home.resolve("bin"));
+
+        addDirectory(directories, Path.of("/opt/homebrew/bin"));
+        addDirectory(directories, Path.of("/opt/homebrew/sbin"));
+        addDirectory(directories, Path.of("/usr/local/bin"));
+        addDirectory(directories, Path.of("/usr/local/sbin"));
+        addDirectory(directories, Path.of("/usr/bin"));
+        addDirectory(directories, Path.of("/bin"));
+        addDirectory(directories, Path.of("/usr/sbin"));
+        addDirectory(directories, Path.of("/sbin"));
+        return String.join(":", directories);
+    }
+
+    private static void addVersionedBinDirectories(Set<String> directories, Path versionsDirectory) {
+        if (!Files.isDirectory(versionsDirectory)) {
+            return;
+        }
+        try (Stream<Path> versions = Files.list(versionsDirectory)) {
+            versions.filter(Files::isDirectory)
+                    .sorted(Comparator.comparing(Path::getFileName).reversed())
+                    .map(path -> path.resolve("bin"))
+                    .filter(Files::isDirectory)
+                    .forEach(path -> addDirectory(directories, path));
+        } catch (IOException ignored) {
+            // 版本目录不可读时继续使用已有的 PATH，实际命令是否可用会在脚本输出里体现
+        }
+    }
+
+    private static void addDirectory(Set<String> directories, Path directory) {
+        if (Files.isDirectory(directory)) {
+            directories.add(directory.toString());
+        }
+    }
+
+    private static String toolSummary(Map<String, String> environment) {
+        String path = environment.getOrDefault("PATH", "");
+        List<String> tools = new ArrayList<>();
+        for (String name : List.of("mvn", "npm", "node", "rsync", "ssh")) {
+            tools.add(name + "=" + findExecutable(name, path).map(Path::toString).orElse("未找到"));
+        }
+        return String.join("，", tools);
+    }
+
+    private static Optional<Path> findExecutable(String name, String path) {
+        for (String entry : path.split(":")) {
+            if (entry.isBlank()) {
+                continue;
+            }
+            Path candidate = Path.of(entry, name);
+            if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
+                return Optional.of(candidate);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Path resolveProjectScript(DeploymentExecutionRequest request) throws IOException {
+        try {
+            Path root = Path.of(request.projectDirectory()).toAbsolutePath().normalize();
+            Path script = root.resolve(request.projectScriptPath()).normalize();
+            if (!script.startsWith(root)) {
+                throw new IOException("项目脚本路径越出项目目录：" + request.projectScriptPath());
+            }
+            Path realRoot;
+            try {
+                realRoot = root.toRealPath();
+            } catch (IOException e) {
+                throw new IOException("项目目录不存在或不可访问：" + root, e);
+            }
+            if (!Files.isRegularFile(script)) {
+                throw new IOException("项目脚本不存在或不是普通文件：" + request.projectScriptPath());
+            }
+            Path realScript = script.toRealPath();
+            if (!realScript.startsWith(realRoot)) {
+                throw new IOException("项目脚本通过链接越出项目目录：" + request.projectScriptPath());
+            }
+            byte[] uploaded = request.scriptContent().getBytes(StandardCharsets.UTF_8);
+            if (Files.size(realScript) != uploaded.length) {
+                throw new IOException(
+                        "项目脚本内容与上传脚本不一致，请重新上传：" + request.projectScriptPath());
+            }
+            byte[] actual = Files.readAllBytes(realScript);
+            if (!Arrays.equals(actual, uploaded)) {
+                throw new IOException(
+                        "项目脚本内容与上传脚本不一致，请重新上传：" + request.projectScriptPath());
+            }
+            return realScript;
+        } catch (InvalidPathException e) {
+            throw new IOException("项目目录或脚本路径不合法", e);
+        }
     }
 
     private static Path createAskpass() throws IOException {

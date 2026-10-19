@@ -2,6 +2,7 @@ package com.pydlove.regent.deployment.application.command;
 
 import com.pydlove.regent.deployment.domain.model.Deployment;
 import com.pydlove.regent.deployment.domain.model.DeploymentAuthType;
+import com.pydlove.regent.deployment.domain.model.DeploymentExecutionMode;
 import com.pydlove.regent.deployment.domain.model.DeploymentExecutionRequest;
 import com.pydlove.regent.deployment.domain.model.DeploymentExecutionResult;
 import com.pydlove.regent.deployment.domain.model.DeploymentId;
@@ -17,6 +18,8 @@ import com.pydlove.regent.deployment.domain.port.DeploymentLogWriter;
 import com.pydlove.regent.deployment.domain.repository.DeploymentRepository;
 import com.pydlove.regent.deployment.domain.repository.DeploymentRunRepository;
 import com.pydlove.regent.deployment.domain.repository.DeploymentServerRepository;
+import com.pydlove.regent.project.domain.repository.ProjectProfile;
+import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.domain.TransactionRunner;
@@ -36,6 +39,7 @@ public class DeploymentExecutionService {
     private final DeploymentRepository deploymentRepository;
     private final DeploymentRunRepository runRepository;
     private final DeploymentServerRepository serverRepository;
+    private final ProjectProfileRepository projectProfileRepository;
     private final DeploymentExecutor deploymentExecutor;
     private final DeploymentServerCredentialStore credentialStore;
     private final DeploymentLogStore logStore;
@@ -45,6 +49,7 @@ public class DeploymentExecutionService {
     public DeploymentExecutionService(DeploymentRepository deploymentRepository,
                                       DeploymentRunRepository runRepository,
                                       DeploymentServerRepository serverRepository,
+                                      ProjectProfileRepository projectProfileRepository,
                                       DeploymentExecutor deploymentExecutor,
                                       DeploymentServerCredentialStore credentialStore,
                                       DeploymentLogStore logStore,
@@ -53,6 +58,7 @@ public class DeploymentExecutionService {
         this.deploymentRepository = deploymentRepository;
         this.runRepository = runRepository;
         this.serverRepository = serverRepository;
+        this.projectProfileRepository = projectProfileRepository;
         this.deploymentExecutor = deploymentExecutor;
         this.credentialStore = credentialStore;
         this.logStore = logStore;
@@ -70,6 +76,9 @@ public class DeploymentExecutionService {
             DeploymentServer server = serverRepository.findById(deployment.getServerId())
                     .orElseThrow(() -> new EntityNotFoundException(
                             "部署服务器不存在：" + deployment.getServerId().value()));
+            ProjectProfile project = projectProfileRepository.findById(deployment.getProjectId())
+                    .orElseThrow(() -> new EntityNotFoundException(
+                            "部署归属项目不存在：" + deployment.getProjectId().value()));
             DeploymentScriptValidator.requireValid(deployment.getScriptContent());
             String password = server.getAuthType() == DeploymentAuthType.PASSWORD
                     ? credentialStore.find(server.getId())
@@ -79,10 +88,10 @@ public class DeploymentExecutionService {
                     : null;
             DeploymentRun queued = DeploymentRun.queue(deployment.snapshot(), server.snapshot());
             runRepository.save(queued);
-            return new Started(queued, password);
+            return new Started(queued, password, project.path());
         });
         transactionRunner.afterCompletion(
-                () -> submit(started.run().getId(), started.password()),
+                () -> submit(started.run().getId(), started.password(), started.projectDirectory()),
                 () -> interrupt(started.run().getId(), "发起部署的事务回滚，本次部署未执行"));
         return started.run();
     }
@@ -102,15 +111,15 @@ public class DeploymentExecutionService {
         return interrupted;
     }
 
-    private void submit(DeploymentRunId runId, String password) {
+    private void submit(DeploymentRunId runId, String password, String projectDirectory) {
         try {
-            workers.execute(() -> execute(runId, password));
+            workers.execute(() -> execute(runId, password, projectDirectory));
         } catch (RuntimeException e) {
             interrupt(runId, "部署工作线程未能启动：" + messageOf(e));
         }
     }
 
-    private void execute(DeploymentRunId runId, String password) {
+    private void execute(DeploymentRunId runId, String password, String projectDirectory) {
         DeploymentRun run = runRepository.findById(runId).orElse(null);
         if (run == null || run.getStatus() != DeploymentRunStatus.QUEUED) {
             return;
@@ -124,7 +133,11 @@ public class DeploymentExecutionService {
             writer.append("[平台] 开始部署「" + run.getDeploymentName() + "」\n");
             writer.append("[平台] 目标 " + run.getUsername() + "@" + run.getHost()
                     + ":" + run.getPort() + "，远程目录 " + run.getRemoteDirectory() + "\n");
-            writer.append("[平台] 脚本 " + run.getScriptFilename() + "\n\n");
+            writer.append("[平台] 脚本 " + run.getScriptFilename() + "\n");
+            writer.append("[平台] 执行方式 "
+                    + (run.getExecutionMode() == DeploymentExecutionMode.PROJECT_SCRIPT
+                    ? "本机项目脚本 " + run.getProjectScriptPath()
+                    : "远端脚本") + "\n\n");
 
             DeploymentExecutionResult result;
             try {
@@ -138,7 +151,10 @@ public class DeploymentExecutionService {
                         run.getRemoteDirectory(),
                         run.getScriptFilename(),
                         run.getScriptContent(),
-                        password), writer);
+                        run.getExecutionMode(),
+                        run.getProjectScriptPath(),
+                        password,
+                        projectDirectory), writer);
             } catch (RuntimeException e) {
                 result = new DeploymentExecutionResult(
                         DeploymentRunStatus.FAILED, null, "部署执行异常：" + messageOf(e));
@@ -181,6 +197,6 @@ public class DeploymentExecutionService {
                 : e.getMessage();
     }
 
-    private record Started(DeploymentRun run, String password) {
+    private record Started(DeploymentRun run, String password, String projectDirectory) {
     }
 }

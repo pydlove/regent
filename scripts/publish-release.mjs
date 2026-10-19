@@ -65,4 +65,5 @@ const manifest = {
 const manifestPath = path.join(outputDirectory, 'latest.json')
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8')
 console.log(`manifest: ${manifestPath}`)
-console.log('无需 CDN：后端会通过 /api/release/latest 和 /api/release/download/{platform} 提供。')
+console.log('无需 CDN：版本清单由 /api/release/latest 提供，安装包由 /downloads/<文件名> 直接下载。')
+console.log('公网发布：再运行 deploy/remote/deploy.sh，会把 ~/.regent/downloads 同步到中继服务器。')

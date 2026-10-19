@@ -20,6 +20,7 @@ public class Deployment {
 
     private static final int MAX_NAME_LENGTH = 128;
     private static final int MAX_REMOTE_DIRECTORY_LENGTH = 512;
+    private static final int MAX_SCRIPT_PATH_LENGTH = 512;
     private static final int MAX_FILENAME_LENGTH = 255;
     public static final int MAX_SCRIPT_LENGTH = 512 * 1024;
 
@@ -31,6 +32,8 @@ public class Deployment {
     private String scriptFilename;
     private String scriptContent;
     private String scriptHash;
+    private DeploymentExecutionMode executionMode;
+    private String projectScriptPath;
     private final Instant createdAt;
     private Instant updatedAt;
 
@@ -42,6 +45,8 @@ public class Deployment {
                        String scriptFilename,
                        String scriptContent,
                        String scriptHash,
+                       DeploymentExecutionMode executionMode,
+                       String projectScriptPath,
                        Instant createdAt,
                        Instant updatedAt) {
         this.id = id;
@@ -49,7 +54,8 @@ public class Deployment {
         this.serverId = requireNotNull(serverId, "部署服务器");
         this.createdAt = requireNotNull(createdAt, "创建时间").truncatedTo(ChronoUnit.MILLIS);
         this.updatedAt = requireNotNull(updatedAt, "更新时间").truncatedTo(ChronoUnit.MILLIS);
-        apply(name, serverId, remoteDirectory, scriptFilename, scriptContent, scriptHash);
+        apply(name, serverId, remoteDirectory, scriptFilename, scriptContent, scriptHash,
+                executionMode, projectScriptPath);
     }
 
     public static Deployment create(ProjectId projectId,
@@ -58,9 +64,21 @@ public class Deployment {
                                     String remoteDirectory,
                                     String scriptFilename,
                                     String scriptContent) {
+        return create(projectId, serverId, name, remoteDirectory, scriptFilename, scriptContent,
+                DeploymentExecutionMode.REMOTE_SCRIPT, null);
+    }
+
+    public static Deployment create(ProjectId projectId,
+                                    DeploymentServerId serverId,
+                                    String name,
+                                    String remoteDirectory,
+                                    String scriptFilename,
+                                    String scriptContent,
+                                    DeploymentExecutionMode executionMode,
+                                    String projectScriptPath) {
         Instant now = now();
         return new Deployment(null, projectId, serverId, name, remoteDirectory,
-                scriptFilename, scriptContent, null, now, now);
+                scriptFilename, scriptContent, null, executionMode, projectScriptPath, now, now);
     }
 
     public static Deployment restore(DeploymentId id,
@@ -73,8 +91,26 @@ public class Deployment {
                                      String scriptHash,
                                      Instant createdAt,
                                      Instant updatedAt) {
+        return restore(id, projectId, serverId, name, remoteDirectory, scriptFilename,
+                scriptContent, scriptHash, DeploymentExecutionMode.REMOTE_SCRIPT, null,
+                createdAt, updatedAt);
+    }
+
+    public static Deployment restore(DeploymentId id,
+                                     ProjectId projectId,
+                                     DeploymentServerId serverId,
+                                     String name,
+                                     String remoteDirectory,
+                                     String scriptFilename,
+                                     String scriptContent,
+                                     String scriptHash,
+                                     DeploymentExecutionMode executionMode,
+                                     String projectScriptPath,
+                                     Instant createdAt,
+                                     Instant updatedAt) {
         return new Deployment(requireNotNull(id, "部署 ID"), projectId, serverId, name,
-                remoteDirectory, scriptFilename, scriptContent, scriptHash, createdAt, updatedAt);
+                remoteDirectory, scriptFilename, scriptContent, scriptHash, executionMode,
+                projectScriptPath, createdAt, updatedAt);
     }
 
     public void update(String name,
@@ -82,8 +118,19 @@ public class Deployment {
                        String remoteDirectory,
                        String scriptFilename,
                        String scriptContent) {
+        update(name, serverId, remoteDirectory, scriptFilename, scriptContent,
+                DeploymentExecutionMode.REMOTE_SCRIPT, null);
+    }
+
+    public void update(String name,
+                       DeploymentServerId serverId,
+                       String remoteDirectory,
+                       String scriptFilename,
+                       String scriptContent,
+                       DeploymentExecutionMode executionMode,
+                       String projectScriptPath) {
         apply(name, serverId, remoteDirectory,
-                scriptFilename, scriptContent, null);
+                scriptFilename, scriptContent, null, executionMode, projectScriptPath);
         this.updatedAt = now();
     }
 
@@ -99,7 +146,8 @@ public class Deployment {
             throw new DomainException("部署尚未持久化，不能执行");
         }
         return new DeploymentSnapshot(id, projectId, serverId, name,
-                remoteDirectory, scriptFilename, scriptContent, scriptHash);
+                remoteDirectory, scriptFilename, scriptContent, scriptHash,
+                executionMode, projectScriptPath);
     }
 
     private void apply(String name,
@@ -107,11 +155,17 @@ public class Deployment {
                        String remoteDirectory,
                        String scriptFilename,
                        String scriptContent,
-                       String scriptHash) {
+                       String scriptHash,
+                       DeploymentExecutionMode executionMode,
+                       String projectScriptPath) {
         this.name = requireName(name);
         this.serverId = requireNotNull(serverId, "部署服务器");
         this.remoteDirectory = requireRemoteDirectory(remoteDirectory);
         applyScript(scriptFilename, scriptContent, scriptHash);
+        this.executionMode = executionMode == null ? DeploymentExecutionMode.REMOTE_SCRIPT : executionMode;
+        this.projectScriptPath = this.executionMode == DeploymentExecutionMode.PROJECT_SCRIPT
+                ? requireProjectScriptPath(projectScriptPath)
+                : null;
     }
 
     private void applyScript(String filename, String content, String hash) {
@@ -168,6 +222,26 @@ public class Deployment {
         }
         if (value.contains("/") || value.contains("\\")) {
             throw new DomainException("部署脚本文件名不能包含路径分隔符：" + value);
+        }
+        return value;
+    }
+
+    private static String requireProjectScriptPath(String scriptPath) {
+        String value = requireText(scriptPath, "项目脚本路径").trim();
+        while (value.startsWith("./")) {
+            value = value.substring(2);
+        }
+        if (value.length() > MAX_SCRIPT_PATH_LENGTH) {
+            throw new DomainException(
+                    "项目脚本路径超长（上限 " + MAX_SCRIPT_PATH_LENGTH + " 字符）：" + value.length());
+        }
+        if (value.startsWith("/") || value.contains("\\")) {
+            throw new DomainException("项目脚本路径必须是项目内的相对路径：" + value);
+        }
+        for (String segment : value.split("/")) {
+            if (segment.isBlank() || ".".equals(segment) || "..".equals(segment)) {
+                throw new DomainException("项目脚本路径不能包含空段、. 或 ..：" + value);
+            }
         }
         return value;
     }
@@ -230,6 +304,14 @@ public class Deployment {
 
     public String getScriptHash() {
         return scriptHash;
+    }
+
+    public DeploymentExecutionMode getExecutionMode() {
+        return executionMode;
+    }
+
+    public String getProjectScriptPath() {
+        return projectScriptPath;
     }
 
     public int getScriptSize() {

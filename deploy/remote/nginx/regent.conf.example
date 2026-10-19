@@ -35,6 +35,13 @@ server {
     gzip_vary on;
     gzip_disable "MSIE [1-6]\.";
 
+    # 安装包不经过中继：大文件由 Nginx 直接发送，支持 Range，避免 40s 超时和 32MB 缓冲上限。
+    location ^~ /downloads/ {
+        alias /root/app/regent-relay/downloads/;
+        autoindex off;
+        add_header Cache-Control "public, max-age=604800";
+    }
+
     # 外部执行者协议是给本机 codex/CLI 用的免登录入口，不通过公网中继暴露。
     # 它按项目标识找活，没有浏览器账号身份；一旦公网可达，等于绕过账户数据隔离。
     location = /api/agent {

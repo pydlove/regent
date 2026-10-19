@@ -7,5 +7,7 @@ public record DeploymentSaveRequest(
         String name,
         String remoteDirectory,
         String scriptFilename,
-        String scriptContent) {
+        String scriptContent,
+        String executionMode,
+        String projectScriptPath) {
 }

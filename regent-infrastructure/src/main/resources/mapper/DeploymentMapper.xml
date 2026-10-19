@@ -4,7 +4,8 @@
 
     <sql id="deploymentColumns">
         id, project_id, server_id, name, remote_directory,
-        script_filename, script_content, script_hash, created_at, updated_at
+        script_filename, script_content, script_hash, execution_mode, project_script_path,
+        created_at, updated_at
     </sql>
 
     <select id="selectById"
@@ -74,10 +75,12 @@
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO deployment (
             project_id, server_id, name, remote_directory,
-            script_filename, script_content, script_hash, deleted, created_at, updated_at
+            script_filename, script_content, script_hash, execution_mode, project_script_path,
+            deleted, created_at, updated_at
         ) VALUES (
             #{projectId}, #{serverId}, #{name}, #{remoteDirectory},
-            #{scriptFilename}, #{scriptContent}, #{scriptHash}, 0, #{createdAt}, #{updatedAt}
+            #{scriptFilename}, #{scriptContent}, #{scriptHash}, #{executionMode}, #{projectScriptPath},
+            0, #{createdAt}, #{updatedAt}
         )
     </insert>
 
@@ -89,6 +92,8 @@
             script_filename = #{scriptFilename},
             script_content = #{scriptContent},
             script_hash = #{scriptHash},
+            execution_mode = #{executionMode},
+            project_script_path = #{projectScriptPath},
             updated_at = #{updatedAt}
         WHERE id = #{id} AND deleted = 0
     </update>

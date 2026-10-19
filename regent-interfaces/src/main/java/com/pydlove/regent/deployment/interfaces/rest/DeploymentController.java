@@ -9,6 +9,7 @@ import com.pydlove.regent.deployment.application.query.DeploymentQueryService;
 import com.pydlove.regent.deployment.application.query.DeploymentRunQueryService;
 import com.pydlove.regent.deployment.application.query.DeploymentServerQueryService;
 import com.pydlove.regent.deployment.domain.model.DeploymentId;
+import com.pydlove.regent.deployment.domain.model.DeploymentExecutionMode;
 import com.pydlove.regent.deployment.domain.model.DeploymentRun;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunId;
 import com.pydlove.regent.deployment.domain.model.DeploymentServerId;
@@ -209,6 +210,8 @@ public class DeploymentController {
                 request.name(),
                 request.remoteDirectory(),
                 request.scriptFilename(),
-                request.scriptContent());
+                request.scriptContent(),
+                DeploymentExecutionMode.parse(request.executionMode()),
+                request.projectScriptPath());
     }
 }

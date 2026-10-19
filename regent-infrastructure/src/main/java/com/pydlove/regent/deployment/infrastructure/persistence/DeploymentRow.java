@@ -16,6 +16,8 @@ public class DeploymentRow {
     private String scriptFilename;
     private String scriptContent;
     private String scriptHash;
+    private String executionMode;
+    private String projectScriptPath;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -4,19 +4,22 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pydlove.regent.release.interfaces.dto.ReleaseAssetResponse;
 import com.pydlove.regent.release.interfaces.dto.ReleaseManifestResponse;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.UriUtils;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,7 +33,6 @@ import java.util.Map;
  * 提供版本检查和下载。文件不会进入仓库，安装包路径只允许落在该目录内。
  */
 @RestController
-@RequestMapping("/api/release")
 public class ReleaseController {
 
     private static final String MANIFEST_FILE = "latest.json";
@@ -45,8 +47,9 @@ public class ReleaseController {
         this.downloadsDirectory = Path.of(downloadsDirectory).toAbsolutePath().normalize();
     }
 
-    @GetMapping("/latest")
-    public ReleaseManifestResponse latest() {
+    @GetMapping("/api/release/latest")
+    public ReleaseManifestResponse latest(HttpServletResponse response) {
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
         JsonNode manifest = readManifest();
         if (manifest == null) {
             return new ReleaseManifestResponse(null, null, null, null, null, Map.of());
@@ -60,7 +63,7 @@ public class ReleaseController {
             }
             downloads.put(platform, new ReleaseAssetResponse(
                     filename,
-                    "/api/release/download/" + platform,
+                    "/downloads/" + UriUtils.encodePathSegment(filename, StandardCharsets.UTF_8),
                     asset.path("sizeBytes").asLong(0),
                     text(asset, "sha256")));
         }
@@ -73,8 +76,8 @@ public class ReleaseController {
                 downloads);
     }
 
-    @GetMapping("/download/{platform}")
-    public ResponseEntity<InputStreamResource> download(@PathVariable String platform) throws IOException {
+    @GetMapping("/api/release/download/{platform}")
+    public ResponseEntity<Void> download(@PathVariable String platform) {
         if (!isKnownPlatform(platform)) {
             return ResponseEntity.notFound().build();
         }
@@ -91,6 +94,30 @@ public class ReleaseController {
         if (!Files.isRegularFile(file)) {
             return ResponseEntity.notFound().build();
         }
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create("/downloads/" + UriUtils.encodePathSegment(
+                        filename, StandardCharsets.UTF_8)))
+                .build();
+    }
+
+    /**
+     * 公网下载的同一路径。Nginx 在生产环境直接从这里读静态文件，不再经过中继；
+     * 本地开发由 Vite 把 /downloads 代理到本机后端。
+     */
+    @GetMapping("/downloads/{filename}")
+    public ResponseEntity<InputStreamResource> downloadByName(@PathVariable String filename) throws IOException {
+        String safeFilename = safeFilename(filename);
+        if (safeFilename == null) {
+            return ResponseEntity.notFound().build();
+        }
+        Path file = downloadFile(safeFilename);
+        if (!Files.isRegularFile(file)) {
+            return ResponseEntity.notFound().build();
+        }
+        return serve(file, safeFilename);
+    }
+
+    private static ResponseEntity<InputStreamResource> serve(Path file, String filename) throws IOException {
         MediaType mediaType = MediaTypeFactory.getMediaType(filename)
                 .orElse(MediaType.APPLICATION_OCTET_STREAM);
         return ResponseEntity.ok()

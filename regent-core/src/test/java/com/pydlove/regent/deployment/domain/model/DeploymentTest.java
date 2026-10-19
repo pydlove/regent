@@ -46,6 +46,22 @@ class DeploymentTest {
                 "生产", "/opt", "../deploy.sh", "echo ok"));
     }
 
+    @Test
+    @DisplayName("项目发布脚本只接受项目内相对路径")
+    void validatesProjectScriptPath() {
+        Deployment deployment = Deployment.create(
+                ProjectId.of(7L), DeploymentServerId.of(9L), "完整发布",
+                "/root/app", "deploy.sh", "echo ok",
+                DeploymentExecutionMode.PROJECT_SCRIPT, "./deploy/remote/deploy.sh");
+
+        assertEquals(DeploymentExecutionMode.PROJECT_SCRIPT, deployment.getExecutionMode());
+        assertEquals("deploy/remote/deploy.sh", deployment.getProjectScriptPath());
+        assertThrows(DomainException.class, () -> Deployment.create(
+                ProjectId.of(7L), DeploymentServerId.of(9L), "越界发布",
+                "/root/app", "deploy.sh", "echo ok",
+                DeploymentExecutionMode.PROJECT_SCRIPT, "../deploy.sh"));
+    }
+
     private static Deployment deployment(String remoteDirectory) {
         return Deployment.create(
                 ProjectId.of(7L), DeploymentServerId.of(9L),

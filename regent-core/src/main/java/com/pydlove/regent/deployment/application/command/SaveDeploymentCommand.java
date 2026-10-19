@@ -1,5 +1,6 @@
 package com.pydlove.regent.deployment.application.command;
 
+import com.pydlove.regent.deployment.domain.model.DeploymentExecutionMode;
 import com.pydlove.regent.deployment.domain.model.DeploymentServerId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 
@@ -10,5 +11,17 @@ public record SaveDeploymentCommand(
         String name,
         String remoteDirectory,
         String scriptFilename,
-        String scriptContent) {
+        String scriptContent,
+        DeploymentExecutionMode executionMode,
+        String projectScriptPath) {
+
+    public SaveDeploymentCommand(ProjectId projectId,
+                                 DeploymentServerId serverId,
+                                 String name,
+                                 String remoteDirectory,
+                                 String scriptFilename,
+                                 String scriptContent) {
+        this(projectId, serverId, name, remoteDirectory, scriptFilename, scriptContent,
+                DeploymentExecutionMode.REMOTE_SCRIPT, null);
+    }
 }

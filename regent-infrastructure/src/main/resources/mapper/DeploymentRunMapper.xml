@@ -4,8 +4,8 @@
 
     <sql id="runColumns">
         id, deployment_id, project_id, deployment_name, host, port, ssh_username, auth_type,
-        remote_directory, script_filename, script_content, script_hash, status, exit_code,
-        summary, queued_at, started_at, finished_at, created_at
+        remote_directory, script_filename, script_content, script_hash, execution_mode,
+        project_script_path, status, exit_code, summary, queued_at, started_at, finished_at, created_at
     </sql>
 
     <select id="selectById"
@@ -65,12 +65,13 @@
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO deployment_run (
             deployment_id, project_id, deployment_name, host, port, ssh_username, auth_type,
-            remote_directory, script_filename, script_content, script_hash, status, exit_code,
-            summary, queued_at, started_at, finished_at, created_at
+            remote_directory, script_filename, script_content, script_hash, execution_mode,
+            project_script_path, status, exit_code, summary, queued_at, started_at, finished_at, created_at
         ) VALUES (
             #{deploymentId}, #{projectId}, #{deploymentName}, #{host}, #{port}, #{sshUsername}, #{authType},
-            #{remoteDirectory}, #{scriptFilename}, #{scriptContent}, #{scriptHash}, #{status}, #{exitCode},
-            #{summary}, #{queuedAt}, #{startedAt}, #{finishedAt}, #{createdAt}
+            #{remoteDirectory}, #{scriptFilename}, #{scriptContent}, #{scriptHash}, #{executionMode},
+            #{projectScriptPath}, #{status}, #{exitCode}, #{summary}, #{queuedAt}, #{startedAt},
+            #{finishedAt}, #{createdAt}
         )
     </insert>
 

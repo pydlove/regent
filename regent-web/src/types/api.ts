@@ -460,6 +460,7 @@ export type TestCaseBatchRunResult = {
 }
 
 export type DeploymentAuthType = 'KEY' | 'PASSWORD'
+export type DeploymentExecutionMode = 'REMOTE_SCRIPT' | 'PROJECT_SCRIPT'
 
 export type DeploymentRunStatus =
   | 'QUEUED'
@@ -485,6 +486,8 @@ export type DeploymentSummary = {
   scriptFilename: string
   scriptHash: string
   scriptSize: number
+  executionMode: DeploymentExecutionMode
+  projectScriptPath: string | null
   latestRunStatus: DeploymentRunStatus | null
   latestRunAt: string | null
   createdAt: string
@@ -540,6 +543,8 @@ export type DeploymentRunSummary = {
   port: number
   username: string
   authType: DeploymentAuthType
+  executionMode: DeploymentExecutionMode
+  projectScriptPath: string | null
   status: DeploymentRunStatus
   exitCode: number | null
   summary: string | null

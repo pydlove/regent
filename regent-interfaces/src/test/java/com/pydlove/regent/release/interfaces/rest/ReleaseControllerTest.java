@@ -13,6 +13,7 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -41,13 +42,17 @@ class ReleaseControllerTest {
         mvc.perform(get("/api/release/latest"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.version").value("1.2.0"))
-                .andExpect(jsonPath("$.downloads.macos.url").value("/api/release/download/macos"))
+                .andExpect(jsonPath("$.downloads.macos.url").value("/downloads/Regent.dmg"))
                 .andExpect(jsonPath("$.downloads.windows").doesNotExist());
 
-        byte[] content = mvc.perform(get("/api/release/download/macos"))
+        mvc.perform(get("/api/release/download/macos"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "/downloads/Regent.dmg"));
+
+        byte[] staticContent = mvc.perform(get("/downloads/Regent.dmg"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsByteArray();
-        assertArrayEquals("dmg-content".getBytes(StandardCharsets.UTF_8), content);
+        assertArrayEquals("dmg-content".getBytes(StandardCharsets.UTF_8), staticContent);
     }
 
     @Test

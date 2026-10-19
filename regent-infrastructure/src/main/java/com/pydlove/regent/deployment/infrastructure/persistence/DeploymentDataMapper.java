@@ -2,6 +2,7 @@ package com.pydlove.regent.deployment.infrastructure.persistence;
 
 import com.pydlove.regent.deployment.domain.model.Deployment;
 import com.pydlove.regent.deployment.domain.model.DeploymentAuthType;
+import com.pydlove.regent.deployment.domain.model.DeploymentExecutionMode;
 import com.pydlove.regent.deployment.domain.model.DeploymentId;
 import com.pydlove.regent.deployment.domain.model.DeploymentServerId;
 import com.pydlove.regent.deployment.domain.model.DeploymentRun;
@@ -29,6 +30,8 @@ public final class DeploymentDataMapper {
         data.setScriptFilename(deployment.getScriptFilename());
         data.setScriptContent(deployment.getScriptContent());
         data.setScriptHash(deployment.getScriptHash());
+        data.setExecutionMode(deployment.getExecutionMode().name());
+        data.setProjectScriptPath(deployment.getProjectScriptPath());
         data.setCreatedAt(toDb(deployment.getCreatedAt()));
         data.setUpdatedAt(toDb(deployment.getUpdatedAt()));
         return data;
@@ -44,6 +47,8 @@ public final class DeploymentDataMapper {
                 row.getScriptFilename(),
                 row.getScriptContent(),
                 row.getScriptHash(),
+                DeploymentExecutionMode.parse(row.getExecutionMode()),
+                row.getProjectScriptPath(),
                 toInstant(row.getCreatedAt()),
                 toInstant(row.getUpdatedAt()));
     }
@@ -62,6 +67,8 @@ public final class DeploymentDataMapper {
         data.setScriptFilename(run.getScriptFilename());
         data.setScriptContent(run.getScriptContent());
         data.setScriptHash(run.getScriptHash());
+        data.setExecutionMode(run.getExecutionMode().name());
+        data.setProjectScriptPath(run.getProjectScriptPath());
         data.setStatus(run.getStatus().name());
         data.setExitCode(run.getExitCode());
         data.setSummary(run.getSummary());
@@ -86,6 +93,8 @@ public final class DeploymentDataMapper {
                 row.getScriptFilename(),
                 row.getScriptContent(),
                 row.getScriptHash(),
+                DeploymentExecutionMode.parse(row.getExecutionMode()),
+                row.getProjectScriptPath(),
                 DeploymentRunStatus.parse(row.getStatus()),
                 row.getExitCode(),
                 row.getSummary(),

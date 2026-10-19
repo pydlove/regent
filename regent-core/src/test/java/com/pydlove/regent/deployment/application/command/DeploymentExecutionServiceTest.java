@@ -2,12 +2,16 @@ package com.pydlove.regent.deployment.application.command;
 
 import com.pydlove.regent.deployment.domain.model.Deployment;
 import com.pydlove.regent.deployment.domain.model.DeploymentAuthType;
+import com.pydlove.regent.deployment.domain.model.DeploymentExecutionMode;
 import com.pydlove.regent.deployment.domain.model.DeploymentExecutionResult;
 import com.pydlove.regent.deployment.domain.model.DeploymentRun;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunStatus;
 import com.pydlove.regent.deployment.domain.model.DeploymentServer;
 import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.project.domain.repository.ProjectProfile;
+import com.pydlove.regent.shared.kernel.DecisionLevel;
 import com.pydlove.regent.support.DeploymentFakes;
+import com.pydlove.regent.support.ExecutionFakes;
 import com.pydlove.regent.shared.domain.TransactionRunner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -29,6 +33,7 @@ class DeploymentExecutionServiceTest {
     private DeploymentFakes.Servers servers;
     private DeploymentFakes.Logs logs;
     private DeploymentFakes.Credentials credentials;
+    private ExecutionFakes.Projects projects;
     private DeploymentFakes.ScriptedExecutor executor;
     private DeploymentExecutionService service;
     private Deployment deployment;
@@ -41,11 +46,20 @@ class DeploymentExecutionServiceTest {
         servers = new DeploymentFakes.Servers();
         logs = new DeploymentFakes.Logs();
         credentials = new DeploymentFakes.Credentials();
+        projects = new ExecutionFakes.Projects()
+                .put(new ProjectProfile(
+                        ProjectId.of(7L),
+                        "regent",
+                        "Regent",
+                        "/Users/panyong/shanjie/Regent",
+                        DecisionLevel.L2,
+                        true));
         executor = new DeploymentFakes.ScriptedExecutor();
         service = new DeploymentExecutionService(
                 deployments,
                 runs,
                 servers,
+                projects,
                 executor,
                 credentials,
                 logs,
@@ -70,6 +84,24 @@ class DeploymentExecutionServiceTest {
         assertTrue(logs.read(run.getId()).contains("fake output"));
         assertEquals(null, executor.requests().get(0).password());
         assertEquals(ProjectId.of(7L), executor.requests().get(0).projectId());
+        assertEquals("/Users/panyong/shanjie/Regent",
+                executor.requests().get(0).projectDirectory());
+    }
+
+    @Test
+    @DisplayName("项目发布脚本携带项目目录、脚本路径和执行方式")
+    void passesProjectScriptContext() {
+        Deployment projectDeployment = deployments.put(Deployment.create(
+                ProjectId.of(7L), server.getId(), "本机完整发布",
+                "/root/app", "deploy.sh", validScript(),
+                DeploymentExecutionMode.PROJECT_SCRIPT, "deploy/remote/deploy.sh"));
+
+        service.start(projectDeployment.getId());
+
+        var request = executor.requests().get(0);
+        assertEquals(DeploymentExecutionMode.PROJECT_SCRIPT, request.executionMode());
+        assertEquals("deploy/remote/deploy.sh", request.projectScriptPath());
+        assertEquals("/Users/panyong/shanjie/Regent", request.projectDirectory());
     }
 
     @Test

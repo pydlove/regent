@@ -250,7 +250,7 @@ log_info "2/7 构建前端"
 
 log_info "3/7 准备服务器目录"
 "${SSH_COMMAND[@]}" \
-    "mkdir -p $REMOTE_BASE/relay $REMOTE_BASE/frontend $REMOTE_BASE/script $REMOTE_BASE/logs $REMOTE_BASE/nginx"
+    "mkdir -p $REMOTE_BASE/relay $REMOTE_BASE/frontend $REMOTE_BASE/script $REMOTE_BASE/logs $REMOTE_BASE/nginx $REMOTE_BASE/downloads"
 
 log_info "4/7 上传中继与静态前端"
 JAR=$(ls -t "$PROJECT_DIR"/regent-relay/target/regent-relay-*.jar | head -1)
@@ -259,6 +259,12 @@ rsync -az -e "$RSYNC_SSH" "$JAR" "$REMOTE_HOST:$REMOTE_BASE/relay/regent-relay.j
 rsync -az --delete -e "$RSYNC_SSH" "$PROJECT_DIR/regent-web/dist/" "$REMOTE_HOST:$REMOTE_BASE/frontend/dist/"
 rsync -az -e "$RSYNC_SSH" "$DEPLOY_DIR/scripts/" "$REMOTE_HOST:$REMOTE_BASE/script/"
 rsync -az -e "$RSYNC_SSH" "$DEPLOY_DIR/nginx/" "$REMOTE_HOST:$REMOTE_BASE/nginx/"
+if [ -f "$HOME/.regent/downloads/latest.json" ]; then
+    log_info "上传安装包到公网静态下载目录"
+    rsync -az -e "$RSYNC_SSH" "$HOME/.regent/downloads/" "$REMOTE_HOST:$REMOTE_BASE/downloads/"
+else
+    log_warn "本机没有安装包清单：$HOME/.regent/downloads/latest.json，跳过安装包上传"
+fi
 "${SSH_COMMAND[@]}" "chmod +x $REMOTE_BASE/script/*.sh"
 
 log_info "5/7 初始化服务器凭据"
@@ -339,6 +345,10 @@ fi
 
 if grep -q 'listen 18787' "$CONF"; then
     echo "[nginx] 已有 Regent 配置（listen 18787），跳过写入：$CONF"
+    if ! grep -q 'location ^~ /downloads/' "$CONF"; then
+        echo "[nginx] 警告：现有配置缺少 /downloads 静态下载目录。"
+        echo "[nginx] 请参照 $REMOTE_BASE/nginx/regent.conf.example 补充后执行 nginx -t && nginx -s reload。"
+    fi
     nginx -s reload >/dev/null 2>&1 || systemctl reload nginx >/dev/null 2>&1 || true
 else
     BAK="$CONF.bak.$(date +%Y%m%d%H%M%S)-regent"

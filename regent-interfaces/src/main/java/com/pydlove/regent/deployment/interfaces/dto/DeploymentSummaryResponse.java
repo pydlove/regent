@@ -22,6 +22,8 @@ public record DeploymentSummaryResponse(
         String scriptFilename,
         String scriptHash,
         int scriptSize,
+        String executionMode,
+        String projectScriptPath,
         String latestRunStatus,
         Instant latestRunAt,
         Instant createdAt,
@@ -46,6 +48,8 @@ public record DeploymentSummaryResponse(
                 deployment.getScriptFilename(),
                 deployment.getScriptHash(),
                 deployment.getScriptSize(),
+                deployment.getExecutionMode().name(),
+                deployment.getProjectScriptPath(),
                 latest == null ? null : latest.getStatus().name(),
                 latest == null ? null : latest.getFinishedAt() != null
                         ? latest.getFinishedAt() : latest.getQueuedAt(),

@@ -42,6 +42,7 @@ final class RelayHeaders {
         "content-type",
         "etag",
         "last-modified",
+        "location",
         "set-cookie",
         "vary"
     );

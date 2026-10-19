@@ -1,6 +1,7 @@
 import { deleteRequest, get, postJson, postJsonWithTimeout, putJson } from '@/api/http'
 import type {
   DeploymentDetail,
+  DeploymentExecutionMode,
   DeploymentRunDetail,
   DeploymentRunSummary,
   DeploymentScriptGeneration,
@@ -15,6 +16,8 @@ export type SaveDeploymentInput = {
   remoteDirectory: string
   scriptFilename: string
   scriptContent: string
+  executionMode: DeploymentExecutionMode
+  projectScriptPath: string | null
 }
 
 export const listDeployments = (projectId?: number | null) =>

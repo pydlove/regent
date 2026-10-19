@@ -380,8 +380,12 @@ node scripts/publish-release.mjs \
 
 后端公开接口：
 
-- `GET /api/release/latest`：返回版本、说明、安装包大小/摘要和本机下载地址；
-- `GET /api/release/download/macos|windows`：从下载目录流式返回安装包。
+- `GET /api/release/latest`：返回版本、说明、安装包大小/摘要和 `/downloads/<文件名>` 下载地址；
+- `GET /downloads/<文件名>`：生产环境由公网 Nginx 直接静态发送，支持 Range，不经过中继；
+- `GET /api/release/download/macos|windows`：保留为本地/兼容入口，从本机下载目录流式返回。
+
+大文件下载不能走中继：中继按整包缓冲，默认请求超时 40 秒、响应体上限 32MB。
+部署脚本会把 `~/.regent/downloads` 同步到服务器的 `$REMOTE_BASE/downloads`。
 
 浏览器端每 30 分钟和窗口重新获得焦点时读取清单；版本变化时提示刷新页面。桌面壳后续可以在同一份清单上增加 Tauri updater 的签名平台条目。
 

@@ -26,6 +26,10 @@ export default defineConfig({
     // 端口是约定的一部分：被占用时宁可启动失败，也不许悄悄换一个
     // （脚本与文档都按这个端口探活，静默换端口会让探活探到别的服务上）
     strictPort: true,
-    proxy: { '/api': { target: apiTarget, changeOrigin: true } },
+    proxy: {
+      '/api': { target: apiTarget, changeOrigin: true },
+      // 安装包本地也走同一个 /downloads 路径，生产由 Nginx 直接静态发送。
+      '/downloads': { target: apiTarget, changeOrigin: true },
+    },
   },
 })

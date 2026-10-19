@@ -1,6 +1,7 @@
 package com.pydlove.regent.deployment.infrastructure.process;
 
 import com.pydlove.regent.deployment.domain.model.DeploymentAuthType;
+import com.pydlove.regent.deployment.domain.model.DeploymentExecutionMode;
 import com.pydlove.regent.deployment.domain.model.DeploymentExecutionRequest;
 import com.pydlove.regent.deployment.domain.model.DeploymentExecutionResult;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunId;
@@ -25,6 +26,66 @@ class ProcessDeploymentExecutorTest {
 
     @TempDir
     Path temp;
+
+    @Test
+    @DisplayName("项目发布脚本在项目目录本机执行，连接参数走 argv，密码只走环境变量")
+    void executesProjectReleaseScriptLocally() throws Exception {
+        Path project = temp.resolve("project");
+        Path script = project.resolve("deploy/remote/deploy.sh");
+        Files.createDirectories(script.getParent());
+        String content = """
+                #!/usr/bin/env bash
+                set -Eeuo pipefail
+                printf '%s\\n' "$@" > args.txt
+                printf '%s' "$REGENT_SERVER_PASSWORD" > password.txt
+                printf '%s' "$REGENT_REMOTE_BASE" > remote-base.txt
+                echo "project release output"
+                """;
+        Files.writeString(script, content, StandardCharsets.UTF_8);
+
+        ProcessDeploymentExecutor executor = new ProcessDeploymentExecutor(
+                temp.resolve("ssh-must-not-run").toString(), Duration.ofSeconds(5));
+        StringBuilder log = new StringBuilder();
+
+        DeploymentExecutionResult result = executor.execute(new DeploymentExecutionRequest(
+                DeploymentRunId.of(42L),
+                ProjectId.of(7L),
+                "api.example.com",
+                2222,
+                "deploy",
+                DeploymentAuthType.PASSWORD,
+                "/root/app",
+                "deploy.sh",
+                content,
+                DeploymentExecutionMode.PROJECT_SCRIPT,
+                "deploy/remote/deploy.sh",
+                "s3cret",
+                project.toString()), log::append);
+
+        assertEquals(DeploymentRunStatus.SUCCESS, result.status());
+        assertTrue(log.toString().contains("project release output"));
+        assertTrue(log.toString().contains("mvn="));
+        assertTrue(log.toString().contains("npm="));
+        assertTrue(log.toString().contains("node="));
+        assertEquals(List.of(
+                "-H", "api.example.com",
+                "-P", "2222",
+                "-u", "deploy",
+                "-r", "/root/app"), Files.readAllLines(project.resolve("args.txt"), StandardCharsets.UTF_8));
+        assertEquals("s3cret", Files.readString(project.resolve("password.txt"), StandardCharsets.UTF_8));
+        assertEquals("/root/app", Files.readString(
+                project.resolve("remote-base.txt"), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    @DisplayName("本机发布 PATH 补齐用户级 Maven、NVM 与系统工具目录")
+    void enrichesLocalProcessPath() {
+        String path = ProcessDeploymentExecutor.localProcessPath("/usr/bin:/bin");
+
+        assertTrue(path.contains("/usr/local/bin"));
+        assertTrue(path.endsWith("/sbin"));
+        assertTrue(path.startsWith("/usr/bin:/bin"));
+    }
 
     @Test
     @DisplayName("远端脚本通过固定环境变量拿到部署上下文，SSH 密码不进入脚本参数")
