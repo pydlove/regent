@@ -334,6 +334,15 @@ try {
       run('git', ['commit', '-m', `chore(release): 发布 ${version}`])
     }
     tagCommit = capture('git', ['rev-parse', 'HEAD'])
+  }
+
+  if (deploy) {
+    run(path.join(projectDirectory, 'deploy/remote/deploy.sh'), [], {
+      env: deploymentEnvironment(),
+    })
+  }
+
+  if (tagCommit) {
     run('git', [
       'tag',
       '-a',
@@ -346,12 +355,6 @@ try {
       run('git', ['push', 'origin', tagName])
     }
     console.log(`Git 标签：${tagName} -> ${tagCommit.slice(0, 8)}`)
-  }
-
-  if (deploy) {
-    run(path.join(projectDirectory, 'deploy/remote/deploy.sh'), [], {
-      env: deploymentEnvironment(),
-    })
   }
 
   console.log('\n发布完成')
