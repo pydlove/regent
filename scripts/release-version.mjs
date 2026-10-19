@@ -68,6 +68,23 @@ function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
 }
 
+function preflightTagPush(tagName) {
+  try {
+    capture('git', [
+      'push',
+      '--dry-run',
+      'origin',
+      `HEAD:refs/heads/regent-release-auth-${process.pid}-${Date.now()}`,
+    ])
+  } catch (error) {
+    throw new Error(
+      `无法推送 Git 标签 ${tagName}：GitHub 凭据不可用。`
+      + `请先执行 gh auth login && gh auth setup-git，再重新发布。`
+      + `\n${error.message}`,
+    )
+  }
+}
+
 function buildReleaseNotes(notes) {
   const items = notes
     .split(/[;；\n]+/)
@@ -217,6 +234,7 @@ if (!flag('no-tag')) {
       + '如只是重新生成安装包，请加 --no-tag。',
     )
   }
+  if (flag('push-tag') && !flag('dry-run')) preflightTagPush(tagName)
   tagCommit = capture('git', ['rev-parse', 'HEAD'])
 }
 
@@ -305,6 +323,17 @@ try {
   published = true
 
   if (tagCommit) {
+    run('git', [
+      'add',
+      releasesPath,
+      desktopPackagePath,
+      desktopLockPath,
+      desktopReleaseInfoPath,
+    ])
+    if (capture('git', ['status', '--porcelain']) !== '') {
+      run('git', ['commit', '-m', `chore(release): 发布 ${version}`])
+    }
+    tagCommit = capture('git', ['rev-parse', 'HEAD'])
     run('git', [
       'tag',
       '-a',
