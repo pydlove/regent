@@ -50,7 +50,8 @@ public class DeploymentServerCommandService {
                     command.host(),
                     command.port(),
                     command.username(),
-                    command.authType());
+                    command.authType(),
+                    command.defaultRemoteDirectory());
             requireNameAvailable(projectId, server.getName(), null);
             serverRepository.save(server);
             if (server.getAuthType() == DeploymentAuthType.PASSWORD) {
@@ -71,7 +72,7 @@ public class DeploymentServerCommandService {
             String nextName = command.name() == null ? server.getName() : command.name().trim();
             requireNameAvailable(server.getProjectId(), nextName, id);
             server.update(nextName, command.host(), command.port(), command.username(),
-                    command.authType());
+                    command.authType(), command.defaultRemoteDirectory());
             serverRepository.save(server);
             updateCredential(server, command.password());
             return server;

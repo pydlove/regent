@@ -505,6 +505,8 @@ export type DeploymentServer = {
   port: number
   username: string
   authType: DeploymentAuthType
+  /** 新建部署选择这台服务器时预填的远程工作目录。 */
+  defaultRemoteDirectory: string | null
   credentialConfigured: boolean
   deploymentCount: number
   createdAt: string

@@ -11,5 +11,17 @@ public record SaveDeploymentServerCommand(
         int port,
         String username,
         DeploymentAuthType authType,
+        String defaultRemoteDirectory,
         String password) {
+
+    /** 兼容不配置默认目录的调用方。 */
+    public SaveDeploymentServerCommand(ProjectId projectId,
+                                       String name,
+                                       String host,
+                                       int port,
+                                       String username,
+                                       DeploymentAuthType authType,
+                                       String password) {
+        this(projectId, name, host, port, username, authType, null, password);
+    }
 }

@@ -95,6 +95,13 @@ deploy/remote/    公网服务器：构建并部署无状态中继与静态前�
 ./deploy/remote/deploy.sh
 ```
 
+`deploy.sh` 是双模式入口：
+
+- 显式传入 `-H/--host`（或设置 `REGENT_SERVER_IP`）时，委托
+  `deploy/remote/deploy-local.sh` 完成本地构建、上传和公网部署。
+- 不传 `-H` 且由 Regent 注入 `REGENT_DEPLOY_DIRECTORY` 时，直接在当前服务器执行远端部署，
+  不会再建立 SSH 连接。
+
 也支持直接在命令行传入连接信息，且兼容 `sh` 启动：
 
 ```bash
@@ -128,6 +135,17 @@ bash deploy/remote/deploy.sh -H example.com -P 22 -u root -k ~/.ssh/id_rsa
 非交互场景仍可用环境变量跳过询问：`REGENT_SERVER_IP`、`REGENT_SSH_PORT`、
 `REGENT_SERVER_USER`、`REGENT_SERVER_PASSWORD`（密码认证）或
 `REGENT_SSH_KEY`（密钥认证）。
+
+通过 Regent 部署平台执行时，远端目录中可预先暂存：
+
+```text
+relay/regent-relay.jar.new     # 可选；存在时备份并替换线上 JAR
+frontend.tar.gz                # 可选；解压后覆盖 frontend/，归档需包含 frontend/ 根目录
+```
+
+两个文件都不存在时，脚本沿用当前线上 JAR 和前端，只重启并检查 `regent-relay`。
+远端目录既可以填 `/root/app/regent-relay`，也可以填父目录 `/root/app`；脚本会自动识别
+实际安装目录，避免把父目录误判成中继根目录。
 
 `deploy.sh` 会构建中继与前端，上传产物，并在首次部署时生成服务器端共享密钥。
 脚本不会把密钥打印到构建日志里；从服务器读取后写入本机 `~/.regent/relay-connector.env`：

@@ -14,7 +14,7 @@ import type {
   HourlyTokenUsagePoint,
   TokenUsageRange,
 } from '@/types/api'
-import { formatTokens } from '@/utils/format'
+import { formatTokenYi, formatTokens } from '@/utils/format'
 
 const props = defineProps<{
   projectId: number | null
@@ -169,6 +169,7 @@ const summary = computed(() =>
   ),
 )
 const total = computed(() => summary.value.input + summary.value.cachedInput + summary.value.output)
+const totalYi = computed(() => formatTokenYi(total.value))
 const activeValue = (point: UsagePoint) => (metric.value === 'runs' ? point.runCount : point.total)
 const maxValue = computed(() => Math.max(1, ...points.value.map(activeValue)))
 const hasUsage = computed(() => points.value.some((point) => activeValue(point) > 0))
@@ -208,6 +209,9 @@ function formatValue(value: number): string {
         <div class="rounded-panel border border-separator-soft bg-content px-3 py-2.5">
           <p class="text-caption text-label-tertiary">总消耗</p>
           <p class="tnum mt-1 text-title font-emphasis text-label">{{ formatValue(total) }}</p>
+          <p v-if="totalYi" class="tnum mt-0.5 text-caption text-label-tertiary">
+            ≈ {{ totalYi }} 亿 tokens
+          </p>
         </div>
         <div class="rounded-panel border border-separator-soft bg-content px-3 py-2.5">
           <p class="text-caption text-label-tertiary">输入</p>

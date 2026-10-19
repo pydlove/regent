@@ -8,5 +8,6 @@ public record DeploymentServerSaveRequest(
         Integer port,
         String username,
         String authType,
+        String defaultRemoteDirectory,
         String password) {
 }

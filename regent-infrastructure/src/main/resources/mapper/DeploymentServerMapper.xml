@@ -3,7 +3,8 @@
 <mapper namespace="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentServerMapper">
 
     <sql id="serverColumns">
-        id, project_id, name, host, port, ssh_username, auth_type, created_at, updated_at
+        id, project_id, name, host, port, ssh_username, auth_type,
+        default_remote_directory, created_at, updated_at
     </sql>
 
     <select id="selectById"
@@ -57,10 +58,11 @@
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO deployment_server (
-            project_id, name, host, port, ssh_username, auth_type, deleted, created_at, updated_at
+            project_id, name, host, port, ssh_username, auth_type,
+            default_remote_directory, deleted, created_at, updated_at
         ) VALUES (
-            #{projectId}, #{name}, #{host}, #{port}, #{sshUsername}, #{authType}, 0,
-            #{createdAt}, #{updatedAt}
+            #{projectId}, #{name}, #{host}, #{port}, #{sshUsername}, #{authType},
+            #{defaultRemoteDirectory}, 0, #{createdAt}, #{updatedAt}
         )
     </insert>
 
@@ -71,6 +73,7 @@
             port = #{port},
             ssh_username = #{sshUsername},
             auth_type = #{authType},
+            default_remote_directory = #{defaultRemoteDirectory},
             updated_at = #{updatedAt}
         WHERE id = #{id} AND deleted = 0
     </update>

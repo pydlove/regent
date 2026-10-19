@@ -497,10 +497,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     keywords: ['部署', '远程目录', 'REGENT_DEPLOY_DIRECTORY', '脚本', '目录', '自动识别'],
     answer: {
       paragraphs: [
-        '自动识别只读取脚本里写死的绝对路径或 ~ 路径。若脚本按平台规范使用 $REGENT_DEPLOY_DIRECTORY 或 ${REGENT_DEPLOY_DIRECTORY}，源码里就没有可推断的远程路径，字段会保持为空。',
-        '这时需要手动填写服务器上的项目根目录，通常是 package.json 所在目录。/usr/setup/.../static/... 这类 web_dir 是发布目标，不是构建工作目录，不要拿它当远程目录。',
+        '自动识别只读取脚本里写死的绝对路径或 ~ 路径。按平台规范编写的脚本使用 $REGENT_DEPLOY_DIRECTORY，源码里本来就没有可推断的路径。',
+        '正确做法是在“服务器”设置里填写一次默认远程目录（通常是 package.json 所在的项目根目录），新建部署选中这台服务器时会自动带出。也可以在当前部署里手动覆盖。',
+        '/usr/setup/.../static/... 这类 web_dir 是发布目标，不是构建工作目录，不要拿它当远程目录。',
       ],
-      note: '远程目录为空时 AI 生成与保存都会被禁用，填写后才能继续。',
+      note: '服务器默认目录和部署远程目录都为空时，AI 生成与保存会被禁用。',
       links: [{ label: '打开部署', to: '/deployments' }],
     },
   },

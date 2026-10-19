@@ -63,6 +63,12 @@ export function formatTokens(value: number): string {
   return `${(value / 1_000_000).toFixed(1)}M`
 }
 
+/** 中文用户对“亿”更敏感；超过一亿时补一个直观换算。 */
+export function formatTokenYi(value: number): string | null {
+  if (value < 100_000_000) return null
+  return (value / 100_000_000).toFixed(2)
+}
+
 /** 图片大小。截图大多落在几百 KB 到几 MB，进一位小数就够读了。 */
 export function formatBytes(bytes: number): string {
   if (bytes <= 0) return '—'

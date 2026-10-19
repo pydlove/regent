@@ -34,7 +34,7 @@ import Skeleton from '@/components/ui/skeleton/Skeleton.vue'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
 import { useTaskStore } from '@/stores/useTaskStore'
 import type { TaskStatus } from '@/types/task'
-import { formatRelative, formatTokens } from '@/utils/format'
+import { formatRelative, formatTokenYi, formatTokens } from '@/utils/format'
 
 const snapshot = ref<DashboardSnapshot | null>(null)
 const loading = ref(false)
@@ -172,6 +172,7 @@ type Metric = {
   label: string
   valueText: string
   unit: string
+  secondary?: string
   valueClass: string
   caption: string
 }
@@ -244,6 +245,9 @@ const metrics = computed<Metric[]>(() => {
       label: 'Token 消耗',
       valueText: formatTokenCount(current.tokenUsage.total),
       unit: 'tokens',
+      secondary: formatTokenYi(current.tokenUsage.total)
+        ? `≈ ${formatTokenYi(current.tokenUsage.total)} 亿 tokens`
+        : '',
       valueClass: 'text-label',
       caption:
         cachedHitRate.value === null
@@ -460,6 +464,12 @@ onUnmounted(() => {
                 {{ metric.unit }}
               </span>
             </div>
+            <p
+              v-if="metric.secondary"
+              class="tnum relative mt-0.5 text-subhead font-emphasis text-label-secondary"
+            >
+              {{ metric.secondary }}
+            </p>
             <p class="relative mt-1 line-clamp-1 text-subhead text-label-tertiary md:line-clamp-2">{{ metric.caption }}</p>
           </button>
         </section>

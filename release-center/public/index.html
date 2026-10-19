@@ -54,6 +54,28 @@
             </div>
           </section>
 
+          <section class="server-panel">
+            <div class="server-heading">
+              <div>
+                <p class="section-label">中继器与服务器</p>
+                <h2>公网发布与升级</h2>
+                <p>构建并上传最新中继器、静态前端，随后重启服务器服务。</p>
+              </div>
+              <span id="server-status" class="badge neutral">检查中</span>
+            </div>
+            <div class="server-meta">
+              <span>地址 <code id="server-url">—</code></span>
+              <span>连接器 <strong id="server-connector">—</strong></span>
+              <span>队列 <strong id="server-queue">—</strong></span>
+            </div>
+            <div class="server-actions">
+              <button id="server-refresh" class="button small" type="button">刷新状态</button>
+              <button id="server-deploy" class="button primary" type="button">
+                发布中继器并升级服务器
+              </button>
+            </div>
+          </section>
+
           <div id="workspace-warning" class="workspace-warning" hidden>
             当前工作区有未提交改动。版本内容和预览可以生成，但创建 Git 标签前必须先提交代码并刷新页面。
           </div>

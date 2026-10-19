@@ -15,6 +15,7 @@ public class DeploymentServerData {
     private Integer port;
     private String sshUsername;
     private String authType;
+    private String defaultRemoteDirectory;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -100,7 +100,10 @@ public class CodexDeploymentScriptGenerator implements DeploymentScriptGenerator
                 1. 必须保持只读，不得修改项目文件，不得创建、切换或删除 Git 分支。
                 2. 脚本会在目标服务器上执行，平台先把工作目录切到 REGENT_DEPLOY_DIRECTORY，再通过 bash 标准输入执行脚本。
                 3. 第一行必须是 #!/usr/bin/env bash，紧接着启用 set -Eeuo pipefail。
-                4. 使用 "$REGENT_DEPLOY_DIRECTORY" 作为远程目录，不得写死 cd /...；不得执行 ssh、scp 或 sftp。
+                4. 使用 "$REGENT_DEPLOY_DIRECTORY" 作为远程目录，不得写死 cd /...。
+                   平台以无参数方式执行上传后的脚本，必须直接进入远端部署逻辑。
+                   如需兼容本地发布，可把 ssh/scp/sftp 封装在仅由 -H/--host 触发的 run_local() 中；
+                   平台不会传 -H，因此这些命令不得在远端模式执行。
                 5. 不得接收主机、端口、用户名或密码；这些连接信息由平台负责。
                 6. 脚本必须完全非交互，不得使用 read -p；需要 sudo 时只能使用 sudo -n，并在失败时明确提示。
                 7. 生成前优先查找并阅读项目已有的部署脚本，重点检查 deploy/、script/、scripts/ 目录以及根目录下的 deploy*.sh。

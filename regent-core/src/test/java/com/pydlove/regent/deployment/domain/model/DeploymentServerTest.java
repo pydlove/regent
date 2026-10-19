@@ -32,4 +32,20 @@ class DeploymentServerTest {
         assertThrows(DomainException.class, () -> DeploymentServer.create(
                 ProjectId.of(7L), "生产", "bad host", 22, "root", DeploymentAuthType.KEY));
     }
+
+    @Test
+    @DisplayName("默认远程目录只接受绝对路径或 ~，并拒绝路径穿越")
+    void validatesDefaultRemoteDirectory() {
+        DeploymentServer server = DeploymentServer.create(
+                ProjectId.of(7L), "生产", "api.example.com", 22, "root",
+                DeploymentAuthType.KEY, "/srv/app-audit-frontend");
+        assertEquals("/srv/app-audit-frontend", server.getDefaultRemoteDirectory());
+
+        assertThrows(DomainException.class, () -> DeploymentServer.create(
+                ProjectId.of(7L), "生产", "api.example.com", 22, "root",
+                DeploymentAuthType.KEY, "relative/path"));
+        assertThrows(DomainException.class, () -> DeploymentServer.create(
+                ProjectId.of(7L), "生产", "api.example.com", 22, "root",
+                DeploymentAuthType.KEY, "/srv/../etc"));
+    }
 }

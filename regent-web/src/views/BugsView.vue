@@ -36,7 +36,7 @@ import {
 } from '@/types/bug'
 import { formatRelative } from '@/utils/format'
 
-/* 缺陷单按录入先后排序：先添加的在前，分页也沿这条顺序切。 */
+/* 缺陷单按录入先后倒序：最新添加的在前，分页也沿这条顺序切。 */
 
 const bugStore = useBugStore()
 const toast = useToast()

@@ -112,6 +112,7 @@ public class DeploymentServerController {
                 request.port(),
                 request.username(),
                 DeploymentAuthType.parse(request.authType()),
+                request.defaultRemoteDirectory(),
                 request.password());
     }
 }

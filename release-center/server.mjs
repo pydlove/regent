@@ -27,11 +27,29 @@ const runtimeDirectory = path.join(
   'release-center',
 )
 const draftPath = path.join(runtimeDirectory, 'draft.json')
+const lastJobPath = path.join(runtimeDirectory, 'last-job.json')
 const port = Number(process.env.REGENT_RELEASE_CENTER_PORT || 12600)
 const host = '127.0.0.1'
 const jobs = new Map()
 let activeJobId = null
 let generating = false
+
+fs.mkdirSync(runtimeDirectory, { recursive: true, mode: 0o700 })
+
+function persistJob(job) {
+  fs.writeFileSync(lastJobPath, `${JSON.stringify(job, null, 2)}\n`, { mode: 0o600 })
+}
+
+function loadLastJob() {
+  try {
+    const job = JSON.parse(fs.readFileSync(lastJobPath, 'utf8'))
+    if (job?.id && job?.version) jobs.set(job.id, job)
+  } catch {
+    // 还没有历史发布任务。
+  }
+}
+
+loadLastJob()
 
 function releases() {
   return JSON.parse(fs.readFileSync(releasesPath, 'utf8')).releases
@@ -78,6 +96,22 @@ function writeDraft(value, { existing = readDraft(), gitHead = '' } = {}) {
 
 function clearDraft() {
   fs.rmSync(draftPath, { force: true })
+}
+
+function relayConfiguration() {
+  const regentHome = process.env.REGENT_HOME?.trim() || path.join(os.homedir(), '.regent')
+  const envFile = path.join(regentHome, 'relay-connector.env')
+  const content = fs.readFileSync(envFile, 'utf8')
+  const serverUrl = content.match(/^REGENT_RELAY_SERVER_URL=(.+)$/m)?.[1]?.trim()
+  if (!serverUrl) throw new Error('relay-connector.env 缺少 REGENT_RELAY_SERVER_URL')
+  const url = new URL(serverUrl)
+  const environment = { ...process.env }
+  environment.REGENT_SERVER_IP ||= url.hostname
+  environment.REGENT_SERVER_USER ||= 'root'
+  environment.REGENT_SSH_PORT ||= '22'
+  const key = path.join(os.homedir(), '.ssh/id_rsa')
+  if (!environment.REGENT_SSH_KEY && fs.existsSync(key)) environment.REGENT_SSH_KEY = key
+  return { url: url.toString().replace(/\/$/, ''), environment }
 }
 
 function sendJson(response, status, value) {
@@ -225,6 +259,7 @@ function appendJobLog(job, chunk) {
   }
   if (job.logs.length > 2000) job.logs.splice(0, job.logs.length - 2000)
   job.updatedAt = new Date().toISOString()
+  persistJob(job)
 }
 
 function startPublish(payload) {
@@ -260,6 +295,7 @@ function startPublish(payload) {
   jobs.set(job.id, job)
   activeJobId = job.id
   job.logs.push(`开始发布 ${parsed.version}`)
+  persistJob(job)
   const child = spawn(process.execPath, args, {
     cwd: projectDirectory,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -272,6 +308,7 @@ function startPublish(payload) {
     job.error = error.message
     job.updatedAt = new Date().toISOString()
     activeJobId = null
+    persistJob(job)
     fs.rmSync(temporaryDirectory, { recursive: true, force: true })
   })
   child.on('close', (code) => {
@@ -279,8 +316,52 @@ function startPublish(payload) {
     job.error = code === 0 ? null : `发布进程退出码 ${code}`
     job.updatedAt = new Date().toISOString()
     activeJobId = null
+    persistJob(job)
     fs.rmSync(temporaryDirectory, { recursive: true, force: true })
     if (code === 0) clearDraft()
+  })
+  return job
+}
+
+function startServerDeploy() {
+  if (activeJobId) throw new Error('已有发布任务正在执行')
+  const { url, environment } = relayConfiguration()
+  const deployScript = path.join(projectDirectory, 'deploy/remote/deploy.sh')
+  if (!fs.existsSync(deployScript)) throw new Error('找不到公网部署脚本')
+  const job = {
+    id: crypto.randomUUID(),
+    version: '中继器与服务器',
+    kind: 'server-deploy',
+    title: '发布中继器并升级服务器',
+    status: 'running',
+    logs: [`开始发布 ${url}`],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    error: null,
+  }
+  jobs.set(job.id, job)
+  activeJobId = job.id
+  persistJob(job)
+  const child = spawn(deployScript, [], {
+    cwd: projectDirectory,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: environment,
+  })
+  child.stdout.on('data', (chunk) => appendJobLog(job, chunk))
+  child.stderr.on('data', (chunk) => appendJobLog(job, chunk))
+  child.on('error', (error) => {
+    job.status = 'failed'
+    job.error = error.message
+    job.updatedAt = new Date().toISOString()
+    activeJobId = null
+    persistJob(job)
+  })
+  child.on('close', (code) => {
+    job.status = code === 0 ? 'success' : 'failed'
+    job.error = code === 0 ? null : `服务器发布进程退出码 ${code}`
+    job.updatedAt = new Date().toISOString()
+    activeJobId = null
+    persistJob(job)
   })
   return job
 }
@@ -319,12 +400,43 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === 'GET' && pathname.startsWith('/api/jobs/')) {
     const id = pathname.slice('/api/jobs/'.length)
-    const job = jobs.get(id)
+    const job = id === 'last'
+      ? [...jobs.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+      : jobs.get(id)
     if (!job) {
       sendError(response, 404, '发布任务不存在')
       return
     }
     sendJson(response, 200, job)
+    return
+  }
+
+  if (request.method === 'GET' && pathname === '/api/server/status') {
+    try {
+      const { url } = relayConfiguration()
+      const healthResponse = await fetch(`${url}/health`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(5000),
+      })
+      if (!healthResponse.ok) throw new Error(`HTTP ${healthResponse.status}`)
+      const health = await healthResponse.json()
+      sendJson(response, 200, {
+        url,
+        reachable: true,
+        status: health.status || 'UNKNOWN',
+        connectorOnline: health.connectorOnline === true,
+        queueDepth: Number(health.queueDepth) || 0,
+      })
+    } catch (error) {
+      sendJson(response, 200, {
+        url: '',
+        reachable: false,
+        status: 'OFFLINE',
+        connectorOnline: false,
+        queueDepth: 0,
+        error: error.message,
+      })
+    }
     return
   }
 
@@ -355,6 +467,16 @@ async function handleApi(request, response, pathname) {
 
   if (request.method !== 'POST' || !localOriginAllowed(request)) {
     sendError(response, 403, '只允许本地发布中心操作')
+    return
+  }
+
+  if (pathname === '/api/server/deploy') {
+    try {
+      const job = startServerDeploy()
+      sendJson(response, 202, { jobId: job.id })
+    } catch (error) {
+      sendError(response, 400, error.message)
+    }
     return
   }
 

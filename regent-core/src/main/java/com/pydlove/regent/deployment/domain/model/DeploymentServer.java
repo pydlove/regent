@@ -7,7 +7,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
 /**
- * 可复用的部署服务器。远程目录和脚本属于部署配置，不在这里。
+ * 可复用的部署服务器。具体部署目录和脚本属于部署配置；这里只保存一个可复用的
+ * 默认远程目录，用来在新建部署时预填 {@code REGENT_DEPLOY_DIRECTORY}。
  *
  * <p>SSH 密码同样不在聚合里，由独立凭据端口按服务器 ID 加密保存。
  */
@@ -16,6 +17,7 @@ public class DeploymentServer {
     private static final int MAX_NAME_LENGTH = 128;
     private static final int MAX_HOST_LENGTH = 255;
     private static final int MAX_USERNAME_LENGTH = 32;
+    private static final int MAX_REMOTE_DIRECTORY_LENGTH = 512;
 
     private DeploymentServerId id;
     private final ProjectId projectId;
@@ -24,6 +26,7 @@ public class DeploymentServer {
     private int port;
     private String username;
     private DeploymentAuthType authType;
+    private String defaultRemoteDirectory;
     private final Instant createdAt;
     private Instant updatedAt;
 
@@ -34,13 +37,14 @@ public class DeploymentServer {
                              int port,
                              String username,
                              DeploymentAuthType authType,
+                             String defaultRemoteDirectory,
                              Instant createdAt,
                              Instant updatedAt) {
         this.id = id;
         this.projectId = requireNotNull(projectId, "归属项目");
         this.createdAt = requireNotNull(createdAt, "创建时间").truncatedTo(ChronoUnit.MILLIS);
         this.updatedAt = requireNotNull(updatedAt, "更新时间").truncatedTo(ChronoUnit.MILLIS);
-        apply(name, host, port, username, authType);
+        apply(name, host, port, username, authType, defaultRemoteDirectory);
     }
 
     public static DeploymentServer create(ProjectId projectId,
@@ -49,8 +53,19 @@ public class DeploymentServer {
                                           int port,
                                           String username,
                                           DeploymentAuthType authType) {
+        return create(projectId, name, host, port, username, authType, null);
+    }
+
+    public static DeploymentServer create(ProjectId projectId,
+                                          String name,
+                                          String host,
+                                          int port,
+                                          String username,
+                                          DeploymentAuthType authType,
+                                          String defaultRemoteDirectory) {
         Instant now = now();
-        return new DeploymentServer(null, projectId, name, host, port, username, authType, now, now);
+        return new DeploymentServer(null, projectId, name, host, port, username, authType,
+                defaultRemoteDirectory, now, now);
     }
 
     public static DeploymentServer restore(DeploymentServerId id,
@@ -62,8 +77,21 @@ public class DeploymentServer {
                                            DeploymentAuthType authType,
                                            Instant createdAt,
                                            Instant updatedAt) {
+        return restore(id, projectId, name, host, port, username, authType, null, createdAt, updatedAt);
+    }
+
+    public static DeploymentServer restore(DeploymentServerId id,
+                                           ProjectId projectId,
+                                           String name,
+                                           String host,
+                                           int port,
+                                           String username,
+                                           DeploymentAuthType authType,
+                                           String defaultRemoteDirectory,
+                                           Instant createdAt,
+                                           Instant updatedAt) {
         return new DeploymentServer(requireNotNull(id, "部署服务器 ID"), projectId, name,
-                host, port, username, authType, createdAt, updatedAt);
+                host, port, username, authType, defaultRemoteDirectory, createdAt, updatedAt);
     }
 
     public void update(String name,
@@ -71,7 +99,16 @@ public class DeploymentServer {
                        int port,
                        String username,
                        DeploymentAuthType authType) {
-        apply(name, host, port, username, authType);
+        update(name, host, port, username, authType, defaultRemoteDirectory);
+    }
+
+    public void update(String name,
+                       String host,
+                       int port,
+                       String username,
+                       DeploymentAuthType authType,
+                       String defaultRemoteDirectory) {
+        apply(name, host, port, username, authType, defaultRemoteDirectory);
         this.updatedAt = now();
     }
 
@@ -93,12 +130,14 @@ public class DeploymentServer {
                        String host,
                        int port,
                        String username,
-                       DeploymentAuthType authType) {
+                       DeploymentAuthType authType,
+                       String defaultRemoteDirectory) {
         this.name = requireName(name);
         this.host = requireHost(host);
         this.port = requirePort(port);
         this.username = requireUsername(username);
         this.authType = requireNotNull(authType, "认证方式");
+        this.defaultRemoteDirectory = optionalRemoteDirectory(defaultRemoteDirectory);
     }
 
     private static String requireName(String name) {
@@ -136,6 +175,29 @@ public class DeploymentServer {
             throw new DomainException("SSH 端口必须在 1–65535 之间：" + port);
         }
         return port;
+    }
+
+    /** 空值合法：不是每台服务器都承担部署工作。非空时与部署远程目录使用同一套安全规则。 */
+    private static String optionalRemoteDirectory(String remoteDirectory) {
+        if (remoteDirectory == null || remoteDirectory.isBlank()) {
+            return null;
+        }
+        String value = remoteDirectory.trim();
+        if (value.length() > MAX_REMOTE_DIRECTORY_LENGTH) {
+            throw new DomainException("默认远程目录超长（上限 512 字符）");
+        }
+        if (!value.equals("~") && !value.startsWith("/") && !value.startsWith("~/")) {
+            throw new DomainException("默认远程目录必须使用 ~ 或绝对路径：" + value);
+        }
+        if (!value.matches("[A-Za-z0-9._~/-]+")) {
+            throw new DomainException("默认远程目录只能包含字母、数字、点、下划线、斜杠和 ~：" + value);
+        }
+        for (String segment : value.split("/")) {
+            if ("..".equals(segment)) {
+                throw new DomainException("默认远程目录不能包含 .. 路径段：" + value);
+            }
+        }
+        return value;
     }
 
     private static Instant now() {
@@ -182,6 +244,10 @@ public class DeploymentServer {
 
     public DeploymentAuthType getAuthType() {
         return authType;
+    }
+
+    public String getDefaultRemoteDirectory() {
+        return defaultRemoteDirectory;
     }
 
     public Instant getCreatedAt() {

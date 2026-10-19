@@ -8,6 +8,7 @@ export type SaveDeploymentServerInput = {
   port: number
   username: string
   authType: DeploymentAuthType
+  defaultRemoteDirectory: string
   password: string
 }
 

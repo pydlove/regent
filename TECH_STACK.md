@@ -147,6 +147,7 @@ spring:
 | 部署密码密文 | `V27__deployment_credential.sql` | 独立保存 AES-GCM 加密后的 SSH 密码；主密钥只存在 `~/.regent/deployment/credential.key` |
 | 可复用部署服务器 | `V28__reusable_deployment_servers.sql` | 抽取项目级服务器与服务器凭据；旧部署按连接和凭据自动迁移，部署配置改为引用 `server_id` |
 | 账户数据隔离 | `V29__account_data_isolation.sql` | `project.owner_id` 作为租户根；环境与计划增加 `user_id`；存量数据归最早账号，环境唯一键改为按账号区分 |
+| 服务器默认部署目录 | `V31__deployment_server_default_directory.sql` | 服务器保存 `default_remote_directory`；新建部署选中服务器时自动带出 `REGENT_DEPLOY_DIRECTORY` |
 
 全部用 `utf8mb4`，主键用 `BIGINT`，状态字段用 `VARCHAR` 存枚举名（不用 MySQL `ENUM`，避免改枚举要动表结构）。时间统一 `DATETIME(3)` 存 UTC。
 

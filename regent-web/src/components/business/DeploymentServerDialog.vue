@@ -33,6 +33,7 @@ const host = ref('')
 const port = ref('22')
 const username = ref('root')
 const authType = ref<DeploymentAuthType>('KEY')
+const defaultRemoteDirectory = ref('')
 const password = ref('')
 const credentialConfigured = ref(false)
 const saving = ref(false)
@@ -89,6 +90,7 @@ watch(open, (value) => {
   port.value = String(props.server?.port ?? 22)
   username.value = props.server?.username ?? 'root'
   authType.value = props.server?.authType ?? 'KEY'
+  defaultRemoteDirectory.value = props.server?.defaultRemoteDirectory ?? ''
   credentialConfigured.value = props.server?.credentialConfigured ?? false
   password.value = ''
 })
@@ -104,6 +106,7 @@ const save = async () => {
     port: Number(port.value),
     username: username.value.trim(),
     authType: authType.value,
+    defaultRemoteDirectory: defaultRemoteDirectory.value.trim(),
     password: password.value,
   }
   try {
@@ -196,6 +199,23 @@ const save = async () => {
           class="w-full"
           :placeholder="credentialConfigured ? '已保存，留空保持不变' : '输入服务器登录密码'"
           autocomplete="new-password"
+        />
+      </DialogField>
+
+      <div class="flex items-center gap-2 pt-1">
+        <span class="text-caption font-emphasis text-label-secondary">部署默认值</span>
+        <span class="h-px min-w-0 flex-1 bg-separator-soft" aria-hidden="true" />
+      </div>
+
+      <DialogField
+        label="默认远程目录"
+        label-width="w-24"
+        hint="新建部署选择这台服务器时自动带出。脚本仍从 REGENT_DEPLOY_DIRECTORY 读取，不写死路径"
+      >
+        <Input
+          v-model="defaultRemoteDirectory"
+          class="w-full font-mono"
+          placeholder="~ 或 /opt/app-audit-frontend"
         />
       </DialogField>
 

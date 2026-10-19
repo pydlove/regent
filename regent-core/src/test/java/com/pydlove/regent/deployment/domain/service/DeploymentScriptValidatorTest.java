@@ -60,4 +60,47 @@ class DeploymentScriptValidatorTest {
         assertThrows(DomainException.class,
                 () -> DeploymentScriptValidator.requireValid(script));
     }
+
+    @Test
+    @DisplayName("受控双模式脚本允许在 run_local 中连接服务器")
+    void acceptsControlledLocalMode() {
+        String script = """
+                #!/usr/bin/env bash
+                set -Eeuo pipefail
+                HOST=""
+                run_local() {
+                    ssh -o BatchMode=yes root@example.test "echo ok"
+                    scp -q app.jar root@example.test:/tmp/app.jar
+                    remote_size="$(ssh root@example.test "stat -c %s /tmp/app.jar")"
+                }
+                run_remote() {
+                    echo remote
+                }
+                if [ -n "$HOST" ]; then
+                    run_local
+                else
+                    run_remote
+                fi
+                """;
+
+        assertTrue(DeploymentScriptValidator.validate(script).isEmpty());
+    }
+
+    @Test
+    @DisplayName("缺少显式本地模式入口时仍拒绝 SSH")
+    void rejectsLocalFunctionWithoutRemoteDispatch() {
+        String script = """
+                #!/usr/bin/env bash
+                set -Eeuo pipefail
+                run_local() {
+                    ssh root@example.test "echo ok"
+                }
+                run_local
+                """;
+
+        var issues = DeploymentScriptValidator.validate(script);
+
+        assertTrue(issues.stream().anyMatch(
+                issue -> "HARD_CODED_REMOTE_CONNECTION".equals(issue.code())));
+    }
 }

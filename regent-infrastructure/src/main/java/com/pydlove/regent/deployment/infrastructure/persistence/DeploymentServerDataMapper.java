@@ -24,6 +24,7 @@ public final class DeploymentServerDataMapper {
         data.setPort(server.getPort());
         data.setSshUsername(server.getUsername());
         data.setAuthType(server.getAuthType().name());
+        data.setDefaultRemoteDirectory(server.getDefaultRemoteDirectory());
         data.setCreatedAt(toDb(server.getCreatedAt()));
         data.setUpdatedAt(toDb(server.getUpdatedAt()));
         return data;
@@ -38,6 +39,7 @@ public final class DeploymentServerDataMapper {
                 row.getPort(),
                 row.getSshUsername(),
                 DeploymentAuthType.parse(row.getAuthType()),
+                row.getDefaultRemoteDirectory(),
                 toInstant(row.getCreatedAt()),
                 toInstant(row.getUpdatedAt()));
     }

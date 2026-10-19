@@ -41,6 +41,17 @@ test('已经指定项目时保持项目边界并只返回该项目的服务器',
   assert.deepEqual(selection.servers.map(({ id }) => id), [12])
 })
 
+test('指定项目没有服务器时切换到实际有服务器的项目', () => {
+  const selection = resolveDeploymentServerSelection(
+    7,
+    [{ id: 7 }, { id: 8 }],
+    [server(31, 8), server(30, 8)],
+  )
+
+  assert.equal(selection.projectId, 8)
+  assert.deepEqual(selection.servers.map(({ id }) => id), [31, 30])
+})
+
 test('全部项目且没有服务器时回退到第一个项目', () => {
   const selection = resolveDeploymentServerSelection(
     null,

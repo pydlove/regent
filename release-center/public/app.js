@@ -9,6 +9,12 @@ const elements = {
   generateStatus: document.querySelector('#generate-status'),
   error: document.querySelector('#error'),
   workspaceWarning: document.querySelector('#workspace-warning'),
+  serverStatus: document.querySelector('#server-status'),
+  serverUrl: document.querySelector('#server-url'),
+  serverConnector: document.querySelector('#server-connector'),
+  serverQueue: document.querySelector('#server-queue'),
+  serverRefresh: document.querySelector('#server-refresh'),
+  serverDeploy: document.querySelector('#server-deploy'),
   preview: document.querySelector('#preview'),
   previewVersion: document.querySelector('#preview-version'),
   summary: document.querySelector('#summary'),
@@ -32,7 +38,7 @@ let draftStale = false
 let draftSaveTimer = null
 
 const DIRTY_WARNING = '当前工作区有未提交改动。版本内容和预览可以生成，但创建 Git 标签前必须先提交代码并刷新页面。'
-const STALE_DRAFT_WARNING = '这份发布预览生成后代码提交已变化，为避免发布内容与代码不一致，请重新生成版本内容。'
+const STALE_DRAFT_WARNING = '这份发布预览生成后代码提交有更新，请确认当前内容仍覆盖最新改动，或重新生成。'
 
 function showError(message) {
   elements.error.textContent = message
@@ -50,7 +56,6 @@ function updateConfirmState() {
   elements.publishButton.disabled = !(
     previewVersion
     && !workspaceDirty
-    && !draftStale
     && elements.confirmReview.checked
     && elements.highlights.children.length > 0
   )
@@ -209,6 +214,54 @@ async function loadState() {
     elements.confirmReview.checked = false
   }
   updateConfirmState()
+  try {
+    const lastJob = await request('/api/jobs/last')
+    if (lastJob?.status && lastJob.status !== 'running') renderJob(lastJob)
+  } catch {
+    // 还没有历史发布任务。
+  }
+}
+
+async function loadServerStatus() {
+  elements.serverRefresh.disabled = true
+  try {
+    const status = await request('/api/server/status')
+    elements.serverStatus.className =
+      `badge ${status.reachable && status.connectorOnline ? 'success' : 'danger'}`
+    elements.serverStatus.textContent = status.reachable && status.connectorOnline
+      ? '在线'
+      : status.reachable
+        ? '连接器离线'
+        : '服务器不可达'
+    elements.serverUrl.textContent = status.url || '读取失败'
+    elements.serverConnector.textContent = status.connectorOnline ? '在线' : '离线'
+    elements.serverQueue.textContent = String(status.queueDepth ?? 0)
+  } catch (error) {
+    elements.serverStatus.className = 'badge danger'
+    elements.serverStatus.textContent = '状态读取失败'
+    elements.serverUrl.textContent = error.message
+    elements.serverConnector.textContent = '—'
+    elements.serverQueue.textContent = '—'
+  } finally {
+    elements.serverRefresh.disabled = false
+  }
+}
+
+async function deployServer() {
+  if (!window.confirm('确认重新构建并发布中继器、升级服务器前端并重启服务？')) return
+  showError('')
+  elements.serverDeploy.disabled = true
+  try {
+    const result = await request('/api/server/deploy', { method: 'POST', body: '{}' })
+    elements.jobPanel.hidden = false
+    elements.jobStatus.textContent = '准备中'
+    elements.jobLog.textContent = '正在启动服务器发布流程…'
+    clearTimeout(pollTimer)
+    await pollJob(result.jobId)
+  } catch (error) {
+    elements.serverDeploy.disabled = false
+    showError(error.message)
+  }
 }
 
 async function generatePreview() {
@@ -239,7 +292,7 @@ async function generatePreview() {
 function renderJob(job) {
   elements.jobPanel.hidden = false
   elements.jobPanel.dataset.status = job.status
-  elements.jobTitle.textContent = `${job.version} 发布`
+  elements.jobTitle.textContent = job.title || `${job.version} 发布`
   elements.jobStatus.textContent = job.status === 'running'
     ? '执行中'
     : job.status === 'success'
@@ -263,10 +316,13 @@ async function pollJob(jobId) {
       draftSaveTimer = null
       elements.jobPanel.scrollIntoView({ behavior: 'smooth', block: 'start' })
       await loadState()
+      if (job.kind === 'server-deploy') await loadServerStatus()
     } else {
       showError(job.error || '发布失败，请查看执行日志')
     }
+    elements.serverDeploy.disabled = false
   } catch (error) {
+    elements.serverDeploy.disabled = false
     showError(error.message)
   }
 }
@@ -321,5 +377,7 @@ elements.version.addEventListener('input', () => {
   }
 })
 elements.publishButton.addEventListener('click', publish)
+elements.serverRefresh.addEventListener('click', loadServerStatus)
+elements.serverDeploy.addEventListener('click', deployServer)
 
-loadState().catch((error) => showError(error.message))
+Promise.all([loadState(), loadServerStatus()]).catch((error) => showError(error.message))

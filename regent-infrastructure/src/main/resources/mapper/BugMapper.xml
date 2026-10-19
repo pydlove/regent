@@ -84,7 +84,7 @@
         FROM bug b
         JOIN project p ON p.id = b.project_id
         WHERE <include refid="filters"/>
-        ORDER BY b.id ASC
+        ORDER BY b.id DESC
         LIMIT #{size} OFFSET #{offset}
     </select>
 

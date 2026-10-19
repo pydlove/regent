@@ -1,410 +1,160 @@
 #!/bin/bash
 
-# 兼容用户习惯的 `sh deploy/remote/deploy.sh ...` 调用。脚本主体依赖 bash 数组
-# 与 pipefail，因此不能真的交给 POSIX sh 执行。
 if [ -z "${BASH_VERSION:-}" ]; then
     exec /bin/bash "$0" "$@"
 fi
 
-set -euo pipefail
+set -Eeuo pipefail
 
-# 非 UTF-8 locale 下，部分 bash（3.2/5.x 均有记录）会把中文首字节并入
-# 相邻的变量名，导致 unbound variable。统一固定为 UTF-8 规避该陷阱；
-# 注意中文紧跟变量时仍必须写 ${VAR} 花括号，两者缺一不可。
-export LC_CTYPE=UTF-8
-
-# ===================================================================
-# Regent 公网中继一键部署
+# Regent 公网中继部署入口（双模式）。
 #
-# 服务器只运行中继和静态前端；真正的 Regent 仍在本机 127.0.0.1:8787。
-# 本机连接器主动访问服务器，因此服务器不需要反向连接本机。
+# 本地模式：显式传入 -H/--host（或 REGENT_SERVER_IP），委托 deploy-local.sh
+# 完成构建、上传、服务重启和 Nginx 配置。
 #
-# 用法：
-#   bash deploy/remote/deploy.sh -H <IP> -p <密码>
-#   sh   deploy/remote/deploy.sh -H <IP> -P 22 -u root -k ~/.ssh/id_rsa
-#
-# 不传参数时会交互询问。也支持 REGENT_SERVER_IP / REGENT_SSH_PORT /
-# REGENT_SERVER_USER / REGENT_SERVER_PASSWORD / REGENT_SSH_KEY 环境变量。
-# ===================================================================
+# 远端模式：平台执行时不传 -H，并注入 REGENT_DEPLOY_DIRECTORY。
+# 脚本直接在当前服务器处理已暂存的 JAR/前端包，不重复建立 SSH 连接。
 
-SERVER_IP="${REGENT_SERVER_IP:-}"
-SERVER_USER="${REGENT_SERVER_USER:-}"
-SERVER_PASSWORD="${REGENT_SERVER_PASSWORD:-}"
-SSH_KEY_PATH="${REGENT_SSH_KEY:-$HOME/.ssh/id_rsa}"
-SSH_PORT="${REGENT_SSH_PORT:-}"
+deploy_dir="$(cd "$(dirname "$0")" && pwd)"
+local_script="$deploy_dir/deploy-local.sh"
 
-DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$(dirname "$DEPLOY_DIR")")"
-APP_NAME="regent-relay"
-REMOTE_BASE="${REGENT_REMOTE_BASE:-/root/app/$APP_NAME}"
+HOST=""
+if [ -n "${REGENT_SERVER_IP:-}" ]; then
+    HOST="$REGENT_SERVER_IP"
+fi
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-log_info()  { printf '%b\n' "${GREEN}[INFO]${NC} $*"; }
-log_warn()  { printf '%b\n' "${YELLOW}[WARN]${NC} $*"; }
-log_error() { printf '%b\n' "${RED}[ERROR]${NC} $*"; }
-
-usage() {
-    cat <<'EOF'
-用法：
-  deploy/remote/deploy.sh [选项]
-
-选项：
-  -H, --host <IP>            服务器 IP 或域名
-  -p, --password <密码>      SSH 密码（会出现在命令历史中，生产环境优先用 -k）
-  -k, --key <路径>           SSH 私钥路径，默认 ~/.ssh/id_rsa
-  -P, --port <端口>          SSH 端口，默认 22
-  -u, --user <用户名>        SSH 用户名，默认 root
-  -r, --remote-base <目录>   服务器安装目录，默认 /root/app/regent-relay
-      --skip-local-connector 只部署服务器，不重新配对本机连接器
-  -h, --help                 显示帮助
-
-示例：
-  sh deploy/remote/deploy.sh -H 203.0.113.10 -p 'your-password'
-  bash deploy/remote/deploy.sh -H example.com -P 22 -u root -k ~/.ssh/id_rsa
-EOF
-}
-
-PASSWORD_FROM_COMMAND_LINE=0
-while [ "$#" -gt 0 ]; do
-    case "$1" in
+args=("$@")
+show_help=false
+for ((index = 0; index < ${#args[@]}; index++)); do
+    case "${args[$index]}" in
         -H|--host)
-            [ "$#" -ge 2 ] || { log_error "$1 缺少参数"; exit 1; }
-            SERVER_IP="$2"
-            shift 2
-            ;;
-        -p|--password)
-            [ "$#" -ge 2 ] || { log_error "$1 缺少参数"; exit 1; }
-            SERVER_PASSWORD="$2"
-            PASSWORD_FROM_COMMAND_LINE=1
-            shift 2
-            ;;
-        -k|--key)
-            [ "$#" -ge 2 ] || { log_error "$1 缺少参数"; exit 1; }
-            SSH_KEY_PATH="$2"
-            shift 2
-            ;;
-        -P|--port)
-            [ "$#" -ge 2 ] || { log_error "$1 缺少参数"; exit 1; }
-            SSH_PORT="$2"
-            shift 2
-            ;;
-        -u|--user)
-            [ "$#" -ge 2 ] || { log_error "$1 缺少参数"; exit 1; }
-            SERVER_USER="$2"
-            shift 2
-            ;;
-        -r|--remote-base)
-            [ "$#" -ge 2 ] || { log_error "$1 缺少参数"; exit 1; }
-            REMOTE_BASE="$2"
-            shift 2
-            ;;
-        --skip-local-connector)
-            REGENT_SKIP_LOCAL_CONNECTOR=1
-            shift
+            if [ $((index + 1)) -ge ${#args[@]} ] || [ -z "${args[$((index + 1))]:-}" ]; then
+                printf '错误：%s 缺少服务器地址\n' "${args[$index]}" >&2
+                exit 1
+            fi
+            HOST="${args[$((index + 1))]}"
+            index=$((index + 1))
             ;;
         -h|--help)
-            usage
-            exit 0
-            ;;
-        --)
-            shift
-            break
-            ;;
-        *)
-            log_error "未知参数：$1"
-            usage
-            exit 1
+            show_help=true
             ;;
     esac
 done
 
-case "$REMOTE_BASE" in
-    /*) ;;
-    *) log_error "REGENT_REMOTE_BASE 必须是绝对路径：$REMOTE_BASE"; exit 1 ;;
-esac
-case "$REMOTE_BASE" in
-    *[!A-Za-z0-9._/-]*) log_error "REGENT_REMOTE_BASE 含不支持的字符：$REMOTE_BASE"; exit 1 ;;
-esac
-REMOTE_BASE="${REMOTE_BASE%/}"
-if [ -z "$REMOTE_BASE" ] || [ "$REMOTE_BASE" = "/" ]; then
-    log_error "REGENT_REMOTE_BASE 不能是根目录"
-    exit 1
-fi
-case "$REMOTE_BASE/" in
-    *'/../'*|*'/./'*|*'//'*)
-        log_error "REGENT_REMOTE_BASE 不能包含 .、.. 或重复斜杠"
-        exit 1
-        ;;
-esac
-
-require_tty() {
-    if [ ! -t 0 ]; then
-        log_error "缺少 $1，且当前不是交互终端；请先用环境变量提供它。"
+run_local() {
+    if [ ! -x "$local_script" ]; then
+        printf '错误：本地部署脚本不存在或不可执行：%s\n' "$local_script" >&2
         exit 1
     fi
+    exec "$local_script" "$@"
 }
 
-ask() {
-    # $1 提示语，$2 默认值（可空）；答案写入 REPLY
-    local input
-    if [ -n "${2:-}" ]; then
-        read -r -p "  $1 [${2}]: " input
-        REPLY="${input:-${2}}"
-    else
-        read -r -p "  $1: " input
-        REPLY="$input"
+run_remote() {
+    : "${REGENT_DEPLOY_DIRECTORY:?缺少 REGENT_DEPLOY_DIRECTORY；本地发布请显式传入 -H/--host}"
+
+    local input_dir="$REGENT_DEPLOY_DIRECTORY"
+    local app_dir="$input_dir"
+    local relay_dir="$app_dir/relay"
+    local frontend_dir="$app_dir/frontend"
+    local service_name="${REGENT_DEPLOY_SERVICE:-regent-relay}"
+    local owner_group="${REGENT_DEPLOY_OWNER_GROUP:-root:root}"
+    local timestamp
+    local sudo_cmd=()
+
+    if [ ! -d "$app_dir/relay" ] && [ -d "$app_dir/regent-relay" ]; then
+        app_dir="$input_dir/regent-relay"
+        relay_dir="$app_dir/relay"
+        frontend_dir="$app_dir/frontend"
     fi
-}
 
-if [ -t 0 ] && { [ -z "$SERVER_IP" ] || [ -z "$SSH_PORT" ] || [ -z "$SERVER_USER" ]; }; then
-    printf '%s\n' "请输入服务器连接信息（直接回车使用默认值）："
-fi
-
-if [ -z "$SERVER_IP" ]; then
-    require_tty REGENT_SERVER_IP
-    while :; do
-        ask "服务器 IP"
-        if [ -n "$REPLY" ]; then SERVER_IP="$REPLY"; break; fi
-        log_warn "服务器 IP 不能为空"
-    done
-fi
-
-if [ "$SERVER_IP" = "127.0.0.1" ]; then
-    log_error "服务器 IP 不能是 127.0.0.1，请填公网服务器地址。"
-    exit 1
-fi
-case "$SERVER_IP" in
-    ''|*[!A-Za-z0-9.-]*) log_error "服务器 IP 格式不正确：$SERVER_IP"; exit 1 ;;
-esac
-
-if [ -z "$SSH_PORT" ]; then
-    if [ -t 0 ]; then
-        ask "SSH 端口" "22"
-        SSH_PORT="$REPLY"
-    else
-        SSH_PORT="22"
+    timestamp="$(date +%Y%m%d_%H%M%S)"
+    if [ "$(id -u)" -ne 0 ]; then
+        sudo_cmd=(sudo -n)
     fi
-fi
-case "$SSH_PORT" in
-    ''|*[!0-9]*) log_error "SSH 端口必须是数字：$SSH_PORT"; exit 1 ;;
-esac
 
-if [ -z "$SERVER_USER" ]; then
-    if [ -t 0 ]; then
-        ask "SSH 用户名" "root"
-        SERVER_USER="$REPLY"
-    else
-        SERVER_USER="root"
-    fi
-fi
+    cd "$app_dir"
+    printf '[deploy] 模式=远端 input=%s directory=%s service=%s\n' \
+        "$input_dir" "$app_dir" "$service_name"
 
-if [ -z "$SERVER_PASSWORD" ]; then
-    if [ -t 0 ]; then
-        read -r -s -p "  SSH 密码（直接回车改用密钥登录）: " SERVER_PASSWORD
-        echo
-    fi
-fi
+    "${sudo_cmd[@]}" mkdir -p "$relay_dir" "$frontend_dir"
 
-REMOTE_HOST="$SERVER_USER@$SERVER_IP"
-if [ -n "$SERVER_PASSWORD" ]; then
-    log_info "目标：${REMOTE_HOST}（SSH 端口 ${SSH_PORT}，密码认证）"
-    if [ "$PASSWORD_FROM_COMMAND_LINE" = "1" ]; then
-        log_warn "-p 会把密码暴露在命令历史和进程参数中；生产环境优先使用 -k 或 REGENT_SERVER_PASSWORD"
-    fi
-else
-    log_info "目标：${REMOTE_HOST}（SSH 端口 ${SSH_PORT}，密钥认证 ${SSH_KEY_PATH}）"
-fi
-
-SSH_OPTS=(-p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o NumberOfPasswordPrompts=1)
-if [ -n "$SERVER_PASSWORD" ]; then
-    if command -v sshpass >/dev/null 2>&1; then
-        export SSHPASS="$SERVER_PASSWORD"
-        SSH_COMMAND=(sshpass -e ssh "${SSH_OPTS[@]}" "$REMOTE_HOST")
-        RSYNC_SSH="sshpass -e ssh -p $SSH_PORT -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o NumberOfPasswordPrompts=1"
-    else
-        # Web 调用没有 TTY。OpenSSH 在 SSH_ASKPASS_REQUIRE=force 时会调用辅助脚本，
-        # 密码只通过子进程环境传递，不进入 argv。
-        export REGENT_SSH_PASSWORD="$SERVER_PASSWORD"
-        export SSH_ASKPASS="$DEPLOY_DIR/ssh-askpass.sh"
-        export SSH_ASKPASS_REQUIRE=force
-        export DISPLAY="${DISPLAY:-regent}"
-        PASSWORD_SSH_OPTS=(
-            -o BatchMode=no
-            -o PreferredAuthentications=password,keyboard-interactive
-            -o PubkeyAuthentication=no
-        )
-        SSH_COMMAND=(ssh "${PASSWORD_SSH_OPTS[@]}" "${SSH_OPTS[@]}" "$REMOTE_HOST")
-        RSYNC_SSH="ssh -o BatchMode=no -o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no -p $SSH_PORT -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o NumberOfPasswordPrompts=1"
-    fi
-else
-    SSH_COMMAND=(ssh -i "$SSH_KEY_PATH" "${SSH_OPTS[@]}" "$REMOTE_HOST")
-    RSYNC_SSH="ssh -i $SSH_KEY_PATH -p $SSH_PORT -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o NumberOfPasswordPrompts=1"
-fi
-
-log_info "前置检查：SSH 连接"
-if ! PROBE_OUTPUT=$("${SSH_COMMAND[@]}" "echo ok" 2>&1); then
-    log_error "SSH 连接失败：${REMOTE_HOST}（端口 ${SSH_PORT}）"
-    printf '%s\n' "$PROBE_OUTPUT"
-    exit 1
-fi
-log_info "1/7 构建中继"
-(cd "$PROJECT_DIR" && mvn -q -pl regent-relay -am clean package -DskipTests)
-
-log_info "2/7 构建前端"
-(cd "$PROJECT_DIR/regent-web" && npm ci --registry=https://registry.npmmirror.com --strict-ssl=false && npm run build)
-
-log_info "3/7 准备服务器目录"
-"${SSH_COMMAND[@]}" \
-    "mkdir -p $REMOTE_BASE/relay $REMOTE_BASE/frontend $REMOTE_BASE/script $REMOTE_BASE/logs $REMOTE_BASE/nginx"
-
-log_info "4/7 上传中继与静态前端"
-JAR=$(ls -t "$PROJECT_DIR"/regent-relay/target/regent-relay-*.jar | head -1)
-"${SSH_COMMAND[@]}" "systemctl stop regent-relay 2>/dev/null || true"
-rsync -az -e "$RSYNC_SSH" "$JAR" "$REMOTE_HOST:$REMOTE_BASE/relay/regent-relay.jar"
-rsync -az --delete -e "$RSYNC_SSH" "$PROJECT_DIR/regent-web/dist/" "$REMOTE_HOST:$REMOTE_BASE/frontend/dist/"
-rsync -az -e "$RSYNC_SSH" "$DEPLOY_DIR/scripts/" "$REMOTE_HOST:$REMOTE_BASE/script/"
-rsync -az -e "$RSYNC_SSH" "$DEPLOY_DIR/nginx/" "$REMOTE_HOST:$REMOTE_BASE/nginx/"
-"${SSH_COMMAND[@]}" "chmod +x $REMOTE_BASE/script/*.sh"
-
-log_info "5/7 初始化服务器凭据"
-# 已有部署沿用原密钥，保证重复部署不会把已经配好的连接器打挂
-REMOTE_SECRET=$("${SSH_COMMAND[@]}" \
-    "grep -m1 '^REGENT_RELAY_SHARED_SECRET=' $REMOTE_BASE/relay/relay.env 2>/dev/null | cut -d= -f2- || true")
-if [ -z "$REMOTE_SECRET" ]; then
-    # 密钥在本机生成后整份推上去：服务器不需要 openssl，也避免密钥回显到终端与构建日志
-    RELAY_SECRET=$(openssl rand -hex 32)
-    printf '%s\n' \
-        'REGENT_RELAY_BIND=127.0.0.1' \
-        'REGENT_RELAY_PORT=8788' \
-        "REGENT_RELAY_SHARED_SECRET=$RELAY_SECRET" \
-        'REGENT_RELAY_POLL_SECONDS=25' \
-        'REGENT_RELAY_REQUEST_TIMEOUT_SECONDS=40' \
-        'REGENT_RELAY_OFFLINE_SECONDS=45' \
-        'REGENT_RELAY_QUEUE_CAPACITY=64' \
-        'REGENT_RELAY_MAX_BODY_BYTES=33554432' \
-        | "${SSH_COMMAND[@]}" "umask 077; cat > $REMOTE_BASE/relay/relay.env"
-    log_info "已生成服务器中继密钥（不回显）"
-else
-    RELAY_SECRET="$REMOTE_SECRET"
-    log_info "服务器已有 relay.env，沿用原密钥"
-fi
-
-log_info "6/7 安装并启动中继，再配对本机连接器"
-sed "s#/root/app/regent-relay#$REMOTE_BASE#g" "$DEPLOY_DIR/systemd/regent-relay.service" \
-    | "${SSH_COMMAND[@]}" "umask 022; cat > /etc/systemd/system/regent-relay.service"
-"${SSH_COMMAND[@]}" "systemctl daemon-reload && systemctl enable regent-relay && systemctl restart regent-relay"
-sleep 3
-if "${SSH_COMMAND[@]}" "systemctl is-active --quiet regent-relay"; then
-    log_info "公网中继已启动"
-else
-    log_error "公网中继未启动，执行 ssh $REMOTE_HOST 'journalctl -u regent-relay -n 80' 排查"
-    exit 1
-fi
-
-if [ "${REGENT_SKIP_LOCAL_CONNECTOR:-}" = "1" ]; then
-    log_warn "已跳过本机连接器配对（REGENT_SKIP_LOCAL_CONNECTOR=1）"
-else
-    # 远端中继必须先上线。反序会让连接器在部署中反复探活失败，最后只留下误导性的告警。
-    log_info "配对本机中继连接器"
-    if ! REGENT_SERVER_IP="$SERVER_IP" \
-        REGENT_SSH_PORT="$SSH_PORT" \
-        REGENT_SERVER_USER="$SERVER_USER" \
-        REGENT_SERVER_PASSWORD="$SERVER_PASSWORD" \
-        REGENT_REMOTE_BASE="$REMOTE_BASE" \
-        REGENT_RELAY_SHARED_SECRET="$RELAY_SECRET" \
-        bash "$PROJECT_DIR/deploy/local/connect-relay.sh"; then
-        log_error "本机连接器未上线，公网 API 仍会返回 RELAY_OFFLINE"
-        log_error "修复后单独运行 deploy/local/connect-relay.sh，再重试部署"
-        exit 1
-    fi
-    log_info "本机中继连接器已上线"
-fi
-
-log_info "7/7 自动配置服务器 Nginx"
-"${SSH_COMMAND[@]}" \
-    "sed -i 's#/root/app/regent-relay#$REMOTE_BASE#g' $REMOTE_BASE/nginx/regent.conf.example"
-NGINX_OUTPUT=$("${SSH_COMMAND[@]}" "REMOTE_BASE='$REMOTE_BASE' bash -s" <<'REMOTE_NGINX'
-if ! command -v nginx >/dev/null 2>&1; then
-    echo "[nginx] 服务器未安装 nginx，跳过自动配置"
-    echo "[nginx] 可参考 $REMOTE_BASE/nginx/regent.conf.example 手工配置"
-    exit 0
-fi
-
-CONF=$(nginx -V 2>&1 | tr ' ' '\n' | sed -n 's/^--conf-path=//p' | head -1)
-if [ -z "$CONF" ] || [ ! -f "$CONF" ]; then
-    CONF=""
-    for candidate in /usr/local/nginx/conf/nginx.conf /etc/nginx/nginx.conf; do
-        if [ -f "$candidate" ]; then CONF="$candidate"; break; fi
-    done
-fi
-if [ -z "$CONF" ]; then
-    echo "[nginx] 没找到 nginx.conf，跳过自动配置"
-    exit 0
-fi
-
-if grep -q 'listen 18787' "$CONF"; then
-    echo "[nginx] 已有 Regent 配置（listen 18787），跳过写入：$CONF"
-    nginx -s reload >/dev/null 2>&1 || systemctl reload nginx >/dev/null 2>&1 || true
-else
-    BAK="$CONF.bak.$(date +%Y%m%d%H%M%S)-regent"
-    cp "$CONF" "$BAK"
-    CLOSE_LINE=$(awk '/^}[[:space:]]*$/{n=NR} END{print n}' "$CONF")
-    if [ -z "$CLOSE_LINE" ]; then
-        echo "[nginx] $CONF 里找不到 http 块收尾的 }，跳过自动写入"
-        rm -f "$BAK"
-    else
-        head -n $((CLOSE_LINE-1)) "$CONF" > "$CONF.regent-new"
-        awk 'length($0) > 0 { print "    " $0; next } { print }' \
-            "$REMOTE_BASE/nginx/regent.conf.example" >> "$CONF.regent-new"
-        tail -n +"$CLOSE_LINE" "$CONF" >> "$CONF.regent-new"
-        mv "$CONF.regent-new" "$CONF"
-        if nginx -t -c "$CONF" >/tmp/regent-nginx-test.log 2>&1; then
-            if nginx -s reload >/dev/null 2>&1 || systemctl reload nginx >/dev/null 2>&1; then
-                echo "[nginx] 已写入 Regent 配置并重载（备份：$BAK）"
-            else
-                echo "[nginx] 已写入配置但 reload 失败，请检查 nginx 进程（备份：$BAK）"
-            fi
-        else
-            cp "$BAK" "$CONF"
-            echo "[nginx] nginx -t 校验失败，已回滚 $CONF。报错如下："
-            sed 's/^/  /' /tmp/regent-nginx-test.log
+    local staged_jar=""
+    for candidate in \
+        "$input_dir/relay/regent-relay.jar.new" \
+        "$input_dir/regent-relay.jar.new" \
+        "$relay_dir/regent-relay.jar.new"; do
+        if [ -f "$candidate" ]; then
+            staged_jar="$candidate"
+            break
         fi
-    fi
-fi
+    done
 
-echo "[nginx] 服务器本机自检 http://127.0.0.1:18787/health："
-if curl -s -m 5 http://127.0.0.1:18787/health; then
-    echo
-else
-    echo "[nginx] 自检失败：18787 暂不可达"
-fi
-
-if systemctl is-active --quiet firewalld 2>/dev/null && command -v firewall-cmd >/dev/null 2>&1; then
-    if firewall-cmd --permanent --add-port=18787/tcp >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1; then
-        echo "[nginx] firewalld 已放行 18787/tcp"
+    if [ -n "$staged_jar" ]; then
+        printf '[1/3] 替换中继 JAR\n'
+        if [ -f "$relay_dir/regent-relay.jar" ]; then
+            "${sudo_cmd[@]}" cp -p \
+                "$relay_dir/regent-relay.jar" \
+                "$relay_dir/regent-relay.jar.bak.$timestamp"
+        fi
+        "${sudo_cmd[@]}" mv -f "$staged_jar" "$relay_dir/regent-relay.jar"
+    elif [ -f "$relay_dir/regent-relay.jar" ]; then
+        printf '[1/3] 未发现 regent-relay.jar.new，沿用线上 JAR\n'
     else
-        echo "[nginx] firewalld 放行失败，请手工执行：firewall-cmd --permanent --add-port=18787/tcp && firewall-cmd --reload"
+        printf '错误：既没有 regent-relay.jar.new，也没有 regent-relay.jar\n' >&2
+        exit 1
     fi
+
+    local frontend_archive=""
+    for candidate in \
+        "$input_dir/frontend.tar.gz" \
+        "$app_dir/frontend.tar.gz"; do
+        if [ -f "$candidate" ]; then
+            frontend_archive="$candidate"
+            break
+        fi
+    done
+
+    if [ -n "$frontend_archive" ]; then
+        printf '[2/3] 更新静态前端\n'
+        if [ -d "$frontend_dir" ]; then
+            "${sudo_cmd[@]}" cp -a \
+                "$frontend_dir" \
+                "$app_dir/frontend.bak.$timestamp"
+        fi
+        "${sudo_cmd[@]}" tar -xzf "$frontend_archive" -C "$app_dir"
+        "${sudo_cmd[@]}" rm -f "$frontend_archive"
+    else
+        printf '[2/3] 未发现 frontend.tar.gz，沿用线上前端\n'
+    fi
+
+    "${sudo_cmd[@]}" chown -R "$owner_group" "$relay_dir" "$frontend_dir"
+    "${sudo_cmd[@]}" chmod 644 "$relay_dir/regent-relay.jar"
+    "${sudo_cmd[@]}" find "$frontend_dir" -type d -exec chmod 755 {} +
+    "${sudo_cmd[@]}" find "$frontend_dir" -type f -exec chmod 644 {} +
+
+    printf '[3/3] 重启 %s\n' "$service_name"
+    "${sudo_cmd[@]}" systemctl restart "$service_name"
+    service_ready=false
+    for _ in {1..15}; do
+        if "${sudo_cmd[@]}" systemctl is-active --quiet "$service_name"; then
+            service_ready=true
+            break
+        fi
+        sleep 1
+    done
+    if [ "$service_ready" != true ]; then
+        printf '错误：%s 重启后未进入 active 状态\n' "$service_name" >&2
+        "${sudo_cmd[@]}" systemctl --no-pager --lines=20 status "$service_name" || true
+        exit 1
+    fi
+    printf '=== 远端部署完成：%s ===\n' "$service_name"
+}
+
+if [ "$show_help" = true ]; then
+    run_local --help
 fi
-REMOTE_NGINX
-) || true
 
-printf '%s\n' "$NGINX_OUTPUT"
-
-cat <<TIP
-
-部署完成。
-
-  访问地址：http://$SERVER_IP:18787
-  安装目录：$REMOTE_BASE
-  （外网打不开就先检查云厂商安全组是否放行 18787/tcp）
-
-  本机中继连接器已自动配对（~/.regent/relay-connector.env）。
-  服务器只做转发，真正的 Regent 在本机，所以本机没起服务时公网只有静态页面：
-
-     ./deploy/local/start-all.sh     # 后端 + 前端 + 中继连接器
-     ./deploy/local/status.sh        # 看状态
-
-  换服务器 / 换密钥 / 只想重配连接器：./deploy/local/connect-relay.sh
-
-TIP
+if [ -n "$HOST" ]; then
+    run_local "$@"
+else
+    run_remote
+fi

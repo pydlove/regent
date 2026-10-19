@@ -71,6 +71,8 @@ const serverId = ref('')
 const allServers = ref<DeploymentServer[]>([])
 const name = ref('')
 const remoteDirectory = ref('')
+const remoteDirectoryAutoFilled = ref(false)
+let lastAutoFilledDirectory: string | null = null
 const workspacePath = ref('')
 const scriptFilename = ref<string | null>(null)
 const scriptContent = ref<string | null>(null)
@@ -116,6 +118,37 @@ const serverItems = computed(() =>
 const selectedServer = computed(
   () => servers.value.find((server) => String(server.id) === serverId.value) ?? null,
 )
+
+/**
+ * 标准脚本只读取 REGENT_DEPLOY_DIRECTORY，不可能从脚本里反推路径。
+ * 服务器上保存的默认目录才是这个参数的来源；新建部署选中服务器后自动带出。
+ */
+const applyServerDefaultDirectory = () => {
+  const fallback = selectedServer.value?.defaultRemoteDirectory?.trim() ?? ''
+  if (remoteDirectoryAutoFilled.value) {
+    if (!fallback) {
+      remoteDirectory.value = ''
+      remoteDirectoryAutoFilled.value = false
+      lastAutoFilledDirectory = null
+      return
+    }
+    remoteDirectory.value = fallback
+    lastAutoFilledDirectory = fallback
+    return
+  }
+  if (!remoteDirectory.value.trim() && fallback) {
+    remoteDirectory.value = fallback
+    lastAutoFilledDirectory = fallback
+    remoteDirectoryAutoFilled.value = true
+  }
+}
+
+watch(remoteDirectory, (value) => {
+  if (remoteDirectoryAutoFilled.value && value !== lastAutoFilledDirectory) {
+    remoteDirectoryAutoFilled.value = false
+    lastAutoFilledDirectory = null
+  }
+})
 const scriptSize = computed(() => new Blob([scriptContent.value ?? '']).size)
 const canGenerateScript = computed(
   () =>
@@ -147,7 +180,7 @@ const canSave = computed(
 const remoteDirectoryNotice = computed(() => {
   if (remoteDirectory.value.trim() || !scriptContent.value?.trim()) return null
   if (scriptContent.value.includes('REGENT_DEPLOY_DIRECTORY')) {
-    return '该脚本通过 REGENT_DEPLOY_DIRECTORY 读取远程目录，没有写死路径；请填写服务器上的项目根目录（package.json 所在目录）。'
+    return '该脚本通过 REGENT_DEPLOY_DIRECTORY 读取远程目录，没有写死路径；请在服务器设置里保存默认远程目录，或在这里手动填写项目根目录（package.json 所在目录）。'
   }
   return '未从脚本中识别到远程目录，请手动填写服务器上的部署工作目录。'
 })
@@ -186,10 +219,13 @@ watch(open, async (opened) => {
     props.deployment?.serverId === undefined ? '' : String(props.deployment.serverId)
   name.value = props.deployment?.name ?? ''
   remoteDirectory.value = props.deployment?.remoteDirectory ?? ''
+  remoteDirectoryAutoFilled.value = false
+  lastAutoFilledDirectory = null
   scriptFilename.value = props.deployment?.scriptFilename ?? null
   scriptContent.value = null
   scriptValidation.value = null
   await loadServers(requestedProjectId)
+  applyServerDefaultDirectory()
   initializing = false
   if (!props.deployment) return
   try {
@@ -201,8 +237,13 @@ watch(open, async (opened) => {
     const storedDirectory = detail.remoteDirectory.trim()
     if (!storedDirectory || storedDirectory === '~') {
       const inferredDirectory = inferDeploymentDirectory(detail.scriptContent)
-      if (inferredDirectory) remoteDirectory.value = inferredDirectory
+      if (inferredDirectory) {
+        remoteDirectory.value = inferredDirectory
+        remoteDirectoryAutoFilled.value = false
+        lastAutoFilledDirectory = null
+      }
     }
+    if (!remoteDirectory.value.trim()) applyServerDefaultDirectory()
     await validateScript()
   } catch (e) {
     error.value = messageOf(e)
@@ -244,7 +285,12 @@ watch(projectId, () => {
   if (open.value && !initializing) {
     workspacePath.value = selectedProject.value?.path ?? ''
     selectAvailableServer()
+    applyServerDefaultDirectory()
   }
+})
+
+watch(serverId, () => {
+  if (open.value && !initializing) applyServerDefaultDirectory()
 })
 
 watch(
@@ -258,6 +304,12 @@ watch(
 
 const openNewServer = () => {
   editingServer.value = null
+  serverDialogOpen.value = true
+}
+
+const editSelectedServer = () => {
+  if (!selectedServer.value) return
+  editingServer.value = selectedServer.value
   serverDialogOpen.value = true
 }
 
@@ -294,6 +346,8 @@ const importFile = async (event: Event) => {
     const inferredDirectory = inferDeploymentDirectory(content)
     if (inferredDirectory) {
       remoteDirectory.value = inferredDirectory
+      remoteDirectoryAutoFilled.value = false
+      lastAutoFilledDirectory = null
       toast.success('已从脚本识别远程目录', inferredDirectory)
     } else if (!remoteDirectory.value.trim()) {
       toast.warning(
@@ -670,7 +724,7 @@ const save = async () => {
       <DialogField
         label="远程目录"
         required
-        hint="部署脚本在服务器上的工作目录；脚本若使用 REGENT_DEPLOY_DIRECTORY，则不会写死路径，需要手动填写服务器上的项目根目录"
+        hint="部署脚本在服务器上的工作目录；新建部署会优先带出服务器默认目录，也可以在这里覆盖"
       >
         <Input
           v-model="remoteDirectory"
@@ -678,9 +732,22 @@ const save = async () => {
           :invalid="Boolean(remoteDirectoryNotice)"
           placeholder="~ 或 /opt/regent"
         />
-        <p v-if="remoteDirectoryNotice" class="mt-1 text-caption leading-relaxed text-warning">
-          {{ remoteDirectoryNotice }}
-        </p>
+        <div
+          v-if="remoteDirectoryNotice"
+          class="mt-1 flex flex-wrap items-start gap-x-2 gap-y-1"
+        >
+          <p class="min-w-0 flex-1 text-caption leading-relaxed text-warning">
+            {{ remoteDirectoryNotice }}
+          </p>
+          <button
+            v-if="selectedServer && !selectedServer.defaultRemoteDirectory"
+            type="button"
+            class="shrink-0 text-caption font-emphasis text-accent hover:underline hover:underline-offset-2"
+            @click="editSelectedServer"
+          >
+            设置服务器默认目录
+          </button>
+        </div>
       </DialogField>
 
       <DialogField label="脚本规范">

@@ -26,7 +26,13 @@ public final class DeploymentScriptValidator {
     private static final Pattern SUDO_NON_INTERACTIVE = Pattern.compile(
             "\\bsudo\\b[^#]*\\s-n(?:\\s|[)\"']|$)");
     private static final Pattern REMOTE_COMMAND = Pattern.compile(
-            "(?:^|[;&|]\\s*)(?:command\\s+)?(?:ssh|scp|sftp)\\s+");
+            "(?:^|[;&|]|\\$\\(|\\{|\\()\\s*(?:command\\s+)?(?:ssh|scp|sftp)\\s+");
+    private static final Pattern RUN_LOCAL_FUNCTION = Pattern.compile(
+            "^run_local\\s*\\(\\)\\s*\\{.*$");
+    private static final Pattern EMPTY_HOST_INIT = Pattern.compile(
+            "(?m)^\\s*HOST=(?:\"\"|'')");
+    private static final Pattern EXPLICIT_HOST_GUARD = Pattern.compile(
+            "(?m)^\\s*if\\s+\\[\\[?\\s+-n\\s+[\"']?\\$\\{?HOST\\}?[\"']?\\s+\\]\\]?");
 
     private DeploymentScriptValidator() {
     }
@@ -55,6 +61,7 @@ public final class DeploymentScriptValidator {
                     "脚本必须启用失败退出与未定义变量保护，推荐 set -Eeuo pipefail"));
         }
 
+        boolean supportsLocalMode = supportsControlledLocalMode(script, lines);
         for (int index = 0; index < lines.length; index++) {
             String line = lines[index].strip();
             if (line.isEmpty() || line.startsWith("#")) {
@@ -81,10 +88,14 @@ public final class DeploymentScriptValidator {
                         "sudo 必须使用 -n 非交互模式，并提前在服务器配置 NOPASSWD"));
             }
             if (REMOTE_COMMAND.matcher(line).find()) {
-                issues.add(new DeploymentScriptIssue(
-                        lineNumber,
-                        "HARD_CODED_REMOTE_CONNECTION",
-                        "不要在部署脚本里再次执行 ssh/scp/sftp；服务器连接由平台配置"));
+                boolean allowedLocalMode = supportsLocalMode && insideRunLocal(lines, index);
+                if (!allowedLocalMode) {
+                    issues.add(new DeploymentScriptIssue(
+                            lineNumber,
+                            "HARD_CODED_REMOTE_CONNECTION",
+                            "ssh/scp/sftp 只能封装在 run_local() 中，并且脚本必须按显式 -H/--host 选择本地模式；"
+                                    + "平台执行时不传 -H，会直接走远端模式"));
+                }
             }
         }
         return List.copyOf(issues);
@@ -109,6 +120,36 @@ public final class DeploymentScriptValidator {
             }
         }
         return 0;
+    }
+
+    private static boolean supportsControlledLocalMode(String script, String[] lines) {
+        boolean hasLocalFunction = false;
+        for (String line : lines) {
+            if (RUN_LOCAL_FUNCTION.matcher(line.strip()).matches()) {
+                hasLocalFunction = true;
+                break;
+            }
+        }
+        return hasLocalFunction
+                && EMPTY_HOST_INIT.matcher(script).find()
+                && EXPLICIT_HOST_GUARD.matcher(script).find()
+                && script.contains("run_remote");
+    }
+
+    private static boolean insideRunLocal(String[] lines, int targetIndex) {
+        boolean inside = false;
+        for (int index = 0; index <= targetIndex; index++) {
+            String raw = lines[index];
+            String stripped = raw.strip();
+            if (!inside && RUN_LOCAL_FUNCTION.matcher(stripped).matches()) {
+                inside = true;
+                continue;
+            }
+            if (inside && raw.startsWith("}")) {
+                inside = false;
+            }
+        }
+        return inside;
     }
 
     private static StrictMode strictMode(String[] lines) {

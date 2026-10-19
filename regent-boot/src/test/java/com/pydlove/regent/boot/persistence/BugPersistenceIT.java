@@ -94,8 +94,8 @@ class BugPersistenceIT {
     }
 
     @Test
-    @DisplayName("列表按添加顺序升序，先添加的在前")
-    void 列表按添加顺序排序() {
+    @DisplayName("列表按添加顺序倒序，最新添加的在前")
+    void 列表按最新添加排序() {
         String prefix = "IT_BUG_SORT_" + System.nanoTime();
         insertBug(prefix + "-first", "MINOR", "OPEN", 30);
         insertBug(prefix + "-second", "MAJOR", "FIXED", 10);
@@ -105,9 +105,9 @@ class BugPersistenceIT {
                 BugQuery.of(null, "ALL", PROBE_PROJECT_ID, prefix, 1, 20));
 
         assertEquals(List.of(
-                prefix + "-first",
+                prefix + "-third",
                 prefix + "-second",
-                prefix + "-third"), page.items().stream().map(item -> item.title()).toList());
+                prefix + "-first"), page.items().stream().map(item -> item.title()).toList());
     }
 
     private void insertBug(String title, String severity, String status, int minutesAgo) {

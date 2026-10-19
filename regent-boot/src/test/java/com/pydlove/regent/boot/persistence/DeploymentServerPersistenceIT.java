@@ -54,6 +54,25 @@ class DeploymentServerPersistenceIT {
     }
 
     @Test
+    @DisplayName("服务器保存默认远程目录并在查询时返回")
+    void 保存默认远程目录() {
+        var server = serverCommandService.create(new SaveDeploymentServerCommand(
+                ProjectId.of(PROJECT_ID),
+                "前端构建服务器",
+                "api.example.com",
+                22,
+                "root",
+                DeploymentAuthType.KEY,
+                "/srv/app-audit-frontend",
+                null));
+
+        assertEquals("/srv/app-audit-frontend", server.getDefaultRemoteDirectory());
+        var overview = serverQueryService.get(server.getId());
+        assertEquals("/srv/app-audit-frontend",
+                overview.server().getDefaultRemoteDirectory());
+    }
+
+    @Test
     @DisplayName("删除服务器时同时移除关联部署配置")
     void 删除服务器时同时移除关联部署配置() {
         var server = serverCommandService.create(new SaveDeploymentServerCommand(
