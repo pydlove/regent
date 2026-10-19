@@ -12,6 +12,12 @@ const artifactVersion = releaseCode ? `${version}-${releaseCode}` : version
 const releaseDirectory = path.join(projectDirectory, 'dist')
 const workDirectory = path.join(releaseDirectory, 'work')
 const assetsDirectory = path.join(projectDirectory, 'assets')
+const electronPackager = path.join(
+  projectDirectory,
+  'node_modules',
+  '.bin',
+  'electron-packager',
+)
 
 function run(command, args, options = {}) {
   console.log(`\n$ ${command} ${args.join(' ')}`)
@@ -22,6 +28,20 @@ function run(command, args, options = {}) {
   })
   if (result.status !== 0) {
     throw new Error(`${command} 执行失败，退出码 ${result.status}`)
+  }
+}
+
+function runWithRetry(command, args, options = {}) {
+  const attempts = options.attempts || 3
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      run(command, args, options)
+      return
+    } catch (error) {
+      if (attempt === attempts) throw error
+      console.warn(`\n打包命令失败，${attempt}/${attempts}，3 秒后重试：${error.message}`)
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000)
+    }
   }
 }
 
@@ -62,8 +82,10 @@ function iconSet() {
 }
 
 function packageApplication(platform, arch, outputDirectory) {
-  run('npx', [
-    'electron-packager',
+  if (!fs.existsSync(electronPackager)) {
+    throw new Error(`找不到本地 electron-packager：${electronPackager}`)
+  }
+  runWithRetry(electronPackager, [
     '.',
     'Regent',
     `--platform=${platform}`,
@@ -80,6 +102,7 @@ function packageApplication(platform, arch, outputDirectory) {
     '--ignore=^/scripts',
     '--ignore=^/README\\.md$',
   ], {
+    attempts: 3,
     env: {
       ELECTRON_MIRROR: process.env.ELECTRON_MIRROR || 'https://npmmirror.com/mirrors/electron/',
     },

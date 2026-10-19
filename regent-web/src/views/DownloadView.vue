@@ -100,7 +100,7 @@ const downloads = computed(() => {
       url: latestRelease.value?.downloads.windows?.url
         || import.meta.env.VITE_DOWNLOAD_WINDOWS_URL
         || null,
-      tone: 'bg-accent/12 text-accent',
+      tone: 'bg-accent-soft text-accent',
       recommended: recommendedPlatform === 'windows',
     },
   ]
@@ -164,7 +164,7 @@ const features = computed(() => [
         <div class="download-content p-6 sm:p-10 lg:p-12">
           <div class="max-w-2xl">
             <div class="flex items-center gap-2">
-              <span class="download-soft-accent inline-flex items-center gap-1 rounded-badge px-1.5 py-px text-caption font-emphasis text-accent">
+              <span class="inline-flex items-center gap-1 rounded-badge bg-accent-soft px-1.5 py-px text-caption font-emphasis text-accent">
                 桌面客户端
               </span>
               <span class="tnum text-caption text-label-tertiary">{{ displayVersion }}</span>
@@ -200,7 +200,7 @@ const features = computed(() => [
                 </div>
                 <span
                   v-if="platform.recommended"
-                  class="download-soft-accent ml-auto inline-flex shrink-0 items-center rounded-badge px-1.5 py-px text-caption font-emphasis text-accent"
+                  class="ml-auto inline-flex shrink-0 items-center rounded-badge bg-accent-soft px-1.5 py-px text-caption font-emphasis text-accent"
                 >
                   当前系统
                 </span>
@@ -250,7 +250,7 @@ const features = computed(() => [
 
           <div class="download-feature-grid mt-8 grid gap-3 border-t border-separator pt-6 sm:grid-cols-3">
             <div v-for="feature in features" :key="feature.title" class="flex items-start gap-2.5">
-              <span class="download-soft-success mt-0.5 grid size-5 shrink-0 place-items-center rounded-full text-success">
+              <span class="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-success-soft text-success">
                 <Icon :as="Check" size="inline" />
               </span>
               <div>
@@ -260,7 +260,7 @@ const features = computed(() => [
             </div>
           </div>
 
-          <div class="download-info-surface mt-6 flex flex-wrap items-start gap-2 rounded-panel px-3 py-2.5">
+          <div class="mt-6 flex flex-wrap items-start gap-2 rounded-panel bg-info-surface px-3 py-2.5">
             <Icon :as="ShieldCheck" size="inline" class="mt-0.5 text-accent" />
             <p class="text-caption leading-relaxed text-label-secondary">
               安装包由当前 Regent 服务提供。尚未发布对应系统安装包时，可直接使用浏览器版；
@@ -373,18 +373,6 @@ open /Applications/Regent.app</pre>
     var(--window-bg);
 }
 
-.download-soft-accent {
-  background-color: rgba(0, 122, 255, 0.12);
-}
-
-.download-soft-success {
-  background-color: rgba(52, 199, 89, 0.12);
-}
-
-.download-info-surface {
-  background-color: rgba(0, 122, 255, 0.05);
-}
-
 .download-recommended-card {
   border-color: rgba(0, 122, 255, 0.35);
   box-shadow:
@@ -436,22 +424,4 @@ open /Applications/Regent.app</pre>
   }
 }
 
-:global(.dark) .download-soft-accent {
-  background-color: rgba(10, 132, 255, 0.16);
-}
-
-:global(.dark) .download-soft-success {
-  background-color: rgba(48, 209, 88, 0.16);
-}
-
-:global(.dark) .download-info-surface {
-  background-color: rgba(10, 132, 255, 0.08);
-}
-
-:global(.dark) .download-recommended-card {
-  border-color: rgba(10, 132, 255, 0.45);
-  box-shadow:
-    0 0 0 1px rgba(10, 132, 255, 0.16),
-    var(--fx-shadow-control);
-}
 </style>

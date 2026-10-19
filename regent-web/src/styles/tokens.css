@@ -75,6 +75,11 @@
   /* 输入类控件的底色与描边单独一组：深色下输入框要比内容底色略亮，否则一片死黑 */
   --fx-field-bg: #ffffff;
   --fx-field-border: rgba(0, 0, 0, 0.13);
+  /* 下载页这类「浅色底 + 同色图标」的色块不能依赖 alpha：
+     旧版 Windows Chromium 会把半透明背景渲染成实色，图标就会和背景同色消失。 */
+  --fx-accent-soft: #e8f2ff;
+  --fx-success-soft: #e8f8ec;
+  --fx-info-surface: #f3f8ff;
 
   /* 窗口红黄绿（traffic lights）。单列一组、不并进上面那套 --sys-*：
      AppKit 画这三颗用的是另一组固定的窗口色，和控件语义色不是同一个值 ——
@@ -118,6 +123,9 @@
 
   --fx-field-bg: rgba(255, 255, 255, 0.07);
   --fx-field-border: rgba(255, 255, 255, 0.13);
+  --fx-accent-soft: #0d2a4a;
+  --fx-success-soft: #0d2f1a;
+  --fx-info-surface: #101d2d;
 
   /* 深色下投影基本不可见，分层靠发丝线，所以只留 0.5px 描边 */
   --fx-shadow-control: 0 0 0 0.5px rgba(255, 255, 255, 0.09);
@@ -172,6 +180,9 @@
   --color-selection: var(--selection-bg);
   --color-field: var(--fx-field-bg);
   --color-field-border: var(--fx-field-border);
+  --color-accent-soft: var(--fx-accent-soft);
+  --color-success-soft: var(--fx-success-soft);
+  --color-info-surface: var(--fx-info-surface);
   --color-traffic-close: var(--fx-traffic-close);
   --color-traffic-minimize: var(--fx-traffic-minimize);
   --color-traffic-zoom: var(--fx-traffic-zoom);
