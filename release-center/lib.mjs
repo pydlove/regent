@@ -54,6 +54,20 @@ export function normalizeReviewedRelease(value) {
   return normalizeReleasePreview(value)
 }
 
+export function normalizeDraft(value) {
+  if (!value || typeof value !== 'object') {
+    throw new Error('缺少发布草稿')
+  }
+  const parsed = parseVersion(value.version)
+  const content = normalizeReviewedRelease(value)
+  return {
+    ...parsed,
+    ...content,
+    deploy: value.deploy !== false,
+    pushTag: value.pushTag === true,
+  }
+}
+
 export function codexPrompt({ version, previousVersion, instruction }) {
   return `
 你是 Regent 项目的发布经理。只读检查当前仓库，生成面向用户的版本发布说明。

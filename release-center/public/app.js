@@ -28,6 +28,11 @@ const elements = {
 let previewVersion = ''
 let pollTimer = null
 let workspaceDirty = false
+let draftStale = false
+let draftSaveTimer = null
+
+const DIRTY_WARNING = '当前工作区有未提交改动。版本内容和预览可以生成，但创建 Git 标签前必须先提交代码并刷新页面。'
+const STALE_DRAFT_WARNING = '这份发布预览生成后代码提交已变化，为避免发布内容与代码不一致，请重新生成版本内容。'
 
 function showError(message) {
   elements.error.textContent = message
@@ -45,9 +50,18 @@ function updateConfirmState() {
   elements.publishButton.disabled = !(
     previewVersion
     && !workspaceDirty
+    && !draftStale
     && elements.confirmReview.checked
     && elements.highlights.children.length > 0
   )
+}
+
+function updateWorkspaceWarning() {
+  const messages = []
+  if (workspaceDirty) messages.push(DIRTY_WARNING)
+  if (draftStale) messages.push(STALE_DRAFT_WARNING)
+  elements.workspaceWarning.textContent = messages.join(' ')
+  elements.workspaceWarning.hidden = messages.length === 0
 }
 
 function highlightRow(item = { title: '', description: '' }) {
@@ -75,15 +89,22 @@ function highlightRow(item = { title: '', description: '' }) {
   remove.addEventListener('click', () => {
     row.remove()
     updateConfirmState()
+    scheduleDraftSave()
   })
 
-  title.addEventListener('input', updateConfirmState)
-  description.addEventListener('input', updateConfirmState)
+  title.addEventListener('input', () => {
+    updateConfirmState()
+    scheduleDraftSave()
+  })
+  description.addEventListener('input', () => {
+    updateConfirmState()
+    scheduleDraftSave()
+  })
   row.append(title, description, remove)
   return row
 }
 
-function renderPreview(preview) {
+function renderPreview(preview, { focus = true } = {}) {
   previewVersion = preview.version
   elements.preview.hidden = false
   elements.previewVersion.textContent = preview.version
@@ -94,7 +115,7 @@ function renderPreview(preview) {
   elements.tagPreview.textContent = preview.version
   elements.confirmReview.checked = false
   updateConfirmState()
-  elements.preview.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  if (focus) elements.preview.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function readPreview() {
@@ -110,6 +131,43 @@ function readPreview() {
   return { summary, highlights }
 }
 
+async function persistDraft() {
+  if (!previewVersion) return
+  try {
+    const content = readPreview()
+    await request('/api/draft', {
+      method: 'POST',
+      body: JSON.stringify({
+        version: previewVersion,
+        ...content,
+        deploy: elements.deploy.checked,
+        pushTag: elements.pushTag.checked,
+      }),
+    })
+  } catch (error) {
+    // 输入尚未完整时草稿暂时无法保存，等下一次有效输入继续。
+    if (!/不完整|不能为空|至少保留/.test(error.message)) {
+      console.warn(`发布草稿保存失败：${error.message}`)
+    }
+  }
+}
+
+function scheduleDraftSave() {
+  if (!previewVersion) return
+  clearTimeout(draftSaveTimer)
+  draftSaveTimer = setTimeout(() => {
+    void persistDraft()
+  }, 350)
+}
+
+function clearPersistedDraft() {
+  clearTimeout(draftSaveTimer)
+  draftSaveTimer = null
+  void request('/api/draft', { method: 'DELETE' }).catch((error) => {
+    console.warn(`发布草稿清理失败：${error.message}`)
+  })
+}
+
 async function request(path, options) {
   const response = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
@@ -123,8 +181,9 @@ async function request(path, options) {
 async function loadState() {
   const state = await request('/api/state')
   workspaceDirty = state.dirty === true
+  draftStale = state.draftStale === true
   elements.gitHead.textContent = state.gitHead
-  elements.workspaceWarning.hidden = !workspaceDirty
+  updateWorkspaceWarning()
   elements.currentVersion.textContent = state.currentVersion
   elements.nextVersion.textContent = `下一个建议：${state.suggestedVersion}`
   if (!elements.version.value) elements.version.value = state.suggestedVersion
@@ -138,6 +197,16 @@ async function loadState() {
     date.textContent = release.releasedAt
     item.append(version, date)
     elements.history.append(item)
+  }
+  if (state.draft) {
+    elements.version.value = state.draft.version
+    elements.deploy.checked = state.draft.deploy !== false
+    elements.pushTag.checked = state.draft.pushTag === true
+    renderPreview(state.draft, { focus: false })
+  } else {
+    elements.preview.hidden = true
+    previewVersion = ''
+    elements.confirmReview.checked = false
   }
   updateConfirmState()
 }
@@ -155,6 +224,10 @@ async function generatePreview() {
         instruction: elements.instruction.value.trim(),
       }),
     })
+    draftStale = false
+    elements.deploy.checked = preview.deploy !== false
+    elements.pushTag.checked = preview.pushTag === true
+    updateWorkspaceWarning()
     renderPreview(preview)
   } catch (error) {
     showError(error.message)
@@ -186,6 +259,8 @@ async function pollJob(jobId) {
     }
     elements.publishButton.disabled = false
     if (job.status === 'success') {
+      clearTimeout(draftSaveTimer)
+      draftSaveTimer = null
       elements.jobPanel.scrollIntoView({ behavior: 'smooth', block: 'start' })
       await loadState()
     } else {
@@ -226,13 +301,22 @@ elements.generateButton.addEventListener('click', generatePreview)
 elements.addHighlight.addEventListener('click', () => {
   elements.highlights.append(highlightRow())
   updateConfirmState()
+  scheduleDraftSave()
 })
 elements.confirmReview.addEventListener('change', updateConfirmState)
-elements.summary.addEventListener('input', updateConfirmState)
+elements.summary.addEventListener('input', () => {
+  updateConfirmState()
+  scheduleDraftSave()
+})
+elements.deploy.addEventListener('change', scheduleDraftSave)
+elements.pushTag.addEventListener('change', scheduleDraftSave)
 elements.version.addEventListener('input', () => {
   if (previewVersion && elements.version.value.trim() !== previewVersion) {
     elements.preview.hidden = true
     previewVersion = ''
+    draftStale = false
+    updateWorkspaceWarning()
+    clearPersistedDraft()
     updateConfirmState()
   }
 })

@@ -11,6 +11,7 @@ import {
   codexPrompt,
   codexSchema,
   nextVersion,
+  normalizeDraft,
   normalizeReleasePreview,
   normalizeReviewedRelease,
   parseVersion,
@@ -21,6 +22,11 @@ const projectDirectory = path.resolve(centerDirectory, '..')
 const publicDirectory = path.join(centerDirectory, 'public')
 const releasesPath = path.join(projectDirectory, 'regent-web/src/content/releases.json')
 const releaseScript = path.join(projectDirectory, 'scripts/release-version.mjs')
+const runtimeDirectory = path.join(
+  process.env.REGENT_HOME?.trim() || path.join(os.homedir(), '.regent'),
+  'release-center',
+)
+const draftPath = path.join(runtimeDirectory, 'draft.json')
 const port = Number(process.env.REGENT_RELEASE_CENTER_PORT || 12600)
 const host = '127.0.0.1'
 const jobs = new Map()
@@ -29,6 +35,49 @@ let generating = false
 
 function releases() {
   return JSON.parse(fs.readFileSync(releasesPath, 'utf8')).releases
+}
+
+function readDraft() {
+  try {
+    if (!fs.existsSync(draftPath)) return null
+    const parsed = JSON.parse(fs.readFileSync(draftPath, 'utf8'))
+    const draft = normalizeDraft(parsed)
+    if (releases().some((release) => release.version === draft.version)) {
+      clearDraft()
+      return null
+    }
+    return {
+      ...draft,
+      gitHead: typeof parsed.gitHead === 'string' ? parsed.gitHead : '',
+      generatedAt: typeof parsed.generatedAt === 'string' ? parsed.generatedAt : '',
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : '',
+    }
+  } catch (error) {
+    console.warn(`发布草稿读取失败，已忽略：${error.message}`)
+    clearDraft()
+    return null
+  }
+}
+
+function writeDraft(value, { existing = readDraft(), gitHead = '' } = {}) {
+  const draft = normalizeDraft(value)
+  const now = new Date().toISOString()
+  const sameVersion = existing?.version === draft.version
+  const record = {
+    ...draft,
+    gitHead: sameVersion ? existing.gitHead || gitHead : gitHead,
+    generatedAt: sameVersion ? existing.generatedAt || now : now,
+    updatedAt: now,
+  }
+  fs.mkdirSync(runtimeDirectory, { recursive: true, mode: 0o700 })
+  const temporary = `${draftPath}.${process.pid}.${Date.now()}.tmp`
+  fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 })
+  fs.renameSync(temporary, draftPath)
+  return record
+}
+
+function clearDraft() {
+  fs.rmSync(draftPath, { force: true })
 }
 
 function sendJson(response, status, value) {
@@ -231,6 +280,7 @@ function startPublish(payload) {
     job.updatedAt = new Date().toISOString()
     activeJobId = null
     fs.rmSync(temporaryDirectory, { recursive: true, force: true })
+    if (code === 0) clearDraft()
   })
   return job
 }
@@ -252,6 +302,7 @@ async function handleApi(request, response, pathname) {
     const currentVersion = history[0]?.version
     const gitHead = await capture('git', ['rev-parse', '--short', 'HEAD'])
     const dirty = (await capture('git', ['status', '--porcelain'])) !== ''
+    const draft = readDraft()
     sendJson(response, 200, {
       currentVersion,
       suggestedVersion: nextVersion(currentVersion),
@@ -260,6 +311,8 @@ async function handleApi(request, response, pathname) {
       dirty,
       busy: Boolean(activeJobId),
       generating,
+      draft,
+      draftStale: draft?.gitHead ? draft.gitHead !== gitHead : false,
     })
     return
   }
@@ -272,6 +325,31 @@ async function handleApi(request, response, pathname) {
       return
     }
     sendJson(response, 200, job)
+    return
+  }
+
+  if (pathname === '/api/draft') {
+    if (!localOriginAllowed(request)) {
+      sendError(response, 403, '只允许本地发布中心操作')
+      return
+    }
+    if (request.method === 'DELETE') {
+      clearDraft()
+      sendJson(response, 200, { cleared: true })
+      return
+    }
+    if (request.method === 'POST') {
+      try {
+        const body = await readBody(request)
+        const gitHead = await capture('git', ['rev-parse', '--short', 'HEAD'])
+        const draft = writeDraft(body, { gitHead })
+        sendJson(response, 200, draft)
+      } catch (error) {
+        sendError(response, 400, error.message)
+      }
+      return
+    }
+    sendError(response, 405, '不支持的草稿操作')
     return
   }
 
@@ -298,7 +376,14 @@ async function handleApi(request, response, pathname) {
         history[0]?.version,
         typeof body.instruction === 'string' ? body.instruction.trim() : '',
       )
-      sendJson(response, 200, { ...parsed, ...preview })
+      const gitHead = await capture('git', ['rev-parse', '--short', 'HEAD'])
+      const draft = writeDraft({
+        ...parsed,
+        ...preview,
+        deploy: true,
+        pushTag: false,
+      }, { existing: null, gitHead })
+      sendJson(response, 200, draft)
     } catch (error) {
       sendError(response, 400, error.message)
     } finally {

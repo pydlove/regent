@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   codexPrompt,
   nextVersion,
+  normalizeDraft,
   normalizeReleasePreview,
   normalizeReviewedRelease,
   parseVersion,
@@ -56,4 +57,30 @@ test('Codex 提示包含版本和用户补充要求', () => {
   assert.match(prompt, /R100B004/)
   assert.match(prompt, /R100B003/)
   assert.match(prompt, /突出自动更新/)
+})
+
+test('规范发布草稿并保留发布选项', () => {
+  assert.deepEqual(normalizeDraft({
+    version: 'feature_V1.0.2_R100B004',
+    summary: ' 本次更新 ',
+    highlights: [
+      { title: ' 发布草稿 ', description: ' 刷新后仍然保留 ' },
+      { title: ' 自动恢复 ', description: ' 避免重复生成 ' },
+      { title: ' 人工确认 ', description: ' 刷新后仍需重新勾选 ' },
+    ],
+    deploy: false,
+    pushTag: true,
+  }), {
+    version: 'feature_V1.0.2_R100B004',
+    desktopVersion: '1.0.2',
+    releaseCode: 'R100B004',
+    summary: '本次更新',
+    highlights: [
+      { title: '发布草稿', description: '刷新后仍然保留' },
+      { title: '自动恢复', description: '避免重复生成' },
+      { title: '人工确认', description: '刷新后仍需重新勾选' },
+    ],
+    deploy: false,
+    pushTag: true,
+  })
 })
