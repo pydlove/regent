@@ -64,8 +64,19 @@ export function normalizeDraft(value) {
     ...parsed,
     ...content,
     deploy: value.deploy !== false,
-    pushTag: value.pushTag === true,
   }
+}
+
+export function publishArguments({ version, releaseInfoFile, deploy }) {
+  const args = [
+    '--version',
+    version,
+    '--release-info-file',
+    releaseInfoFile,
+    '--no-tag',
+  ]
+  if (deploy === true) args.push('--deploy')
+  return args
 }
 
 export function codexPrompt({ version, previousVersion, instruction }) {

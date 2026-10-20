@@ -128,14 +128,6 @@
                 <input id="deploy" type="checkbox" checked />
                 <span>发布后同步部署公网前端</span>
               </label>
-              <label class="check-row">
-                <input id="push-tag" type="checkbox" />
-                <span>发布后推送 Git 标签到 origin</span>
-              </label>
-              <p class="tag-note">
-                发布成功后会创建 annotated tag：
-                <code id="tag-preview"></code>
-              </p>
             </div>
 
             <div class="confirm-zone">
@@ -146,9 +138,6 @@
               <div class="confirm-actions">
                 <p id="publish-blocker" class="publish-blocker" aria-live="polite" hidden></p>
                 <div class="confirm-buttons">
-                  <button id="workspace-refresh" class="button small" type="button" hidden>
-                    重新检查工作区
-                  </button>
                   <button id="publish-button" class="button primary large" type="button" disabled>
                     确认发布
                   </button>

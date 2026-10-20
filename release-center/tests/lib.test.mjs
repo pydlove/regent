@@ -8,6 +8,7 @@ import {
   normalizeReleasePreview,
   normalizeReviewedRelease,
   parseVersion,
+  publishArguments,
 } from '../lib.mjs'
 
 test('解析发布版本并自动递增构建号', () => {
@@ -59,7 +60,7 @@ test('Codex 提示包含版本和用户补充要求', () => {
   assert.match(prompt, /突出自动更新/)
 })
 
-test('规范发布草稿并保留发布选项', () => {
+test('规范发布草稿并保留部署选项', () => {
   assert.deepEqual(normalizeDraft({
     version: 'feature_V1.0.2_R100B004',
     summary: ' 本次更新 ',
@@ -69,7 +70,6 @@ test('规范发布草稿并保留发布选项', () => {
       { title: ' 人工确认 ', description: ' 刷新后仍需重新勾选 ' },
     ],
     deploy: false,
-    pushTag: true,
   }), {
     version: 'feature_V1.0.2_R100B004',
     desktopVersion: '1.0.2',
@@ -81,6 +81,20 @@ test('规范发布草稿并保留发布选项', () => {
       { title: '人工确认', description: '刷新后仍需重新勾选' },
     ],
     deploy: false,
-    pushTag: true,
   })
+})
+
+test('发布参数固定跳过 Git 标签与推送', () => {
+  assert.deepEqual(publishArguments({
+    version: 'feature_V1.0.2_R100B005',
+    releaseInfoFile: '/tmp/release-info.json',
+    deploy: true,
+  }), [
+    '--version',
+    'feature_V1.0.2_R100B005',
+    '--release-info-file',
+    '/tmp/release-info.json',
+    '--no-tag',
+    '--deploy',
+  ])
 })

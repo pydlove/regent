@@ -15,6 +15,7 @@ import {
   normalizeReleasePreview,
   normalizeReviewedRelease,
   parseVersion,
+  publishArguments,
 } from './lib.mjs'
 
 const centerDirectory = path.dirname(fileURLToPath(import.meta.url))
@@ -275,13 +276,12 @@ function startPublish(payload) {
   fs.writeFileSync(releaseInfoFile, `${JSON.stringify(content, null, 2)}\n`, 'utf8')
   const args = [
     releaseScript,
-    '--version',
-    parsed.version,
-    '--release-info-file',
-    releaseInfoFile,
+    ...publishArguments({
+      version: parsed.version,
+      releaseInfoFile,
+      deploy: payload.deploy,
+    }),
   ]
-  if (payload.deploy === true) args.push('--deploy')
-  if (payload.pushTag === true) args.push('--push-tag')
 
   const job = {
     id: crypto.randomUUID(),
@@ -503,7 +503,6 @@ async function handleApi(request, response, pathname) {
         ...parsed,
         ...preview,
         deploy: true,
-        pushTag: false,
       }, { existing: null, gitHead })
       sendJson(response, 200, draft)
     } catch (error) {
@@ -517,9 +516,6 @@ async function handleApi(request, response, pathname) {
   if (pathname === '/api/publish') {
     try {
       const body = await readBody(request)
-      if ((await capture('git', ['status', '--porcelain'])) !== '') {
-        throw new Error('工作区有未提交改动，请先提交代码并刷新页面后再发布')
-      }
       const job = startPublish(body)
       sendJson(response, 202, { jobId: job.id })
     } catch (error) {
