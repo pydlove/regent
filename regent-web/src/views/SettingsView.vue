@@ -600,7 +600,8 @@ onBeforeUnmount(() => {
                   <StatusDot :dot="codexStatusDot">{{ codexStatusLabel }}</StatusDot>
                 </div>
                 <p class="mt-1 text-caption text-label-secondary">
-                  检测本机是否能找到并运行 codex。只执行版本命令，不调用模型。
+                  每次检测都会按本机 PATH、登录 shell 和常见安装目录重新解析实际路径，
+                  再执行版本命令；不写死安装位置，也不调用模型。
                 </p>
               </div>
               <div class="flex shrink-0 items-center gap-2">
@@ -630,7 +631,7 @@ onBeforeUnmount(() => {
                   <dd class="ml-auto truncate text-label">{{ codexRuntime.version ?? '未返回' }}</dd>
                 </div>
                 <div class="flex min-w-0 items-center gap-2 sm:col-span-2">
-                  <dt class="shrink-0 text-label-secondary">实际路径</dt>
+                  <dt class="shrink-0 text-label-secondary">实际检测路径</dt>
                   <dd class="ml-auto truncate font-mono text-label">
                     {{ codexRuntime.executablePath ?? '未找到' }}
                   </dd>

@@ -69,6 +69,33 @@ class CodexCommandResolverTest {
     }
 
     @Test
+    @DisplayName("从登录 shell 的实际 PATH 解析用户自定义安装位置")
+    void 从登录Shell查找() throws IOException {
+        Path codex = 可执行文件(workspace.resolve("custom-node/bin/codex"));
+        Path shell = 可执行文件(workspace.resolve("fake-zsh"));
+        Files.writeString(shell, "#!/bin/bash\nprintf 'login banner\\n__REGENT_CODEX_PATH__=%s\\n' '"
+                + codex + "'\n");
+
+        assertEquals(codex, CodexCommandResolver
+                .resolve("codex", Map.of("PATH", "/usr/bin:/bin"), workspace, shell)
+                .orElseThrow());
+    }
+
+    @Test
+    @DisplayName("从 Volta 和 fnm 等版本管理器目录动态查找")
+    void 从其他版本管理器查找() throws IOException {
+        Path volta = 可执行文件(workspace.resolve(".volta/bin/codex"));
+        assertEquals(volta, CodexCommandResolver
+                .resolve("codex", Map.of("PATH", "/usr/bin:/bin"), workspace).orElseThrow());
+
+        Files.delete(volta);
+        Path fnm = 可执行文件(workspace.resolve(
+                ".local/share/fnm/node-versions/v24.13.0/installation/bin/codex"));
+        assertEquals(fnm, CodexCommandResolver
+                .resolve("codex", Map.of("PATH", "/usr/bin:/bin"), workspace).orElseThrow());
+    }
+
+    @Test
     @DisplayName("不可执行文件会被跳过")
     void 跳过不可执行文件() throws IOException {
         Path bin = workspace.resolve("path-bin");
