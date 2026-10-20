@@ -666,7 +666,7 @@ onBeforeUnmount(() => {
             </p>
           </section>
 
-          <CcSwitchDownloadCard class="mt-4" />
+          <CcSwitchDownloadCard class="mt-4 mb-4" />
 
           <div class="overflow-hidden rounded-panel bg-content shadow-panel">
             <div
