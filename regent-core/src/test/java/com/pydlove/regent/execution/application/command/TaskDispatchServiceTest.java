@@ -105,6 +105,29 @@ class TaskDispatchServiceTest {
         assertEquals(1, workers.size());
     }
 
+    @Test
+    @DisplayName("接续任务必须等来源任务收场后才能派发，并切回同一分支")
+    void 接续任务等待来源任务收场() {
+        Task source = add(1L, TaskStatus.RUNNING);
+        ExecutionFakes.withThread(source, "thread-parent");
+        Task child = Task.continuation(
+                PROJECT, source.getId(), source.getCodexThreadId().orElseThrow(),
+                source.getBranchName().orElse(null), "后续开发", "继续补齐移动端测试", 0);
+        child.assignIdentity(TaskId.of(2L));
+        tasks.add(child);
+
+        assertThrows(DomainException.class, () -> service.dispatch(child.getId()));
+        assertEquals(TaskStatus.PENDING, child.getStatus());
+        assertEquals(0, workers.size());
+
+        source.complete();
+        service.dispatch(child.getId());
+
+        assertTrue(branches.switched.contains("codex/task-1"));
+        assertEquals(TaskStatus.RUNNING, child.getStatus());
+        assertEquals(1, workers.size());
+    }
+
     @Nested
     @DisplayName("手动派发")
     class Manual {

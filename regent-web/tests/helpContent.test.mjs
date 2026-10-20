@@ -93,6 +93,15 @@ test('任务草稿说明可按自动保存与恢复检索', () => {
   )
 })
 
+test('后续任务说明可按同一会话与继续创建检索', () => {
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '继续创建').some((topic) => topic.id === 'task-continuation'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '同一会话').some((topic) => topic.id === 'task-continuation'),
+  )
+})
+
 test('空搜索返回当前分类的全部条目', () => {
   const result = filterHelpTopics(HELP_TOPICS, '', 'tasks')
   const expected = HELP_TOPICS.filter((topic) => topic.category === 'tasks')

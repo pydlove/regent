@@ -13,7 +13,8 @@
 
     <sql id="columns">
         id, project_id, requirement_id, bug_id, source, title, prompt, status, priority,
-        codex_thread_id, branch_name, branch_approval_state, blocking_decision_id, attempt_count,
+        codex_thread_id, continued_from_task_id, branch_name, branch_approval_state,
+        blocking_decision_id, attempt_count,
         started_at, finished_at, created_at, updated_at
     </sql>
 
@@ -54,9 +55,9 @@
 
     <select id="selectByIdOwned" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskData">
         SELECT t.id, t.project_id, t.requirement_id, t.bug_id, t.source, t.title, t.prompt,
-               t.status, t.priority, t.codex_thread_id, t.branch_name, t.branch_approval_state,
-               t.blocking_decision_id, t.attempt_count, t.started_at, t.finished_at,
-               t.created_at, t.updated_at
+               t.status, t.priority, t.codex_thread_id, t.continued_from_task_id,
+               t.branch_name, t.branch_approval_state, t.blocking_decision_id,
+               t.attempt_count, t.started_at, t.finished_at, t.created_at, t.updated_at
         FROM task t
         JOIN project p ON p.id = t.project_id
         WHERE t.id = #{id}
@@ -254,8 +255,8 @@
 
     <sql id="dispatchableColumns">
         t.id, t.project_id, t.requirement_id, t.bug_id, t.source, t.title, t.prompt,
-        t.status, t.priority, t.codex_thread_id, t.branch_name, t.branch_approval_state,
-        t.blocking_decision_id,
+        t.status, t.priority, t.codex_thread_id, t.continued_from_task_id,
+        t.branch_name, t.branch_approval_state, t.blocking_decision_id,
         t.attempt_count, t.started_at, t.finished_at, t.created_at, t.updated_at
     </sql>
 
@@ -273,8 +274,8 @@
     <select id="selectDispatchable" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskData">
         SELECT
             t.id, t.project_id, t.requirement_id, t.bug_id, t.source, t.title, t.prompt,
-            t.status, t.priority, t.codex_thread_id, t.branch_name, t.branch_approval_state,
-            t.blocking_decision_id,
+            t.status, t.priority, t.codex_thread_id, t.continued_from_task_id,
+            t.branch_name, t.branch_approval_state, t.blocking_decision_id,
             t.attempt_count, t.started_at, t.finished_at, t.created_at, t.updated_at
         FROM task t
         JOIN project p ON p.id = t.project_id AND p.enabled = 1 AND p.deleted = 0
@@ -305,11 +306,11 @@
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO task (project_id, requirement_id, bug_id, source, title, prompt, status, priority,
-                          codex_thread_id, branch_name, branch_approval_state, blocking_decision_id, attempt_count,
-                          started_at, finished_at, created_at, updated_at)
+                          codex_thread_id, continued_from_task_id, branch_name, branch_approval_state,
+                          blocking_decision_id, attempt_count, started_at, finished_at, created_at, updated_at)
         VALUES (#{projectId}, #{requirementId}, #{bugId}, #{source}, #{title}, #{prompt}, #{status}, #{priority},
-                #{codexThreadId}, #{branchName}, #{branchApprovalState}, #{blockingDecisionId}, #{attemptCount},
-                #{startedAt}, #{finishedAt}, #{createdAt}, #{updatedAt})
+                #{codexThreadId}, #{continuedFromTaskId}, #{branchName}, #{branchApprovalState},
+                #{blockingDecisionId}, #{attemptCount}, #{startedAt}, #{finishedAt}, #{createdAt}, #{updatedAt})
     </insert>
 
     <!-- 只更新会随状态机改变的列。project_id / requirement_id / source 是任务的「出身」，

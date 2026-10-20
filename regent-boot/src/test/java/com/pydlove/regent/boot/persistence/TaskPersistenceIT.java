@@ -98,6 +98,27 @@ class TaskPersistenceIT {
     }
 
     @Test
+    @DisplayName("接续任务持久化来源关系、Codex 会话与分支")
+    void 接续任务往返一致() {
+        Task source = Task.manual(ProjectId.of(PROBE_PROJECT_ID), "IT 来源任务", "来源指令", 0);
+        taskRepository.save(source);
+        source.dispatch("feature/it-source");
+        source.recordThreadId("thread-it-source");
+        taskRepository.save(source);
+
+        Task child = Task.continuation(
+                source.getProjectId(), source.getId(), source.getCodexThreadId().orElseThrow(),
+                source.getBranchName().orElse(null), "IT 接续任务", "继续开发", 3);
+        taskRepository.save(child);
+        Task loaded = taskRepository.findById(child.getId()).orElseThrow();
+
+        assertEquals(source.getId(), loaded.getContinuedFromTaskId().orElseThrow());
+        assertEquals("thread-it-source", loaded.getCodexThreadId().orElseThrow());
+        assertEquals("feature/it-source", loaded.getBranchName().orElseThrow());
+        assertEquals(TaskStatus.PENDING, loaded.getStatus());
+    }
+
+    @Test
     @DisplayName("状态迁移后更新，重新查回是新状态")
     void 更新状态() {
         Task task = Task.manual(ProjectId.of(PROBE_PROJECT_ID), "IT 状态任务", "验证更新", 0);

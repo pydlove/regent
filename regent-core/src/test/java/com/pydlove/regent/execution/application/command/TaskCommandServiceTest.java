@@ -109,6 +109,33 @@ class TaskCommandServiceTest {
     }
 
     @Test
+    @DisplayName("基于已有会话创建后续任务：复制线程和分支，但不复制执行状态")
+    void createsContinuationTask() {
+        Task source = ExecutionFakes.task(9L, ProjectId.of(3L), TaskStatus.RUNNING);
+        ExecutionFakes.withThread(source, "thread-parent");
+        tasks.add(source);
+
+        Task child = service.createContinuation(new CreateTaskContinuationCommand(
+                source.getId(), "继续补齐移动端空状态与错误状态", 4));
+
+        assertEquals(TaskStatus.PENDING, child.getStatus());
+        assertEquals(source.getId(), child.getContinuedFromTaskId().orElseThrow());
+        assertEquals("thread-parent", child.getCodexThreadId().orElseThrow());
+        assertEquals(source.getBranchName().orElseThrow(), child.getBranchName().orElseThrow());
+        assertEquals(4, child.getPriority());
+    }
+
+    @Test
+    @DisplayName("来源任务没有 Codex 会话时拒绝继续创建")
+    void rejectsContinuationWithoutThread() {
+        Task source = ExecutionFakes.task(9L, ProjectId.of(3L), TaskStatus.DONE);
+        tasks.add(source);
+
+        assertThrows(DomainException.class, () -> service.createContinuation(
+                new CreateTaskContinuationCommand(source.getId(), "继续开发", 0)));
+    }
+
+    @Test
     @DisplayName("编辑任务会重推标题并更新指令与优先级")
     void editsTaskContent() {
         Task task = create("原来的指令");

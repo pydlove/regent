@@ -61,6 +61,19 @@ class TaskTest {
         }
 
         @Test
+        void 接续任务复制会话与分支并保留来源关系() {
+            Task task = Task.continuation(
+                    PROJECT, TaskId.of(7L), "thread-parent", "feature/continue",
+                    "继续补移动端", "继续补齐移动端布局和测试", 3);
+
+            assertEquals(TaskStatus.PENDING, task.getStatus());
+            assertEquals(TaskId.of(7L), task.getContinuedFromTaskId().orElseThrow());
+            assertEquals("thread-parent", task.getCodexThreadId().orElseThrow());
+            assertEquals("feature/continue", task.getBranchName().orElseThrow());
+            assertTrue(task.isContinuation());
+        }
+
+        @Test
         void 需求任务必须携带需求引用() {
             Task task = Task.fromRequirement(PROJECT, RequirementId.of(7L), "拆解需求", "按需求文档实现", 10);
 

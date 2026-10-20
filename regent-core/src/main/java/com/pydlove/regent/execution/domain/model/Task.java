@@ -40,6 +40,7 @@ public class Task {
     private final RequirementId requirementId;
     private final BugId bugId;
     private final TaskSource source;
+    private final TaskId continuedFromTaskId;
     private String title;
     private String prompt;
     private int priority;
@@ -63,14 +64,34 @@ public class Task {
                  String prompt,
                  int priority,
                  Instant createdAt) {
+        this(projectId, requirementId, bugId, source, null, null, null,
+                title, prompt, priority, createdAt);
+    }
+
+    private Task(ProjectId projectId,
+                 RequirementId requirementId,
+                 BugId bugId,
+                 TaskSource source,
+                 TaskId continuedFromTaskId,
+                 String codexThreadId,
+                 String branchName,
+                 String title,
+                 String prompt,
+                 int priority,
+                 Instant createdAt) {
         this.projectId = requireNotNull(projectId, "所属项目");
         this.requirementId = requirementId;
         this.bugId = bugId;
         this.source = requireNotNull(source, "任务来源");
+        this.continuedFromTaskId = continuedFromTaskId;
         this.title = requireTitle(title);
         this.prompt = requirePrompt(prompt);
         this.priority = priority;
         this.status = TaskStatus.PENDING;
+        this.codexThreadId = continuedFromTaskId == null
+                ? codexThreadId
+                : requireText(codexThreadId, "来源任务的执行线程");
+        this.branchName = blankToNull(branchName);
         this.branchApprovalState = BranchApprovalState.NONE;
         this.attemptCount = 0;
         this.createdAt = requireNotNull(createdAt, "创建时间");
@@ -96,6 +117,21 @@ public class Task {
         return new Task(projectId, null, null, TaskSource.MANUAL, title, prompt, priority, now());
     }
 
+    /** 基于已完成过会话的任务继续开发：来源关系、线程和分支在创建时固定下来。 */
+    public static Task continuation(ProjectId projectId,
+                                    TaskId sourceTaskId,
+                                    String codexThreadId,
+                                    String branchName,
+                                    String title,
+                                    String prompt,
+                                    int priority) {
+        return new Task(projectId, null, null, TaskSource.MANUAL,
+                requireNotNull(sourceTaskId, "来源任务"),
+                codexThreadId,
+                branchName,
+                title, prompt, priority, now());
+    }
+
     /**
      * 从存储重建。只允许基础设施层调用 —— 领域层之外的生产代码不该走这条路，
      * 因为它跳过了所有状态守卫。
@@ -103,11 +139,10 @@ public class Task {
     public static Task restore(TaskSnapshot snapshot) {
         Task task = new Task(
                 snapshot.projectId(), snapshot.requirementId(), snapshot.bugId(), snapshot.source(),
+                snapshot.continuedFromTaskId(), snapshot.codexThreadId(), snapshot.branchName(),
                 snapshot.title(), snapshot.prompt(), snapshot.priority(), snapshot.createdAt());
         task.id = requireNotNull(snapshot.id(), "任务 ID");
         task.status = requireNotNull(snapshot.status(), "任务状态");
-        task.codexThreadId = snapshot.codexThreadId();
-        task.branchName = snapshot.branchName();
         task.branchApprovalState = snapshot.branchApprovalState() == null
                 ? BranchApprovalState.NONE : snapshot.branchApprovalState();
         task.blockingDecisionId = snapshot.blockingDecisionId();
@@ -304,6 +339,16 @@ public class Task {
                 TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.BLOCKED);
     }
 
+    /** 只有建立过 Codex 会话的任务才能作为后续任务的上游。 */
+    public void requireContinuable() {
+        requireStateIn("只有执行中、待批准或已收场的任务可以继续创建任务",
+                TaskStatus.RUNNING, TaskStatus.BLOCKED,
+                TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.CANCELLED);
+        if (codexThreadId == null) {
+            throw new DomainException("任务尚未建立 Codex 会话，不能继续创建任务：" + id);
+        }
+    }
+
     /** 终止任务。除终态外都可终止，包括阻塞中（等价于驳回该决策）。 */
     public void cancel() {
         if (this.status.isTerminal()) {
@@ -428,6 +473,14 @@ public class Task {
 
     public TaskSource getSource() {
         return source;
+    }
+
+    public Optional<TaskId> getContinuedFromTaskId() {
+        return Optional.ofNullable(continuedFromTaskId);
+    }
+
+    public boolean isContinuation() {
+        return continuedFromTaskId != null;
     }
 
     public String getTitle() {

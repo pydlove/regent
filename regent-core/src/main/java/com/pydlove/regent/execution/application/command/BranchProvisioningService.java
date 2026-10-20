@@ -20,6 +20,12 @@ public class BranchProvisioningService {
     }
 
     public BranchPreparation prepare(Task task, ProjectProfile project) {
+        if (task.isContinuation()) {
+            String branch = task.getBranchName().orElse(null);
+            if (branch != null) branchManager.switchTo(project.path(), branch);
+            task.dispatch(branch);
+            return BranchPreparation.started(branch);
+        }
         String branch = branchManager.currentBranch(project.path()).orElse(null);
         task.dispatch(branch);
         return BranchPreparation.started(branch);

@@ -66,3 +66,5 @@ export const canBatchDispatch = (s: TaskStatus) => s === 'PENDING' || s === 'QUE
 export const canEdit = (s: TaskStatus) => s !== 'DONE'
 export const canAdjust = (s: TaskStatus) =>
   s === 'QUEUED' || s === 'RUNNING' || s === 'BLOCKED'
+export const canCreateContinuation = (s: TaskStatus) =>
+  s === 'RUNNING' || s === 'BLOCKED' || s === 'DONE' || s === 'FAILED' || s === 'CANCELLED'

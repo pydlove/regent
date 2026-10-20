@@ -102,6 +102,7 @@ public class TaskDispatchService {
     private Task dispatch(TaskId taskId, boolean afterCommit) {
         Task task = taskRepository.findById(taskId)
                 .orElseThrow(() -> new EntityNotFoundException("任务不存在：" + taskId));
+        requireContinuationParentSettled(task);
         ProjectProfile project = projectProfileRepository.findById(task.getProjectId())
                 .orElseThrow(() -> new EntityNotFoundException("任务所属项目不存在：" + task.getProjectId()));
 
@@ -241,6 +242,21 @@ public class TaskDispatchService {
             return BranchPreparation.started(task.getBranchName().orElse(null));
         }
         throw new DomainException("任务当前状态不可派发：" + task.getId() + "，状态：" + task.getStatus());
+    }
+
+    /**
+     * 同一 Codex 会话不能在两条任务里并发续跑。子任务可以提前创建，
+     * 但必须等来源任务完成、失败或终止后才能派发。
+     */
+    private void requireContinuationParentSettled(Task task) {
+        task.getContinuedFromTaskId().ifPresent(parentId ->
+                taskRepository.findById(parentId).ifPresent(parent -> {
+                    if (!parent.getStatus().isTerminal()) {
+                        throw new DomainException(
+                                "来源任务 #" + parentId.value()
+                                        + " 尚未收场，不能同时派发同一 Codex 会话");
+                    }
+                }));
     }
 
     /**

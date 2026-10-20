@@ -6,6 +6,7 @@ import com.pydlove.regent.bug.domain.model.BugStatus;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskAdjustment;
+import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.governance.application.command.DecisionRaiseService;
@@ -118,6 +119,19 @@ class RunSettlementServiceTest {
 
         assertFalse(finish.deferredForAdjustment());
         assertEquals(TaskStatus.DONE, task.getStatus());
+    }
+
+    @Test
+    @DisplayName("接续任务首跑使用自己的新指令，而不是普通重试提示")
+    void 接续任务首跑使用新任务指令() {
+        Task child = Task.continuation(
+                PROJECT, TaskId.of(99L), "thread-parent", null,
+                "继续开发", "补齐移动端错误状态和回归测试", 0);
+
+        String instruction = settlement.instructionFor(child, null);
+
+        assertTrue(instruction.contains("同一 Codex 会话中的后续任务"), instruction);
+        assertTrue(instruction.contains("补齐移动端错误状态和回归测试"), instruction);
     }
 
     private TaskRun run() {

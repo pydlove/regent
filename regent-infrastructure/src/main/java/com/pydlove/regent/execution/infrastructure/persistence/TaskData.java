@@ -31,6 +31,7 @@ public class TaskData {
     private String status;
     private Integer priority;
     private String codexThreadId;
+    private Long continuedFromTaskId;
     private String branchName;
     private String branchApprovalState;
     private Long blockingDecisionId;

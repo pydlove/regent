@@ -50,6 +50,27 @@ public class TaskCommandService {
     }
 
     /**
+     * 基于已有任务新建后续任务。新任务不复制附件和插件，只复制会话与分支上下文，
+     * 再叠加自己的开发指令。
+     */
+    public Task createContinuation(CreateTaskContinuationCommand command) {
+        Task source = taskRepository.findByIdForUpdate(command.sourceTaskId())
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "来源任务不存在：" + command.sourceTaskId()));
+        source.requireContinuable();
+        Task task = Task.continuation(
+                source.getProjectId(),
+                source.getId(),
+                source.getCodexThreadId().orElseThrow(),
+                source.getBranchName().orElse(null),
+                deriveTitle(command.prompt()),
+                command.prompt(),
+                command.priority());
+        taskRepository.save(task);
+        return task;
+    }
+
+    /**
      * 标题从指令的首个非空行推导 —— 录入时只让人写一遍任务。
      *
      * <p>行首的 Markdown 记号（{@code #}、{@code >}、{@code -}、{@code 1.}）要剥掉：指令常常是从

@@ -1,12 +1,14 @@
 package com.pydlove.regent.execution.interfaces.rest;
 
 import com.pydlove.regent.execution.application.command.AddTaskAdjustmentCommand;
+import com.pydlove.regent.execution.application.command.CreateTaskContinuationCommand;
 import com.pydlove.regent.execution.application.command.TaskAdjustmentService;
 import com.pydlove.regent.execution.application.command.TaskCommandService;
 import com.pydlove.regent.execution.application.query.TaskQueryService;
 import com.pydlove.regent.execution.domain.model.TaskAdjustment;
 import com.pydlove.regent.execution.domain.model.TaskAdjustmentId;
 import com.pydlove.regent.execution.domain.model.TaskId;
+import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.shared.kernel.TokenUsage;
@@ -91,9 +93,27 @@ class TaskControllerTest {
         assertEquals("补一套边界测试", taskAdjustmentService.command.temporaryContent());
     }
 
+    @Test
+    @DisplayName("基于任务继续创建时返回新任务和来源关系")
+    void createsContinuationTask() throws Exception {
+        mockMvc.perform(post("/api/tasks/{id}/continuations", 76)
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"prompt\":\"继续补齐移动端测试\",\"priority\":3}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(77))
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.threadId").value("thread-parent"))
+                .andExpect(jsonPath("$.continuedFromTaskId").value(76));
+
+        assertEquals(TaskId.of(76), taskCommandService.continuation.sourceTaskId());
+        assertEquals("继续补齐移动端测试", taskCommandService.continuation.prompt());
+        assertEquals(3, taskCommandService.continuation.priority());
+    }
+
     private static final class RecordingTaskCommandService extends TaskCommandService {
 
         private TaskId deleted;
+        private CreateTaskContinuationCommand continuation;
 
         private RecordingTaskCommandService() {
             super(null, null);
@@ -102,6 +122,16 @@ class TaskControllerTest {
         @Override
         public void delete(TaskId id) {
             this.deleted = id;
+        }
+
+        @Override
+        public Task createContinuation(CreateTaskContinuationCommand command) {
+            this.continuation = command;
+            Task task = Task.continuation(
+                    ProjectId.of(1L), command.sourceTaskId(), "thread-parent",
+                    null, "继续补齐移动端测试", command.prompt(), command.priority());
+            task.assignIdentity(TaskId.of(77L));
+            return task;
         }
     }
 

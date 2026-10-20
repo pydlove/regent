@@ -71,6 +71,15 @@ export type UpdateTaskInput = {
 export const updateTask = (id: number, input: UpdateTaskInput) =>
   putJson<TaskDetail>(`/tasks/${id}`, input)
 
+export type CreateTaskContinuationInput = {
+  prompt: string
+  priority: number
+}
+
+/** 基于已有任务创建一个复用其 Codex 会话的新任务。 */
+export const createTaskContinuation = (id: number, input: CreateTaskContinuationInput) =>
+  postJson<TaskDetail>(`/tasks/${id}/continuations`, input)
+
 export type AddTaskAdjustmentInput =
   | { sourceTaskId: number; content?: never }
   | { sourceTaskId?: never; content: string }

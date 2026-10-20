@@ -6,7 +6,9 @@ import {
   Check,
   ChevronLeft,
   Copy,
+  CornerDownRight,
   ImagePlus,
+  ListPlus,
   Pencil,
   Play,
   Plus,
@@ -34,6 +36,7 @@ import RunDetailDialog from '@/components/business/RunDetailDialog.vue'
 import RunStatusBadge from '@/components/business/RunStatusBadge.vue'
 import TaskEditDialog from '@/components/business/TaskEditDialog.vue'
 import TaskAdjustmentDialog from '@/components/business/TaskAdjustmentDialog.vue'
+import TaskContinuationDialog from '@/components/business/TaskContinuationDialog.vue'
 import TaskPluginDialog from '@/components/business/TaskPluginDialog.vue'
 import TaskTestCasePanel from '@/components/business/TaskTestCasePanel.vue'
 import TaskStatusBadge from '@/components/business/TaskStatusBadge.vue'
@@ -65,12 +68,14 @@ import type {
   TaskAdjustment,
   TaskBatchDeleteFailure,
   TaskBatchDispatchFailure,
+  TaskDetail,
   TaskPluginBinding,
 } from '@/types/api'
 import {
   canBatchDispatch,
   canAdjust,
   canCancel,
+  canCreateContinuation,
   canDelete,
   canDispatch,
   canEdit,
@@ -224,6 +229,7 @@ watch(
 const promptOpen = ref(false)
 const editOpen = ref(false)
 const adjustmentOpen = ref(false)
+const continuationOpen = ref(false)
 const adjustments = ref<TaskAdjustment[]>([])
 const adjustmentsLoading = ref(false)
 const adjustmentsError = ref<string | null>(null)
@@ -253,6 +259,7 @@ watch(
   () => selected.value?.id,
   (taskId) => {
     adjustmentOpen.value = false
+    continuationOpen.value = false
     adjustments.value = []
     adjustmentsError.value = null
     adjustmentsLoading.value = false
@@ -268,6 +275,14 @@ const onAdjustmentCreated = (adjustment: TaskAdjustment) => {
     adjustment.status === 'PENDING' ? '执行器会在下一轮开始前读取它' : '调整已下发',
   )
 }
+
+const canContinueTask = computed(
+  () =>
+    selected.value !== null
+    && store.detail !== null
+    && Boolean(store.detail.threadId)
+    && canCreateContinuation(selected.value.status),
+)
 
 const openEdit = () => {
   if (!selected.value || !store.detail || !canEdit(selected.value.status)) return
@@ -698,7 +713,10 @@ const confirmCancel = async () => {
  */
 const createOpen = ref(false)
 
-const onTaskCreated = async (payload: { id: number; title: string }) => {
+const onTaskCreated = async (
+  payload: { id: number; title: string },
+  continuedFromTaskId?: number,
+) => {
   // 只清理会把新任务藏起来的筛选；项目是用户在顶栏明确选择的长期上下文，不能顺手重置。
   // 当前选中项目时，新建任务本来就落在这个项目；选择「全部项目」时新任务同样可见。
   store.statusFilter = 'ALL'
@@ -720,7 +738,16 @@ const onTaskCreated = async (payload: { id: number; title: string }) => {
   if (fresh) await store.select(fresh)
   // 弹框是先建任务再传图，这里按 0 张读一次；传完它会再发 uploaded 事件让我们重拉
   await loadAttachments(payload.id)
-  toast.success(`#${payload.id} 已创建`, '在待执行队列里，点「派发给 codex」才会真的跑')
+  toast.success(
+    `#${payload.id} 已创建`,
+    continuedFromTaskId
+      ? `已接续任务 #${continuedFromTaskId}，来源任务收场后即可派发`
+      : '在待执行队列里，点「派发给 codex」才会真的跑',
+  )
+}
+
+const onContinuationCreated = async (task: TaskDetail) => {
+  await onTaskCreated(task, task.continuedFromTaskId ?? undefined)
 }
 
 /*
@@ -1213,14 +1240,6 @@ onUnmounted(() => {
               <span v-if="adjustments.length > 0" class="tnum text-caption text-label-tertiary">
                 {{ adjustments.length }}
               </span>
-              <Button
-                v-if="canAdjust(selected.status)"
-                size="sm"
-                class="ml-auto"
-                @click="adjustmentOpen = true"
-              >
-                <Icon :as="Plus" size="inline" />增加
-              </Button>
             </div>
 
             <p v-if="adjustmentsError" class="mt-2 text-caption text-danger">
@@ -1272,6 +1291,12 @@ onUnmounted(() => {
             <div class="flex items-center gap-2">
               <dt class="whitespace-nowrap text-caption text-label-secondary">项目</dt>
               <dd class="ml-auto text-caption text-label">{{ selected.projectName }}</dd>
+            </div>
+            <div v-if="store.detail?.continuedFromTaskId" class="flex items-center gap-2">
+              <dt class="whitespace-nowrap text-caption text-label-secondary">接续任务</dt>
+              <dd class="tnum ml-auto text-caption text-accent">
+                #{{ store.detail.continuedFromTaskId }}
+              </dd>
             </div>
             <div class="flex items-center gap-2">
               <dt class="whitespace-nowrap text-caption text-label-secondary">优先级</dt>
@@ -1514,6 +1539,20 @@ onUnmounted(() => {
 
         <div class="shrink-0 border-t border-separator bg-window p-3 lg:p-4">
           <div class="flex flex-wrap items-center gap-2">
+            <Button
+              v-if="canAdjust(selected.status)"
+              size="sm"
+              @click="adjustmentOpen = true"
+            >
+              <Icon :as="ListPlus" size="inline" />增加调整
+            </Button>
+            <Button
+              v-if="canContinueTask"
+              size="sm"
+              @click="continuationOpen = true"
+            >
+              <Icon :as="CornerDownRight" size="inline" />继续创建
+            </Button>
             <Tooltip
               v-if="store.detail"
               :content="canEdit(selected.status) ? '编辑任务指令与优先级' : '已完成的任务不能编辑'"
@@ -1591,6 +1630,12 @@ onUnmounted(() => {
       v-model:open="adjustmentOpen"
       :task="store.detail"
       @created="onAdjustmentCreated"
+    />
+
+    <TaskContinuationDialog
+      v-model:open="continuationOpen"
+      :task="store.detail"
+      @created="onContinuationCreated"
     />
 
     <TaskPluginDialog

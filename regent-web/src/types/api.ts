@@ -142,6 +142,8 @@ export type TaskDetail = {
   status: TaskStatus
   priority: number
   threadId: string | null
+  /** 基于哪条任务继续创建；非空表示复用该任务的 Codex 会话 */
+  continuedFromTaskId: number | null
   branchName: string | null
   decisionId: number | null
   attemptCount: number

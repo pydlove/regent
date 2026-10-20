@@ -99,6 +99,10 @@ public class RunSettlementService {
         if (task.getCodexThreadId().isEmpty()) {
             return task.getPrompt();
         }
+        if (task.isContinuation() && previous == null) {
+            return "这是同一 Codex 会话中的后续任务，请沿用已有上下文，不要重新开始。\n\n"
+                    + task.getPrompt();
+        }
         if (previous == null || previous.getStatus() != RunStatus.BLOCKED) {
             return RETRY_INSTRUCTION;
         }

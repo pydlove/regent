@@ -217,6 +217,25 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     },
   },
   {
+    id: 'task-continuation',
+    category: 'tasks',
+    question: '如何基于已有任务继续创建后续任务？',
+    keywords: ['继续创建', '后续任务', '接续', '同一会话', 'thread', 'Codex 会话'],
+    answer: {
+      paragraphs: [
+        '打开一条已经建立 Codex 会话的任务，在详情底部的操作栏点击“继续创建”。新任务会复用来源任务的 thread_id 和分支，但拥有独立的标题、指令、状态与执行记录。',
+        '这样可以要求 AI 接着已有上下文继续开发，而不是从零重抄原任务。为避免同一会话被并发写入，来源任务完成、失败或终止后才能派发后续任务。',
+      ],
+      steps: [
+        '选择来源任务，确认详情底部出现“继续创建”。',
+        '填写这次要补充或修改的开发内容，并按需调整优先级。',
+        '创建后等待来源任务收场，再派发新任务。',
+      ],
+      note: '后续任务只继承 Codex 会话与分支，不复制附件和插件绑定。',
+      links: [{ label: '前往任务页', to: '/tasks' }],
+    },
+  },
+  {
     id: 'task-branch',
     category: 'tasks',
     question: '任务会在哪个 Git 分支上执行？没有 Git 怎么办？',

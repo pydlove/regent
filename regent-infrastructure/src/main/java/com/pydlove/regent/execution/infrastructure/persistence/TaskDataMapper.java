@@ -39,6 +39,7 @@ public final class TaskDataMapper {
         data.setStatus(task.getStatus().name());
         data.setPriority(task.getPriority());
         data.setCodexThreadId(task.getCodexThreadId().orElse(null));
+        data.setContinuedFromTaskId(task.getContinuedFromTaskId().map(TaskId::value).orElse(null));
         data.setBranchName(task.getBranchName().orElse(null));
         data.setBranchApprovalState(task.getBranchApprovalState().name());
         data.setBlockingDecisionId(task.getBlockingDecisionId().map(DecisionId::value).orElse(null));
@@ -57,6 +58,7 @@ public final class TaskDataMapper {
                 optionalId(data.getRequirementId()).map(RequirementId::of).orElse(null),
                 optionalId(data.getBugId()).map(BugId::of).orElse(null),
                 TaskSource.valueOf(data.getSource()),
+                optionalId(data.getContinuedFromTaskId()).map(TaskId::of).orElse(null),
                 data.getTitle(),
                 data.getPrompt(),
                 data.getPriority(),

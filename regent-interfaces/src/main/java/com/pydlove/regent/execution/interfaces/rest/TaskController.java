@@ -1,6 +1,7 @@
 package com.pydlove.regent.execution.interfaces.rest;
 
 import com.pydlove.regent.execution.application.command.AddTaskAdjustmentCommand;
+import com.pydlove.regent.execution.application.command.CreateTaskContinuationCommand;
 import com.pydlove.regent.execution.application.command.CreateTaskCommand;
 import com.pydlove.regent.execution.application.command.EditTaskCommand;
 import com.pydlove.regent.execution.application.command.TaskAdjustmentService;
@@ -21,6 +22,7 @@ import com.pydlove.regent.execution.interfaces.dto.TaskBatchDeleteResponse;
 import com.pydlove.regent.execution.interfaces.dto.TaskBatchDispatchRequest;
 import com.pydlove.regent.execution.interfaces.dto.TaskBatchDispatchResponse;
 import com.pydlove.regent.execution.interfaces.dto.TaskCreateRequest;
+import com.pydlove.regent.execution.interfaces.dto.TaskContinuationCreateRequest;
 import com.pydlove.regent.execution.interfaces.dto.TaskAdjustmentCreateRequest;
 import com.pydlove.regent.execution.interfaces.dto.TaskAdjustmentResponse;
 import com.pydlove.regent.execution.interfaces.dto.TaskDetailResponse;
@@ -184,6 +186,24 @@ public class TaskController {
         projectAccessService.require(ProjectId.of(request.projectId()), ownerId);
         Task task = taskCommandService.createManual(new CreateTaskCommand(
                 ProjectId.of(request.projectId()),
+                request.prompt(),
+                request.priority() == null ? 0 : request.priority()));
+        return TaskDetailResponse.from(task);
+    }
+
+    /**
+     * 基于已有任务创建一个后续任务。新任务复用来源任务的 Codex 会话和分支，
+     * 但仍以独立任务记录需求、状态和执行历史。
+     */
+    @PostMapping("/{id}/continuations")
+    @ResponseStatus(HttpStatus.CREATED)
+    public TaskDetailResponse createContinuation(@PathVariable long id,
+                                                 @RequestBody TaskContinuationCreateRequest request,
+                                                 HttpServletRequest servletRequest) {
+        UserId ownerId = currentUser(servletRequest);
+        taskQueryService.get(TaskId.of(id), ownerId);
+        Task task = taskCommandService.createContinuation(new CreateTaskContinuationCommand(
+                TaskId.of(id),
                 request.prompt(),
                 request.priority() == null ? 0 : request.priority()));
         return TaskDetailResponse.from(task);
