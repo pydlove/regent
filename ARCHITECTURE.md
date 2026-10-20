@@ -680,8 +680,8 @@ class ArchitectureTest {
       一条执行链路要切分支、改文件，两个执行者在同一个工作区并行会互相覆盖。
     出参判定从适配器提到领域（`ExecReport.toResult`），让两条入口共用同一条「读不懂就判失败」的规则；
     运行记录多了 `executor` / `agent_name` 两列，界面能分清是平台自己跑的 codex 还是外部执行者。
-    **要外部执行者独占派发，得把 `regent.execution.dispatch.enabled` 关掉** ——
-    内部心跳开着时，两边会抢同一批待执行任务（这是当前已知的取舍，没有做「按任务分配执行方式」）
+    设备代理通过带登录保护的 `/api/device-agent/**` 领取指定任务，默认关闭后端内部派发心跳。
+    Codex 在发起执行的那台设备上运行，后端机器不再作为所有浏览器的默认执行设备。
 
 18. ✅ 重启恢复（2026-10-17）：`ExecutionRecoveryService` 在 `ApplicationReadyEvent` 时执行。
     它先把内部执行遗留的 `RUNNING` 记录收敛为 `INTERRUPTED`，再核对所有 `RUNNING` 任务：

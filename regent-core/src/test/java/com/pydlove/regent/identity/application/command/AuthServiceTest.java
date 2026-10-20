@@ -258,6 +258,20 @@ class AuthServiceTest {
         assertTrue(service.authenticate("x".repeat(129)).isEmpty());
     }
 
+    @Test
+    @DisplayName("设备代理使用独立长期 Bearer 会话")
+    void opensDeviceSession() {
+        var registered = register("device-owner@example.com");
+
+        var grant = service.openDeviceSession(
+                UserId.of(registered.id()), Duration.ofDays(90));
+
+        assertEquals("raw-token", grant.rawToken());
+        assertEquals(NOW.plus(Duration.ofDays(90)), grant.expiresAt());
+        assertTrue(grant.remembered());
+        assertTrue(service.authenticate("raw-token").isPresent());
+    }
+
     private com.pydlove.regent.identity.application.query.AuthenticatedUser register(String email) {
         service.sendRegistrationCode(email);
         return service.register(new RegisterEmailCommand(

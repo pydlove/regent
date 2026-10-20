@@ -47,6 +47,11 @@ public class AuthSessionInterceptor implements HandlerInterceptor {
     }
 
     static String readToken(HttpServletRequest request) {
+        String authorization = request.getHeader("Authorization");
+        if (authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            String bearer = authorization.substring(7).trim();
+            if (!bearer.isEmpty()) return bearer;
+        }
         Cookie[] cookies = request.getCookies();
         if (cookies == null) {
             return null;

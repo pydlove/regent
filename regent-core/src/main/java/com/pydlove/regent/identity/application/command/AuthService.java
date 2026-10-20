@@ -9,6 +9,7 @@ import com.pydlove.regent.identity.domain.model.Email;
 import com.pydlove.regent.identity.domain.model.PasswordHash;
 import com.pydlove.regent.identity.domain.model.SessionTokenHash;
 import com.pydlove.regent.identity.domain.model.User;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.identity.domain.model.Username;
 import com.pydlove.regent.identity.domain.port.PasswordHasher;
 import com.pydlove.regent.identity.domain.port.SessionTokenCodec;
@@ -120,6 +121,25 @@ public class AuthService {
                 user.getId(), tokenCodec.hash(rawToken), now, expiresAt, command.rememberMe());
         sessionRepository.save(session);
         return new AuthSessionGrant(view(user), rawToken, expiresAt, command.rememberMe());
+    }
+
+    /**
+     * 给当前设备代理签发长期会话。设备代理不保存用户密码，只持有这个可撤销的 Bearer 令牌。
+     */
+    public AuthSessionGrant openDeviceSession(UserId userId, Duration ttl) {
+        Objects.requireNonNull(userId, "用户 ID");
+        if (ttl == null || ttl.isZero() || ttl.isNegative()) {
+            throw new DomainException("设备会话有效期必须大于零");
+        }
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AuthenticationException("用户不存在，无法创建设备会话"));
+        Instant now = clock.instant();
+        Instant expiresAt = now.plus(ttl);
+        String rawToken = tokenCodec.generateRawToken();
+        AuthSession session = AuthSession.open(
+                user.getId(), tokenCodec.hash(rawToken), now, expiresAt, true);
+        sessionRepository.save(session);
+        return new AuthSessionGrant(view(user), rawToken, expiresAt, true);
     }
 
     public AuthenticatedUser currentUser(String rawToken) {

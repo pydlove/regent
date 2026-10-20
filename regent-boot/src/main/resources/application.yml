@@ -78,6 +78,8 @@ regent:
     session-ttl: ${REGENT_AUTH_SESSION_TTL:PT168H}
     # 勾选保持登录后使用 180 天持久会话，剩余一半时自动顺延。
     remembered-session-ttl: ${REGENT_AUTH_REMEMBERED_SESSION_TTL:PT4320H}
+    # 当前设备代理使用独立 Bearer 会话，可单独撤销，不依赖浏览器进程。
+    device-session-ttl: ${REGENT_AUTH_DEVICE_SESSION_TTL:PT4320H}
     # 本地 HTTP 开发默认 false；生产由反向代理提供 HTTPS 时必须设成 true。
     cookie-secure: ${REGENT_AUTH_COOKIE_SECURE:false}
     email-code:
@@ -104,8 +106,8 @@ regent:
     # 是否给每个任务开独立分支。首次新建必须先经人工审批；关掉之后在当前分支上执行
     branch-enabled: ${REGENT_BRANCH_ENABLED:true}
     dispatch:
-      # 派发扫描。关掉之后任务只能靠人点「派发」
-      enabled: ${REGENT_DISPATCH_ENABLED:true}
+      # 任务由当前访问设备上的代理领取；后端不再默认拉起本机 Codex 代跑。
+      enabled: ${REGENT_DISPATCH_ENABLED:false}
       interval-ms: 15000
       initial-delay-ms: 20000
       batch-size: 3

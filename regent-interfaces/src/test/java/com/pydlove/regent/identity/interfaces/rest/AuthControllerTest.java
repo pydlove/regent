@@ -16,6 +16,7 @@ import com.pydlove.regent.identity.domain.model.EmailVerificationCode;
 import com.pydlove.regent.identity.domain.model.EmailVerificationCodeHash;
 import com.pydlove.regent.identity.domain.model.PasswordHash;
 import com.pydlove.regent.identity.domain.model.SessionTokenHash;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.identity.domain.model.User;
 import com.pydlove.regent.identity.domain.model.Username;
 import com.pydlove.regent.identity.domain.port.PasswordHasher;
@@ -60,12 +61,32 @@ class AuthControllerTest {
     @BeforeEach
     void setUp() {
         authService = new StubAuthService();
-        mockMvc = MockMvcBuilders.standaloneSetup(new AuthController(authService, false))
+        mockMvc = MockMvcBuilders.standaloneSetup(
+                        new AuthController(authService, false, Duration.ofDays(180)))
+                .addInterceptors(com.pydlove.regent.support.TestCurrentUser.interceptor())
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(
                         Jackson2ObjectMapperBuilder.json()
                                 .featuresToDisable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
                                 .build()))
                 .build();
+    }
+
+    @Test
+    @DisplayName("已登录设备可换取长期 Bearer 会话")
+    void createsDeviceSession() throws Exception {
+        authService.deviceGrant = new AuthSessionGrant(
+                new AuthenticatedUser(7, "alice", "Alice", null, null),
+                "device-token",
+                Instant.parse("2027-04-18T00:00:00Z"),
+                true);
+
+        mockMvc.perform(post("/api/auth/device-session"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.token").value("device-token"));
+
+        assertEquals(UserId.of(com.pydlove.regent.support.TestCurrentUser.USER_ID),
+                authService.deviceOwner);
+        assertEquals(Duration.ofDays(180), authService.deviceTtl);
     }
 
     @Test
@@ -174,6 +195,9 @@ class AuthControllerTest {
 
         private AuthenticatedUser registeredUser;
         private AuthSessionGrant grant;
+        private AuthSessionGrant deviceGrant;
+        private UserId deviceOwner;
+        private Duration deviceTtl;
         private CurrentAuthSession current;
         private LoginCommand lastLogin;
         private String sentEmail;
@@ -209,6 +233,13 @@ class AuthControllerTest {
         @Override
         public CurrentAuthSession currentSession(String rawToken) {
             return current;
+        }
+
+        @Override
+        public AuthSessionGrant openDeviceSession(UserId userId, Duration ttl) {
+            deviceOwner = userId;
+            deviceTtl = ttl;
+            return deviceGrant;
         }
     }
 

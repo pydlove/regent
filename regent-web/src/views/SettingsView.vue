@@ -605,7 +605,7 @@ onBeforeUnmount(() => {
                 </p>
               </div>
               <div class="flex shrink-0 items-center gap-2">
-                <Button size="sm" @click="openCodexInstallDialog">安装 / 更新</Button>
+                <Button size="sm" @click="openCodexInstallDialog">安装方式</Button>
                 <Button size="sm" :disabled="codexChecking" @click="detectCodex">
                   <Icon
                     :as="RefreshCw"
@@ -620,6 +620,12 @@ onBeforeUnmount(() => {
             <template v-if="codexRuntime">
               <div class="h-px bg-separator-soft" />
               <dl class="grid gap-2 px-4 py-3 text-caption sm:grid-cols-2">
+                <div class="flex min-w-0 items-center gap-2 sm:col-span-2">
+                  <dt class="shrink-0 text-label-secondary">当前设备</dt>
+                  <dd class="ml-auto truncate font-mono text-label">
+                    {{ executionRuntime.device?.hostname ?? '未连接设备代理' }}
+                  </dd>
+                </div>
                 <div class="flex min-w-0 items-center gap-2">
                   <dt class="shrink-0 text-label-secondary">配置命令</dt>
                   <dd class="ml-auto truncate font-mono text-label">

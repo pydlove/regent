@@ -8,6 +8,7 @@ const { Readable, Transform } = require('node:stream')
 const { pipeline } = require('node:stream/promises')
 const { URL } = require('node:url')
 const { promisify } = require('node:util')
+const { DeviceAgent } = require('./device-agent')
 const releaseInfo = require('./release-info.json')
 
 const APP_TITLE = 'Regent AI'
@@ -23,6 +24,8 @@ let updateTimer = null
 let promptedReleaseCode = null
 let updating = false
 let updateStatus = { message: '正在准备更新…', progress: 0 }
+let deviceAgent = null
+let devicePairTimer = null
 
 function readServerUrl() {
   try {
@@ -125,6 +128,7 @@ function createMainWindow() {
     show: false,
     webPreferences: {
       partition: PARTITION,
+      preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -167,9 +171,48 @@ function createMainWindow() {
   })
   mainWindow.webContents.once('did-finish-load', () => {
     void checkDesktopUpdate()
+    void ensureDeviceAgentPairing()
     updateTimer = setInterval(() => void checkDesktopUpdate(), 30 * 60 * 1000)
   })
   mainWindow.loadURL(serverUrl)
+}
+
+async function deviceSessionCookieHeader() {
+  const cookies = await session.fromPartition(PARTITION).cookies.get({ url: serverUrl })
+  return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ')
+}
+
+async function ensureDeviceAgentPairing() {
+  if (!deviceAgent || !serverUrl || !mainWindow || mainWindow.isDestroyed()) return false
+  if (await deviceAgent.validatePairing()) return true
+  try {
+    const cookie = await deviceSessionCookieHeader()
+    if (!cookie) return false
+    const response = await fetch(`${serverUrl}/api/auth/device-session`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Cookie: cookie,
+        'X-Regent-Relay-Request': '1',
+      },
+    })
+    if (!response.ok) return false
+    const grant = await response.json()
+    if (!grant?.token) return false
+    deviceAgent.configure(serverUrl, grant.token)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function scheduleDevicePairing() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (devicePairTimer) clearTimeout(devicePairTimer)
+  devicePairTimer = setTimeout(async () => {
+    devicePairTimer = null
+    if (!(await ensureDeviceAgentPairing())) scheduleDevicePairing()
+  }, 5000)
 }
 
 async function checkDesktopUpdate() {
@@ -561,18 +604,53 @@ ipcMain.handle('server:current', () => serverUrl)
 ipcMain.handle('server:connect', async (_event, value) => {
   const normalized = await probeServer(value)
   saveServerUrl(normalized)
+  if (deviceAgent) {
+    deviceAgent.serverUrl = normalized
+    deviceAgent.token = null
+    deviceAgent.saveState()
+  }
   if (configWindow) {
     configWindow.close()
     configWindow = null
   }
   createMainWindow()
+  scheduleDevicePairing()
   return normalized
 })
 ipcMain.handle('server:use-local', () => 'http://127.0.0.1:12580')
 ipcMain.handle('update:current', () => updateStatus)
+ipcMain.handle('device:status', async () => {
+  if (!deviceAgent) throw new Error('设备代理尚未初始化')
+  await ensureDeviceAgentPairing()
+  return deviceAgent.status()
+})
+ipcMain.handle('device:run-task', async (_event, payload) => {
+  if (!deviceAgent) throw new Error('设备代理尚未初始化')
+  if (!(await ensureDeviceAgentPairing())) {
+    throw new Error('当前设备代理尚未完成配对，请先登录并稍候重试')
+  }
+  return deviceAgent.runTask(payload || {})
+})
+ipcMain.handle('device:job', (_event, jobId) => {
+  const job = deviceAgent?.jobs.get(String(jobId))
+  if (!job) throw new Error('设备执行任务不存在')
+  return job
+})
 
 app.whenReady().then(async () => {
   serverUrl = readServerUrl()
+  deviceAgent = new DeviceAgent({
+    stateFile: path.join(app.getPath('userData'), 'device-agent.json'),
+  })
+  deviceAgent.loadState()
+  if (deviceAgent.serverUrl !== serverUrl) {
+    deviceAgent.serverUrl = serverUrl
+    deviceAgent.token = null
+    deviceAgent.saveState()
+  }
+  await deviceAgent.startLocalServer().catch((error) => {
+    console.warn(`设备代理本地服务启动失败：${error.message}`)
+  })
   buildMenu()
   await session.fromPartition(PARTITION).setPermissionRequestHandler(
     (webContents, permission, callback) => {
@@ -582,6 +660,7 @@ app.whenReady().then(async () => {
   )
   if (serverUrl) createMainWindow()
   else createConfigWindow()
+  scheduleDevicePairing()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -593,4 +672,9 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', () => {
+  if (devicePairTimer) clearTimeout(devicePairTimer)
+  deviceAgent?.stopLocalServer()
 })

@@ -6,6 +6,7 @@ import com.pydlove.regent.identity.application.command.RegisterEmailCommand;
 import com.pydlove.regent.identity.application.query.AuthSessionGrant;
 import com.pydlove.regent.identity.application.query.CurrentAuthSession;
 import com.pydlove.regent.identity.interfaces.dto.AuthUserResponse;
+import com.pydlove.regent.identity.interfaces.dto.DeviceSessionResponse;
 import com.pydlove.regent.identity.interfaces.dto.LoginRequest;
 import com.pydlove.regent.identity.interfaces.dto.RegisterRequest;
 import com.pydlove.regent.identity.interfaces.dto.SendEmailCodeRequest;
@@ -31,11 +32,15 @@ public class AuthController {
 
     private final AuthService authService;
     private final boolean secureCookie;
+    private final Duration deviceSessionTtl;
 
     public AuthController(AuthService authService,
-                          @Value("${regent.auth.cookie-secure:false}") boolean secureCookie) {
+                          @Value("${regent.auth.cookie-secure:false}") boolean secureCookie,
+                          @Value("${regent.auth.device-session-ttl:PT4320H}")
+                          Duration deviceSessionTtl) {
         this.authService = authService;
         this.secureCookie = secureCookie;
+        this.deviceSessionTtl = deviceSessionTtl;
     }
 
     @PostMapping("/register")
@@ -77,6 +82,18 @@ public class AuthController {
                     Duration.between(Instant.now(), current.expiresAt())).toString());
         }
         return AuthUserResponse.from(current.user());
+    }
+
+    /** 已登录页面为当前设备的本机代理换取长期 Bearer 会话。 */
+    @PostMapping("/device-session")
+    @ResponseStatus(HttpStatus.CREATED)
+    public DeviceSessionResponse deviceSession(HttpServletRequest request) {
+        AuthUserResponse user = AuthUserResponse.from(
+                AuthSessionInterceptor.currentUser(request));
+        AuthSessionGrant grant = authService.openDeviceSession(
+                com.pydlove.regent.identity.domain.model.UserId.of(user.id()),
+                deviceSessionTtl);
+        return new DeviceSessionResponse(grant.rawToken(), grant.expiresAt());
     }
 
     @PostMapping("/logout")

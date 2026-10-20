@@ -31,7 +31,7 @@ class RelayHeadersTest {
 
         assertEquals("application/json", filtered.get("accept"));
         assertEquals("session=secret", filtered.get("cookie"));
-        assertTrue(!filtered.containsKey("authorization"));
+        assertEquals("Bearer secret", filtered.get("authorization"));
     }
 
     @Test

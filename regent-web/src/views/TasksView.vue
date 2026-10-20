@@ -24,6 +24,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { ACCEPTED_IMAGE_TYPES, listTaskAttachments, uploadTaskAttachment } from '@/api/attachments'
 import { getDecision } from '@/api/decisions'
+import { runTaskOnDevice } from '@/api/deviceAgent'
 import { ApiError } from '@/api/http'
 import { listTaskPlugins } from '@/api/plugins'
 import { listTaskAdjustments } from '@/api/tasks'
@@ -523,16 +524,21 @@ const retry = async () => {
 const dispatchingTask = ref(false)
 
 const requireCodexReady = async (): Promise<boolean> => {
-  if (!executionRuntime.status) {
-    await executionRuntime.check()
-  }
+  await executionRuntime.check(true)
   const status = executionRuntime.status
-  if (status && !status.available) {
-    openCodexInstallDialog()
-    toast.warning(
-      'Codex 未就绪，暂时不能派发',
-      '请先到「设置 → 执行」安装或配置 Codex，然后重新检测',
-    )
+  if (!status?.available) {
+    if (executionRuntime.device?.paired) {
+      openCodexInstallDialog()
+      toast.warning(
+        '当前设备 Codex 未就绪',
+        '请先在本机安装 Codex，安装后回到「设置 → 执行」重新检测',
+      )
+    } else {
+      toast.warning(
+        '当前设备未连接 Regent 设备代理',
+        '请打开 Regent 桌面客户端或启动设备代理，并确认已经登录当前服务器',
+      )
+    }
     return false
   }
   return true
@@ -542,27 +548,30 @@ const dispatch = async () => {
   const task = selected.value
   if (!task || dispatchingTask.value) return
   if (!(await requireCodexReady())) return
+  const project = store.projects.find((item) => item.id === task.projectId)
+  if (!project) {
+    toast.warning('无法确定项目标识', '请刷新项目列表后再试')
+    return
+  }
   dispatchingTask.value = true
   try {
-    const failure = await store.dispatch(task.id)
-    if (failure) {
-      toast.warning(`#${task.id} 派发被拒绝`, failure)
-      return
-    }
-    if (store.selected?.status === 'QUEUED') {
-      toast.show(`#${task.id} 已进入排队`, { description: '执行位空出来后会自动开始，无需再次点击' })
-      return
-    }
-    // 认领成功只说明「codex 已经起跑」，结果还在路上，所以随后把运行记录刷出来
+    await runTaskOnDevice(task.id, project.code)
     await runStore.load(task.id)
-    toast.show(`#${task.id} 已派发给 codex`, { description: 'codex 在本机后台执行，任务状态和运行记录每 3 秒自动刷新' })
+    toast.show(`#${task.id} 已交给当前设备`, {
+      description: '正在当前访问设备上执行本机 Codex，任务状态每 3 秒自动刷新',
+    })
+  } catch (error) {
+    toast.warning(`#${task.id} 未能在当前设备启动`, messageOf(error))
   } finally {
     dispatchingTask.value = false
   }
 }
 
-/** 派发 = 平台在本机拉起 codex CLI。当前只有这一个内部执行器，按钮与提示都要让人知道这一点 */
-const dispatchHint = '在本机拉起 codex CLI 执行；派发目前只支持 codex'
+const messageOf = (error: unknown) =>
+  error instanceof Error ? error.message : '当前设备未连接 Regent 设备代理'
+
+/** 派发 = 当前访问设备的代理拉起本机 codex；绝不回退到服务器机器。 */
+const dispatchHint = '在当前访问设备上拉起 codex CLI；未连接设备代理时不能派发'
 
 const dispatchingSelected = ref(false)
 
@@ -584,30 +593,40 @@ const dispatchSelected = async () => {
 
   const selectedTaskId = selected.value?.id ?? null
   dispatchingSelected.value = true
-  const outcome = await store.dispatchMany(ids)
+  const dispatchedIds: number[] = []
+  const failures: TaskBatchDispatchFailure[] = []
+  for (const id of ids) {
+    const row = store.items.find((item) => item.id === id)
+    const project = row ? store.projects.find((item) => item.id === row.projectId) : null
+    if (!row || !project) {
+      failures.push({ taskId: id, message: '无法确定任务所属项目' })
+      continue
+    }
+    try {
+      await runTaskOnDevice(id, project.code)
+      dispatchedIds.push(id)
+    } catch (error) {
+      failures.push({ taskId: id, message: messageOf(error) })
+    }
+  }
   dispatchingSelected.value = false
 
-  if (!outcome.ok) {
-    toast.warning('批量派发请求失败', outcome.message)
-    return
-  }
-
-  const dispatched = new Set(outcome.result.dispatchedTaskIds)
+  const dispatched = new Set(dispatchedIds)
   selectedIds.value = new Set(ids.filter((id) => !dispatched.has(id)))
   if (selectedTaskId !== null && dispatched.has(selectedTaskId)) {
     await runStore.load(selectedTaskId)
   }
 
-  const successCount = outcome.result.dispatchedTaskIds.length
-  const failureCount = outcome.result.failures.length
+  const successCount = dispatchedIds.length
+  const failureCount = failures.length
   if (failureCount === 0) {
-    toast.success(`已提交 ${successCount} 个任务`, '取得执行位的任务会立即起跑，其余按顺序排队等待')
+    toast.success(`已提交 ${successCount} 个任务`, '任务将由当前设备代理依次执行')
   } else if (successCount === 0) {
-    toast.warning('没有任务被派发', batchFailureDescription(outcome.result.failures, '未派发'))
+    toast.warning('没有任务被派发', batchFailureDescription(failures, '未派发'))
   } else {
     toast.warning(
       `已派发 ${successCount} 个，${failureCount} 个未派发`,
-      batchFailureDescription(outcome.result.failures, '未派发'),
+      batchFailureDescription(failures, '未派发'),
     )
   }
 }

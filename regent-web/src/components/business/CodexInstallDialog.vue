@@ -2,7 +2,6 @@
 import { RefreshCw, Terminal, TriangleAlert } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 
-import { ApiError } from '@/api/http'
 import Button from '@/components/ui/button/Button.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
@@ -11,14 +10,11 @@ import StatusDot from '@/components/ui/status-dot/StatusDot.vue'
 import { useCodexInstallDialog } from '@/composables/useCodexInstallDialog'
 import { useToast } from '@/composables/useToast'
 import { useExecutionRuntimeStore } from '@/stores/useExecutionRuntimeStore'
-import type { CodexInstallMethod, CodexInstallResult } from '@/types/api'
 
 const { open } = useCodexInstallDialog()
 const runtime = useExecutionRuntimeStore()
 const toast = useToast()
 
-const installingMethod = ref<CodexInstallMethod | null>(null)
-const result = ref<CodexInstallResult | null>(null)
 const error = ref<string | null>(null)
 
 const statusLabel = computed(() => {
@@ -31,31 +27,22 @@ const statusDot = computed(() => {
   if (!runtime.status) return 'bg-neutral'
   return runtime.status.available ? 'bg-success' : 'bg-danger'
 })
-const installing = computed(() => runtime.installing)
-
 watch(open, (value) => {
   if (!value) return
-  result.value = null
   error.value = null
-  installingMethod.value = null
   if (!runtime.status) void runtime.check()
 })
 
-async function install(method: CodexInstallMethod) {
-  if (installing.value) return
-  installingMethod.value = method
-  result.value = null
+async function copy(command: string) {
   error.value = null
   try {
-    const installed = await runtime.install(method)
-    result.value = installed
-    if (installed.success) {
-      toast.success('Codex 安装完成', installed.message)
+    if (!navigator.clipboard?.writeText) {
+      throw new Error('当前浏览器不允许访问剪贴板')
     }
-  } catch (e) {
-    error.value = e instanceof ApiError ? e.message : '一键安装失败，请查看下方输出'
-  } finally {
-    installingMethod.value = null
+    await navigator.clipboard.writeText(command)
+    toast.success('命令已复制', '请在当前设备终端执行')
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '命令复制失败'
   }
 }
 
@@ -117,14 +104,8 @@ async function recheck() {
           <code class="mt-2 block break-all rounded-control bg-window px-2 py-1.5 font-mono text-caption text-label">
             npm install -g @openai/codex
           </code>
-          <Button
-            class="mt-3"
-            variant="primary"
-            block
-            :disabled="installing"
-            @click="install('npm')"
-          >
-            {{ installingMethod === 'npm' ? '安装中…' : '一键安装' }}
+          <Button class="mt-3" variant="primary" block @click="copy('npm install -g @openai/codex')">
+            复制安装命令
           </Button>
         </div>
 
@@ -134,13 +115,8 @@ async function recheck() {
           <code class="mt-2 block break-all rounded-control bg-window px-2 py-1.5 font-mono text-caption text-label">
             brew install codex
           </code>
-          <Button
-            class="mt-3"
-            block
-            :disabled="installing"
-            @click="install('brew')"
-          >
-            {{ installingMethod === 'brew' ? '安装中…' : '一键安装' }}
+          <Button class="mt-3" block @click="copy('brew install codex')">
+            复制安装命令
           </Button>
         </div>
       </div>
@@ -154,26 +130,17 @@ async function recheck() {
       <div v-if="error" class="rounded-panel border border-danger/30 bg-danger/8 p-3">
         <p class="text-caption text-danger">{{ error }}</p>
       </div>
-      <div v-if="result" class="rounded-panel border border-separator-soft bg-content p-3">
-        <p class="text-caption" :class="result.success ? 'text-success' : 'text-danger'">
-          {{ result.message }}
-        </p>
-        <pre
-          v-if="result.output"
-          class="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-control bg-window p-2 font-mono text-caption text-label-secondary"
-        >{{ result.output }}</pre>
-      </div>
     </div>
 
     <template #footer>
       <IconButton
         label="重新检测 Codex"
-        :disabled="runtime.loading || installing"
+        :disabled="runtime.loading"
         @click="recheck"
       >
         <Icon :as="RefreshCw" size="regular" :class="{ 'animate-spin': runtime.loading }" />
       </IconButton>
-      <Button :disabled="installing" @click="open = false">关闭</Button>
+      <Button @click="open = false">关闭</Button>
     </template>
   </Dialog>
 </template>

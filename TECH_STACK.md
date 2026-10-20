@@ -398,12 +398,13 @@ regent:
     max-concurrency: ${REGENT_MAX_CONCURRENCY:1}   # 仅首次默认；界面保存后以数据库配置为准
     branch-enabled: ${REGENT_BRANCH_ENABLED:true}  # 根目录有效 Git 仓库才记录分支；非 Git 目录分支为空
     dispatch:                                 # 派发心跳。关了就只能靠人点「派发执行」
-      enabled: ${REGENT_DISPATCH_ENABLED:true}
+      enabled: ${REGENT_DISPATCH_ENABLED:false}  # 默认由当前访问设备的本机代理领取
       interval-ms: 15000
       batch-size: 3
   auth:
     session-ttl: PT168H              # 不保持登录时，服务端会话最多保留七天
     remembered-session-ttl: PT4320H  # 保持登录 180 天；剩余一半时自动顺延
+    device-session-ttl: PT4320H      # 本机设备代理的 Bearer 会话
     cookie-secure: false             # 生产 HTTPS 环境设为 true
     email-code:
       ttl: PT5M                    # 注册验证码有效期

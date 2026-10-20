@@ -124,14 +124,14 @@ node scripts/release-version.mjs \
 不想要时执行它开头「第 0 段」的 DELETE 就能清掉。**演示数据不进生产** ——
 生产 profile 的 `flyway.locations` 里从来没有这一行。
 
-> **本地默认关掉派发心跳**（`application-local.yml` 里的 `regent.execution.dispatch.enabled: false`）。
-> 演示数据里的项目路径是真实仓库（`app_audit`、Regent 自己），一旦你把演示数据灌回来，
-> 心跳一开，起个服务就会真的跑任务 —— 烧 token、切分支、改文件。要看自动派发就改成 `true`；
-> 只验证单条任务，用界面上的「派发给 codex」或 `POST /api/tasks/{id}/dispatch`。
+> **后端默认不拉起 Codex**（`regent.execution.dispatch.enabled: false`）。任务由当前访问设备上的
+> Regent 设备代理领取，并调用那台设备自己的 Codex。桌面客户端会自动启动设备代理；
+> 只使用浏览器时，可在设备上执行 `cd regent-desktop && npm run device-agent`。
+> 打开「设置 → 执行」后会自动完成配对，检测和任务执行都不会回退到后端机器。
 
 手机公网访问见 `doc/设计文档/移动端公网中继.md` 与 `deploy/README.md`：
 公网服务器只运行无状态中继和静态前端，本机连接器主动长轮询服务器；
-Regent、MySQL、codex 和项目工作区始终留在本机。
+Regent 和 MySQL 留在后端设备，Codex 与项目工作区必须存在于发起执行的那台设备。
 一次配对：`./deploy/remote/deploy.sh` 会自动写好本机 `~/.regent/relay-connector.env`
 并探活连接器；想让手机随时打得开，再跑 `./deploy/local/relay-agent.sh install` 交给 launchd 常驻。
 
@@ -153,10 +153,10 @@ curl -s http://127.0.0.1:8787/api/agent/contract.md   # 协议全文，读一次
 
 平台这一侧只有三件事要留意：
 
-- **想让它独占派发，把 `regent.execution.dispatch.enabled` 关掉** —— 内部心跳开着时，
-  两边会抢同一批待执行任务；
-- **执行者要与后端同机**：工作区只有一份，有效 Git 仓库的分支切换由平台负责；项目根目录
-  不是 Git 时 `branch` 为空，直接在 `workdir` 当前状态执行；换台机器得先有按任务隔离的工作区；
+- **设备代理走带登录保护的 `/api/device-agent/**`**：浏览器先为设备换取长期 Bearer 会话，
+  再由代理领取和上报任务；
+- **Codex 与工作区在执行设备上**：项目工作区路径必须在该设备存在；项目根目录不是 Git 时
+  `branch` 为空，直接在 `workdir` 当前状态执行；
 - **认领即拿租约**，默认 900 秒不心跳就按失联处理（`regent.agent.lease-seconds`），
   回收由 `AgentLeaseJob` 负责，任务会回到可以重试的状态。
 

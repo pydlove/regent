@@ -72,7 +72,8 @@ deploy/remote/    公网服务器：构建并部署无状态中继与静态前�
   也避免构建失败后本地服务处于停止状态。
 - 数据库凭据读 `regent-boot/src/main/resources/application-local.yml`（已 gitignore），
   也可用 `REGENT_DB_USERNAME` / `REGENT_DB_PASSWORD` 覆盖。
-- **本地派发心跳默认关闭**（`application-local.yml` 里 `regent.execution.dispatch.enabled: false`）。
+- **后端派发心跳默认关闭**（`regent.execution.dispatch.enabled: false`）。
+  任务由当前访问设备的 Regent 设备代理领取并调用该设备本机 Codex。
   一旦按需灌了演示数据（项目路径就是真实仓库），心跳一开，起个服务就会真的把演示任务跑起来。
   想看自动派发再改 `true`；只验证单条任务，用界面的「派发执行」或
   `POST /api/tasks/{id}/dispatch`。远端 profile 由 `REGENT_DISPATCH_ENABLED` 控制，默认开。
@@ -81,7 +82,7 @@ deploy/remote/    公网服务器：构建并部署无状态中继与静态前�
 
 ## 公网服务器：`deploy/remote/`
 
-服务器只运行无状态中继和静态前端，不运行 Regent 后端，不接触本地 MySQL 或 codex。
+服务器只运行无状态中继和静态前端，不运行 Regent 后端，不接触任何设备上的 MySQL 或 Codex。
 
 ```
 /root/app/regent-relay/relay/      regent-relay.jar + relay.env

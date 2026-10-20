@@ -1,5 +1,6 @@
 package com.pydlove.regent.boot.persistence;
 
+import com.jayway.jsonpath.JsonPath;
 import com.pydlove.regent.identity.application.command.AuthService;
 import com.pydlove.regent.identity.application.command.LoginCommand;
 import com.pydlove.regent.identity.application.command.RegisterEmailCommand;
@@ -157,6 +158,36 @@ class AuthPersistenceIT {
                 .andExpect(status().isNoContent());
         mockMvc.perform(get("/api/auth/me").cookie(session))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("设备代理用 Bearer 令牌访问设备接口，明文令牌不落库")
+    void deviceAgentUsesBearerSession() throws Exception {
+        String email = email("device");
+        String password = "safe-pass-123";
+        seedEmailCode(email);
+        authService.register(new RegisterEmailCommand(email, EMAIL_CODE, password, password));
+
+        AuthSessionGrant login = authService.login(new LoginCommand(email, password, true));
+        Cookie session = new Cookie("regent_session", login.rawToken());
+        MvcResult device = mockMvc.perform(post("/api/auth/device-session").cookie(session))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.token").isString())
+                .andReturn();
+        String token = JsonPath.read(
+                device.getResponse().getContentAsString(), "$.token");
+
+        mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value(email));
+
+        String stored = jdbcTemplate.queryForObject(
+                "SELECT token_hash FROM auth_session WHERE user_id = "
+                        + "(SELECT id FROM app_user WHERE email = ?) ORDER BY id DESC LIMIT 1",
+                String.class,
+                email);
+        assertEquals(64, stored.length());
+        assertNotEquals(token, stored);
     }
 
     private void seedEmailCode(String email) {

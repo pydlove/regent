@@ -35,3 +35,11 @@ export const login = (input: LoginInput) =>
   postJson<AuthUser>('/auth/login', input)
 
 export const logout = () => postNoContent('/auth/logout')
+
+export type DeviceSession = {
+  token: string
+  expiresAt: string
+}
+
+/** 为当前设备代理换取长期 Bearer 会话。令牌只保存在本机代理的安全配置中。 */
+export const createDeviceSession = () => postJson<DeviceSession>('/auth/device-session', {})

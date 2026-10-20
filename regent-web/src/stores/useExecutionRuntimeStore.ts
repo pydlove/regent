@@ -1,13 +1,19 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
+import { createDeviceSession } from '@/api/auth'
+import {
+  getDeviceAgentStatus,
+  pairDeviceAgent,
+  type DeviceAgentStatus,
+} from '@/api/deviceAgent'
 import { ApiError } from '@/api/http'
-import { checkCodexRuntime, installCodex } from '@/api/settings'
 import type { CodexInstallMethod, CodexInstallResult, CodexRuntime } from '@/types/api'
 
 function messageOf(error: unknown): string {
   if (error instanceof ApiError) return error.message
-  return '无法检测 Codex，请确认后端服务已启动'
+  if (error instanceof Error) return error.message
+  return '当前设备未连接 Regent 设备代理'
 }
 
 /**
@@ -18,13 +24,19 @@ function messageOf(error: unknown): string {
  */
 export const useExecutionRuntimeStore = defineStore('executionRuntime', () => {
   const status = ref<CodexRuntime | null>(null)
+  const device = ref<DeviceAgentStatus | null>(null)
   const loading = ref(false)
   const installing = ref(false)
   const error = ref<string | null>(null)
   let monitorTimer: ReturnType<typeof setInterval> | null = null
 
   const available = computed(() => status.value?.available ?? null)
-  const unavailable = computed(() => status.value !== null && !status.value.available)
+  const unavailable = computed(
+    () =>
+      status.value !== null
+      && !status.value.available
+      && device.value?.paired === true,
+  )
 
   const check = async (force = false): Promise<void> => {
     if (loading.value) return
@@ -32,8 +44,25 @@ export const useExecutionRuntimeStore = defineStore('executionRuntime', () => {
     loading.value = true
     error.value = null
     try {
-      status.value = await checkCodexRuntime()
+      let current = await getDeviceAgentStatus()
+      if (!current.paired && !window.regentDesktop) {
+        const grant = await createDeviceSession()
+        current = await pairDeviceAgent(window.location.origin, grant.token)
+      }
+      device.value = current
+      status.value = {
+        available: current.paired && current.codex.available,
+        configuredCommand: 'codex',
+        executablePath: current.codex.executablePath,
+        version: current.codex.version,
+        message: current.paired
+          ? current.codex.message
+          : '当前设备代理尚未连接到 Regent 服务器，请先登录桌面客户端',
+        checkedAt: current.codex.checkedAt,
+      }
     } catch (e) {
+      device.value = null
+      status.value = null
       error.value = messageOf(e)
     } finally {
       loading.value = false
@@ -43,24 +72,18 @@ export const useExecutionRuntimeStore = defineStore('executionRuntime', () => {
   const clear = () => {
     stopMonitoring()
     status.value = null
+    device.value = null
     loading.value = false
     installing.value = false
     error.value = null
   }
 
   const install = async (method: CodexInstallMethod): Promise<CodexInstallResult> => {
-    if (installing.value) {
-      throw new Error('已有安装任务正在进行')
-    }
-    installing.value = true
-    error.value = null
-    try {
-      const result = await installCodex(method)
-      status.value = result.runtime
-      return result
-    } finally {
-      installing.value = false
-    }
+    throw new Error(
+      `请在当前设备终端执行 ${
+        method === 'npm' ? 'npm install -g @openai/codex' : 'brew install codex'
+      }，安装完成后回到设置页重新检测。`,
+    )
   }
 
   const onVisibilityChange = () => {
@@ -90,6 +113,7 @@ export const useExecutionRuntimeStore = defineStore('executionRuntime', () => {
 
   return {
     status,
+    device,
     loading,
     installing,
     error,

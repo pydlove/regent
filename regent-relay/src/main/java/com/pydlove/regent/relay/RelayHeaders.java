@@ -26,6 +26,7 @@ final class RelayHeaders {
 
     private static final Set<String> REQUEST_HEADERS = Set.of(
         "accept",
+        "authorization",
         "content-type",
         "cookie",
         "if-modified-since",
