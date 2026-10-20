@@ -8,6 +8,7 @@
     "start": "node scripts/start.cjs .",
     "device-agent": "node scripts/start-device-agent.cjs",
     "test": "node --test tests/*.test.mjs",
+    "smoke:update-window": "electron scripts/update-window-smoke.cjs",
     "build:release": "node scripts/build-release.mjs"
   },
   "devDependencies": {
