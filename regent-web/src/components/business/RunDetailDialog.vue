@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Maximize2, Minimize2, ScrollText } from '@lucide/vue'
+import { Check, Maximize2, Minimize2, ScrollText, X } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 
 import RunStatusBadge from '@/components/business/RunStatusBadge.vue'
@@ -10,7 +10,7 @@ import Button from '@/components/ui/button/Button.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
-import type { TaskRunDetail } from '@/types/api'
+import type { DecisionSummary, TaskRunDetail } from '@/types/api'
 import { runIsFailure } from '@/types/task'
 import { formatDuration, formatRelative, formatTokens } from '@/utils/format'
 
@@ -28,13 +28,19 @@ import { formatDuration, formatRelative, formatTokens } from '@/utils/format'
 const props = withDefaults(
   defineProps<{
     detail: TaskRunDetail | null
+    decision?: DecisionSummary | null
+    decisionLoading?: boolean
     loading?: boolean
     error?: string | null
   }>(),
-  { loading: false, error: null },
+  { decision: null, decisionLoading: false, loading: false, error: null },
 )
 
 const open = defineModel<boolean>('open', { default: false })
+const emit = defineEmits<{
+  approve: []
+  reject: []
+}>()
 
 const tab = ref<'process' | 'events' | 'raw'>('process')
 const expanded = ref<number[]>([])
@@ -68,6 +74,18 @@ const leaseLabel = computed(() => {
   }
   return `${formatRelative(expiresAt)} 到期`
 })
+
+const decisionReady = computed(
+  () =>
+    run.value !== null
+    && props.decision?.status === 'PENDING'
+    && props.decision.taskId === run.value.taskId,
+)
+const showDecisionActions = computed(
+  () =>
+    run.value?.status === 'BLOCKED'
+    && (props.decisionLoading || decisionReady.value),
+)
 
 /** 人话视图里条目的「谁在说」 */
 const speaker = computed(() => (isExternal.value ? (run.value?.agentName ?? '执行者') : 'codex'))
@@ -252,6 +270,24 @@ const contentHeightClass = computed(() =>
         <Icon :as="fullscreen ? Minimize2 : Maximize2" size="inline" />
         {{ fullscreen ? '退出全屏' : '全屏查看' }}
       </Button>
+      <template v-if="showDecisionActions">
+        <Button
+          size="sm"
+          :disabled="!decisionReady || decisionLoading"
+          @click="emit('reject')"
+        >
+          <Icon :as="X" size="inline" />驳回
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          :disabled="!decisionReady || decisionLoading"
+          @click="emit('approve')"
+        >
+          <Icon :as="Check" size="inline" />
+          {{ decisionLoading ? '正在读取决策…' : '批准并继续' }}
+        </Button>
+      </template>
       <Button size="sm" @click="open = false">关闭</Button>
     </template>
   </Dialog>

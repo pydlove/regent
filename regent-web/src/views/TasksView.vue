@@ -1712,8 +1712,12 @@ onUnmounted(() => {
     <RunDetailDialog
       v-model:open="runDialogOpen"
       :detail="runStore.detail"
+      :decision="activeDecision"
+      :decision-loading="decisionLoading"
       :loading="runStore.detailLoading"
       :error="runStore.detailError"
+      @approve="openReview('approve')"
+      @reject="openReview('reject')"
     />
   </div>
 </template>
