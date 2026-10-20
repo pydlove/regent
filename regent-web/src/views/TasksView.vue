@@ -228,19 +228,24 @@ const adjustments = ref<TaskAdjustment[]>([])
 const adjustmentsLoading = ref(false)
 const adjustmentsError = ref<string | null>(null)
 
-const loadAdjustments = async (taskId: number) => {
-  adjustmentsLoading.value = true
-  adjustmentsError.value = null
+const loadAdjustments = async (taskId: number, quiet = false) => {
+  if (!quiet) {
+    adjustmentsLoading.value = true
+    adjustmentsError.value = null
+  }
   try {
     const loaded = await listTaskAdjustments(taskId)
-    if (selected.value?.id === taskId) adjustments.value = loaded
-  } catch {
     if (selected.value?.id === taskId) {
+      adjustments.value = loaded
+      adjustmentsError.value = null
+    }
+  } catch {
+    if (!quiet && selected.value?.id === taskId) {
       adjustments.value = []
       adjustmentsError.value = '调整方向读取失败，请稍后重试'
     }
   } finally {
-    if (selected.value?.id === taskId) adjustmentsLoading.value = false
+    if (!quiet && selected.value?.id === taskId) adjustmentsLoading.value = false
   }
 }
 
@@ -812,6 +817,8 @@ const refreshTasks = async () => {
   refreshingTasks.value = true
   try {
     await store.refresh()
+    const taskId = selected.value?.id
+    if (taskId !== undefined) await loadAdjustments(taskId, true)
   } finally {
     refreshingTasks.value = false
   }
@@ -1233,7 +1240,11 @@ onUnmounted(() => {
               >
                 <div class="flex items-center gap-2">
                   <span class="text-caption text-label-tertiary">
-                    {{ adjustment.source === 'TASK' ? `任务 #${adjustment.sourceTaskId}` : '临时补充' }}
+                    {{
+                      adjustment.source === 'TASK'
+                        ? `任务 #${adjustment.sourceTaskId}${adjustment.sourceTitle ? ` · ${adjustment.sourceTitle}` : ''}`
+                        : '临时补充'
+                    }}
                   </span>
                   <Badge
                     class="ml-auto"
