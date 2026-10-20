@@ -21,6 +21,7 @@ import {
   updateExecutionSettings,
   updateRelaySettings,
 } from '@/api/settings'
+import CcSwitchDownloadCard from '@/components/business/CcSwitchDownloadCard.vue'
 import Avatar from '@/components/ui/avatar/Avatar.vue'
 import Button from '@/components/ui/button/Button.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
@@ -664,6 +665,8 @@ onBeforeUnmount(() => {
               {{ codexError }}
             </p>
           </section>
+
+          <CcSwitchDownloadCard class="mt-4" />
 
           <div class="overflow-hidden rounded-panel bg-content shadow-panel">
             <div

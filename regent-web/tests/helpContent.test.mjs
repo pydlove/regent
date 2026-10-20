@@ -63,6 +63,18 @@ test('语音输入说明可按麦克风与 HTTPS 检索', () => {
   )
 })
 
+test('CC Switch 下载说明可通过官网、快捷下载和供应商检索', () => {
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, 'CC Switch').some((topic) => topic.id === 'cc-switch-download'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '快捷下载').some((topic) => topic.id === 'cc-switch-download'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '供应商').some((topic) => topic.id === 'cc-switch-download'),
+  )
+})
+
 test('分支执行说明可按 Git 与隔离分支检索', () => {
   assert.ok(
     filterHelpTopics(HELP_TOPICS, 'Git').some((topic) => topic.id === 'task-branch'),

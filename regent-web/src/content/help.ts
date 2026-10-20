@@ -185,6 +185,25 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     },
   },
   {
+    id: 'cc-switch-download',
+    category: 'start',
+    question: '如何安装 CC Switch 来管理多个 Codex 配置？',
+    keywords: ['CC Switch', 'cc-switch', '下载', '安装', 'Codex', '供应商', '配置切换'],
+    answer: {
+      paragraphs: [
+        'CC Switch 是第三方开源桌面工具，可统一管理 Codex、Claude Code 等工具的供应商配置、MCP 与 Skills。',
+        '打开「设置 → 执行」，页面会根据当前系统提供官方最新版的快捷下载，同时列出 Homebrew、Windows 安装版/便携版和 Linux 下载入口。',
+      ],
+      steps: [
+        '进入「设置 → 执行」，找到 CC Switch 面板。',
+        '点击快捷下载；macOS 也可以执行 brew install --cask cc-switch。',
+        '安装后打开 CC Switch，按工具文档添加或切换供应商配置。',
+      ],
+      note: '下载地址来自 CC Switch 官方 GitHub Releases。若网络无法读取最新版本，可直接打开官网或 Releases 页面下载。',
+      links: [{ label: '打开执行设置', to: '/settings/execution' }],
+    },
+  },
+  {
     id: 'task-draft',
     category: 'tasks',
     question: '新建任务写了一半，内容会自动保存吗？',
