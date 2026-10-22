@@ -20,6 +20,7 @@ import { ApiError } from '@/api/http'
 import DeploymentServerDialog from '@/components/business/DeploymentServerDialog.vue'
 import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
+import CopyButton from '@/components/ui/copy-button/CopyButton.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
@@ -48,7 +49,7 @@ const deleting = ref(false)
 
 const columns: TableColumn[] = [
   { key: 'name', label: '服务器名称' },
-  { key: 'project', label: '项目', width: '120px', hideBelow: 'lg' },
+  { key: 'project', label: '归属项目', width: '180px', hideBelow: 'lg' },
   { key: 'connection', label: 'SSH', width: '220px' },
   { key: 'auth', label: '认证', width: '108px', hideBelow: 'md' },
   { key: 'usage', label: '关联部署', width: '88px', hideBelow: 'xl' },
@@ -60,11 +61,23 @@ const filtered = computed(() => {
   const search = keyword.value.trim().toLowerCase()
   if (!search) return servers.value
   return servers.value.filter((server) =>
-    [server.name, server.host, server.username].some((value) =>
-      value.toLowerCase().includes(search),
-    ),
+    [
+      server.name,
+      server.host,
+      server.username,
+      projectNamesOf(server.projectIds),
+    ].some((value) => value.toLowerCase().includes(search)),
   )
 })
+
+const projectNamesOf = (projectIds: number[]) =>
+  projectIds
+    .map(
+      (projectId) =>
+        store.projects.find((project) => project.id === projectId)?.name ??
+        `项目 #${projectId}`,
+    )
+    .join('、')
 
 const deleteDescription = computed(() => {
   const target = deleteTarget.value
@@ -202,15 +215,23 @@ const confirmDelete = async () => {
           <span
             v-else-if="column.key === 'project'"
             class="truncate text-caption text-label-secondary"
+            :title="projectNamesOf(row.projectIds)"
           >
-            {{ store.projects.find((project) => project.id === row.projectId)?.name ?? `项目 #${row.projectId}` }}
+            {{ projectNamesOf(row.projectIds) }}
           </span>
           <span
             v-else-if="column.key === 'connection'"
-            class="truncate font-mono text-caption text-label-secondary"
+            class="flex min-w-0 items-center gap-1 font-mono text-caption text-label-secondary"
             :title="`${row.username}@${row.host}:${row.port}`"
           >
-            {{ row.username }}@{{ row.host }}:{{ row.port }}
+            <span class="min-w-0 flex-1 truncate">
+              {{ row.username }}@{{ row.host }}:{{ row.port }}
+            </span>
+            <CopyButton
+              :text="row.host"
+              label="复制服务器 IP"
+              success-message="服务器 IP 已复制"
+            />
           </span>
           <span v-else-if="column.key === 'auth'" class="flex items-center gap-1.5">
             <Badge :tone="row.authType === 'PASSWORD' ? 'warning' : 'neutral'">

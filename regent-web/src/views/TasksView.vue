@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   Copy,
   CornerDownRight,
+  FileText,
   ImagePlus,
   ListPlus,
   Pencil,
@@ -23,8 +24,13 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ACCEPTED_IMAGE_TYPES, listTaskAttachments, uploadTaskAttachment } from '@/api/attachments'
+import { listTaskDocuments } from '@/api/documents'
 import { getDecision } from '@/api/decisions'
-import { runTaskOnDevice } from '@/api/deviceAgent'
+import {
+  getDeviceAgentJob,
+  runTaskOnDevice,
+  type DeviceAgentJob,
+} from '@/api/deviceAgent'
 import { ApiError } from '@/api/http'
 import { listTaskPlugins } from '@/api/plugins'
 import { listTaskAdjustments } from '@/api/tasks'
@@ -34,6 +40,7 @@ import ImageAttachmentGrid from '@/components/business/ImageAttachmentGrid.vue'
 import ImageAttachmentsDialog from '@/components/business/ImageAttachmentsDialog.vue'
 import NewTaskDialog from '@/components/business/NewTaskDialog.vue'
 import RunDetailDialog from '@/components/business/RunDetailDialog.vue'
+import TaskReviewPanel from '@/components/business/TaskReviewPanel.vue'
 import RunStatusBadge from '@/components/business/RunStatusBadge.vue'
 import TaskEditDialog from '@/components/business/TaskEditDialog.vue'
 import TaskAdjustmentDialog from '@/components/business/TaskAdjustmentDialog.vue'
@@ -45,6 +52,7 @@ import WorkItemSwitcher from '@/components/business/WorkItemSwitcher.vue'
 import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
 import Checkbox from '@/components/ui/checkbox/Checkbox.vue'
+import CopyButton from '@/components/ui/copy-button/CopyButton.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
@@ -70,6 +78,7 @@ import type {
   TaskBatchDeleteFailure,
   TaskBatchDispatchFailure,
   TaskDetail,
+  TaskDocument,
   TaskPluginBinding,
 } from '@/types/api'
 import {
@@ -90,12 +99,13 @@ import {
 } from '@/types/task'
 import {
   formatDateTime,
+  formatBytes,
   formatDuration,
   formatDurationMillis,
   formatRelative,
   formatTokens,
 } from '@/utils/format'
-import { parseTaskIdQuery } from '@/utils/taskNavigation'
+import { parseProjectIdQuery, parseTaskIdQuery } from '@/utils/taskNavigation'
 import BugView from '@/views/BugsView.vue'
 
 /*
@@ -113,6 +123,7 @@ const route = useRoute()
 const router = useRouter()
 const bugView = computed(() => route.query.view === 'bugs')
 const routeTaskId = computed(() => parseTaskIdQuery(route.query.taskId))
+const routeProjectId = computed(() => parseProjectIdQuery(route.query.projectId))
 let routeAppliedFilter = false
 
 const sourceMeta: Record<
@@ -188,8 +199,8 @@ watch(keywordInput, (value) => {
 })
 
 watch(
-  routeTaskId,
-  (taskId) => {
+  [routeTaskId, routeProjectId],
+  ([taskId, projectId]) => {
     if (taskId === null) {
       if (store.taskIdFilter !== null) {
         store.clearTaskFocus()
@@ -201,7 +212,7 @@ watch(
       return
     }
     store.clearSelection()
-    store.focusTask(taskId)
+    store.focusTask(taskId, projectId)
     keywordInput.value = ''
     routeAppliedFilter = true
   },
@@ -459,6 +470,7 @@ const dismissTaskFilter = () => {
   store.clearSelection()
   const query = { ...route.query }
   delete query.taskId
+  delete query.projectId
   void router.replace({ name: 'tasks', query })
 }
 
@@ -555,11 +567,16 @@ const dispatch = async () => {
   }
   dispatchingTask.value = true
   try {
-    await runTaskOnDevice(task.id, project.code)
+    const submitted = await runTaskOnDevice(task.id, project.code)
+    const job = await waitForDeviceClaim(submitted)
     await runStore.load(task.id)
-    toast.show(`#${task.id} 已交给当前设备`, {
-      description: '正在当前访问设备上执行本机 Codex，任务状态每 3 秒自动刷新',
-    })
+    if (job.runId) {
+      toast.show(`#${task.id} 已交给当前设备`, {
+        description: '正在当前访问设备上执行本机 Codex，任务状态每 3 秒自动刷新',
+      })
+    } else {
+      toast.warning(`#${task.id} 已进入排队`, job.message)
+    }
   } catch (error) {
     toast.warning(`#${task.id} 未能在当前设备启动`, messageOf(error))
   } finally {
@@ -567,8 +584,30 @@ const dispatch = async () => {
   }
 }
 
-const messageOf = (error: unknown) =>
-  error instanceof Error ? error.message : '当前设备未连接 Regent 设备代理'
+const messageOf = (error: unknown) => {
+  const message = error instanceof Error
+    ? error.message
+    : '当前设备未连接 Regent 设备代理'
+  return message.replace(
+    /^Error invoking remote method '[^']+': Error:\\s*/,
+    '',
+  )
+}
+
+const waitForDeviceClaim = async (
+  initial: DeviceAgentJob,
+  timeoutMillis = 5_000,
+): Promise<DeviceAgentJob> => {
+  const deadline = Date.now() + timeoutMillis
+  let job = initial
+  while (Date.now() < deadline) {
+    if (job.status === 'failed') throw new Error(job.message)
+    if (job.runId || job.message.includes('已排队')) return job
+    await new Promise((resolve) => window.setTimeout(resolve, 300))
+    job = await getDeviceAgentJob(job.id)
+  }
+  return job
+}
 
 /** 派发 = 当前访问设备的代理拉起本机 codex；绝不回退到服务器机器。 */
 const dispatchHint = '在当前访问设备上拉起 codex CLI；未连接设备代理时不能派发'
@@ -603,7 +642,9 @@ const dispatchSelected = async () => {
       continue
     }
     try {
-      await runTaskOnDevice(id, project.code)
+      const submitted = await runTaskOnDevice(id, project.code)
+      const job = await waitForDeviceClaim(submitted, 800)
+      if (job.status === 'failed') throw new Error(job.message)
       dispatchedIds.push(id)
     } catch (error) {
       failures.push({ taskId: id, message: messageOf(error) })
@@ -620,7 +661,10 @@ const dispatchSelected = async () => {
   const successCount = dispatchedIds.length
   const failureCount = failures.length
   if (failureCount === 0) {
-    toast.success(`已提交 ${successCount} 个任务`, '任务将由当前设备代理依次执行')
+    toast.success(
+      `已提交 ${successCount} 个任务`,
+      '任务将由当前设备代理依次执行；执行位暂满时会自动等待',
+    )
   } else if (successCount === 0) {
     toast.warning('没有任务被派发', batchFailureDescription(failures, '未派发'))
   } else {
@@ -757,6 +801,7 @@ const onTaskCreated = async (
   if (fresh) await store.select(fresh)
   // 弹框是先建任务再传图，这里按 0 张读一次；传完它会再发 uploaded 事件让我们重拉
   await loadAttachments(payload.id)
+  await loadDocuments(payload.id)
   toast.success(
     `#${payload.id} 已创建`,
     continuedFromTaskId
@@ -776,6 +821,7 @@ const onContinuationCreated = async (task: TaskDetail) => {
  * 筛选一起失效重算，而那几处跟附件没关系。
  */
 const attachments = ref<TaskAttachment[]>([])
+const taskDocuments = ref<TaskDocument[]>([])
 const taskPlugins = ref<TaskPluginBinding[]>([])
 const pluginDialogOpen = ref(false)
 const viewerOpen = ref(false)
@@ -787,6 +833,14 @@ const loadAttachments = async (id: number) => {
   } catch {
     // 附件是附加信息：取不到就当作没有，不拿一条红字把整个详情面板顶掉
     attachments.value = []
+  }
+}
+
+const loadDocuments = async (id: number) => {
+  try {
+    taskDocuments.value = await listTaskDocuments(id)
+  } catch {
+    taskDocuments.value = []
   }
 }
 
@@ -850,7 +904,10 @@ const attachFiles = async (event: Event) => {
 
 /** 弹框传完图（含失败后重试成功）时刷新当前选中行的缩略图 */
 const onUploaded = (payload: { id: number }) => {
-  if (store.selected?.id === payload.id) void loadAttachments(payload.id)
+  if (store.selected?.id === payload.id) {
+    void loadAttachments(payload.id)
+    void loadDocuments(payload.id)
+  }
 }
 
 /*
@@ -891,6 +948,11 @@ const openRun = async (runId: number) => {
   await runStore.openRun(runId)
 }
 
+const refreshRunDetail = async () => {
+  const runId = runStore.detail?.run.id
+  if (runId !== undefined) await runStore.refreshDetail(runId)
+}
+
 watch(
   () => store.selected?.id,
   (id) => {
@@ -905,11 +967,13 @@ watch(
     viewerOpen.value = false
     viewerId.value = null
     attachments.value = []
+    taskDocuments.value = []
     taskPlugins.value = []
     pluginDialogOpen.value = false
     if (id !== undefined) {
       void runStore.load(id)
       void loadAttachments(id)
+      void loadDocuments(id)
       void loadTaskPlugins(id)
     }
   },
@@ -982,7 +1046,7 @@ onUnmounted(() => {
           <button
             v-if="store.taskIdFilter !== null"
             type="button"
-            class="inline-flex h-control items-center gap-1.5 rounded-full border border-accent/20 bg-accent/10 px-2.5 text-caption font-emphasis text-accent transition-colors duration-100 ease-apple hover:bg-accent/15"
+            class="inline-flex h-control shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-accent/20 bg-accent/10 px-2.5 text-caption font-emphasis text-accent transition-colors duration-100 ease-apple hover:bg-accent/15"
             title="清除任务筛选"
             @click="dismissTaskFilter"
           >
@@ -1101,11 +1165,15 @@ onUnmounted(() => {
                 #{{ row.id }}
               </span>
               <span
-                class="truncate font-emphasis text-label group-data-[selected=true]:text-white"
-                :title="row.title"
+                class="min-w-0 flex-1 truncate font-emphasis text-label group-data-[selected=true]:text-white"
               >
                 {{ row.title }}
               </span>
+              <CopyButton
+                :text="row.title"
+                label="复制任务标题"
+                success-message="任务标题已复制"
+              />
             </span>
             <span
               v-else-if="column.key === 'source'"
@@ -1235,11 +1303,23 @@ onUnmounted(() => {
             </Badge>
             <TaskStatusBadge :status="selected.status" class="ml-auto" />
           </div>
-          <h2 class="mt-2 text-body font-emphasis text-label">{{ selected.title }}</h2>
+          <div class="mt-2 flex items-start gap-1">
+            <h2 class="min-w-0 flex-1 text-body font-emphasis text-label">{{ selected.title }}</h2>
+            <CopyButton
+              :text="selected.title"
+              label="复制任务标题"
+              success-message="任务标题已复制"
+            />
+          </div>
 
           <div v-if="store.detail" class="mt-2">
             <div class="flex items-center gap-2">
               <p class="text-caption font-emphasis text-label-secondary">指令</p>
+              <CopyButton
+                :text="store.detail.prompt"
+                label="复制任务指令"
+                success-message="任务指令已复制"
+              />
               <button
                 type="button"
                 class="ml-auto text-caption text-accent transition-colors duration-100 ease-apple hover:text-accent/80"
@@ -1252,6 +1332,12 @@ onUnmounted(() => {
               {{ store.detail.prompt }}
             </p>
           </div>
+
+          <TaskReviewPanel
+            :task-id="selected.id"
+            :task-status="selected.status"
+            @open-run="openRun"
+          />
 
           <div class="mt-4 border-t border-separator pt-3">
             <div class="flex items-center gap-2">
@@ -1310,6 +1396,21 @@ onUnmounted(() => {
             <div class="flex items-center gap-2">
               <dt class="whitespace-nowrap text-caption text-label-secondary">项目</dt>
               <dd class="ml-auto text-caption text-label">{{ selected.projectName }}</dd>
+            </div>
+            <div v-if="store.detail?.requirementId" class="flex items-center gap-2">
+              <dt class="whitespace-nowrap text-caption text-label-secondary">来源需求</dt>
+              <dd class="ml-auto">
+                <button
+                  type="button"
+                  class="text-caption text-accent hover:underline"
+                  @click="router.push({
+                    path: '/tasks',
+                    query: { view: 'requirements', requirementId: String(store.detail.requirementId) },
+                  })"
+                >
+                  需求 #{{ store.detail.requirementId }}
+                </button>
+              </dd>
             </div>
             <div v-if="store.detail?.continuedFromTaskId" class="flex items-center gap-2">
               <dt class="whitespace-nowrap text-caption text-label-secondary">接续任务</dt>
@@ -1472,6 +1573,36 @@ onUnmounted(() => {
             class="hidden"
             @change="attachFiles"
           />
+        </div>
+
+        <div class="mt-4 border-t border-separator pt-3">
+          <div class="flex items-center gap-2">
+            <p class="text-caption font-emphasis text-label-secondary">文档</p>
+            <span v-if="taskDocuments.length > 0" class="tnum text-caption text-label-tertiary">
+              {{ taskDocuments.length }}
+            </span>
+          </div>
+          <div v-if="taskDocuments.length > 0" class="mt-2 space-y-1.5">
+            <a
+              v-for="document in taskDocuments"
+              :key="document.id"
+              :href="document.contentUrl"
+              class="flex min-h-9 items-center gap-2 rounded-control border border-separator-soft bg-content px-2.5 py-1.5 transition-colors hover:border-accent/50"
+              :title="`下载 ${document.filename}`"
+            >
+              <Icon :as="FileText" size="inline" class="shrink-0 text-label-tertiary" />
+              <span class="min-w-0 flex-1 truncate text-caption text-label">
+                {{ document.filename }}
+              </span>
+              <Badge v-if="document.savedToLibrary" tone="accent">文件库</Badge>
+              <span class="tnum shrink-0 text-caption text-label-tertiary">
+                {{ formatBytes(document.sizeBytes) }}
+              </span>
+            </a>
+          </div>
+          <p v-else class="mt-2 text-caption text-label-tertiary">
+            没有绑定文档。新建任务时可以上传一次性文档，或从项目文件库复用。
+          </p>
         </div>
 
         <div
@@ -1655,6 +1786,7 @@ onUnmounted(() => {
       v-model:open="continuationOpen"
       :task="store.detail"
       @created="onContinuationCreated"
+      @uploaded="onUploaded"
     />
 
     <TaskPluginDialog
@@ -1734,8 +1866,10 @@ onUnmounted(() => {
       :decision="activeDecision"
       :decision-loading="decisionLoading"
       :loading="runStore.detailLoading"
+      :refreshing="runStore.detailRefreshing"
       :error="runStore.detailError"
       @approve="openReview('approve')"
+      @refresh="refreshRunDetail"
       @reject="openReview('reject')"
     />
   </div>

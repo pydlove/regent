@@ -3,8 +3,10 @@ import {
   CircleUserRound,
   Download,
   Gauge,
+  GitBranch,
   LayoutPanelLeft,
   LogOut,
+  MonitorDown,
   Palette,
   RadioTower,
   RefreshCw,
@@ -16,17 +18,21 @@ import { useRoute, useRouter } from 'vue-router'
 import { ApiError } from '@/api/http'
 import {
   getExecutionSettings,
+  getGitCommitSettings,
   getRelaySettings,
   installRelay as installRelayOnServer,
   updateExecutionSettings,
+  updateGitCommitSettings,
   updateRelaySettings,
 } from '@/api/settings'
 import CcSwitchDownloadCard from '@/components/business/CcSwitchDownloadCard.vue'
 import Avatar from '@/components/ui/avatar/Avatar.vue'
 import Button from '@/components/ui/button/Button.vue'
+import CopyButton from '@/components/ui/copy-button/CopyButton.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
 import Input from '@/components/ui/input/Input.vue'
+import Textarea from '@/components/ui/input/Textarea.vue'
 import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
 import StatusDot from '@/components/ui/status-dot/StatusDot.vue'
 import Switch from '@/components/ui/switch/Switch.vue'
@@ -41,10 +47,12 @@ import type {
   RelaySettings,
   RelayState,
   RelayStatus,
+  GitCommitSettings,
 } from '@/types/api'
+import { isWindowsClient } from '@/utils/downloadPlatform'
 import BaselineView from '@/views/BaselineView.vue'
 
-type SettingsSection = 'appearance' | 'baseline' | 'execution' | 'relay' | 'account'
+type SettingsSection = 'appearance' | 'baseline' | 'execution' | 'git' | 'relay' | 'account'
 type SectionItem = {
   id: SettingsSection
   label: string
@@ -56,6 +64,7 @@ const sections: SectionItem[] = [
   { id: 'appearance', label: '外观', icon: Palette, tone: 'bg-accent' },
   { id: 'baseline', label: '样式基准', icon: LayoutPanelLeft, tone: 'bg-accent' },
   { id: 'execution', label: '执行', icon: Gauge, tone: 'bg-warning' },
+  { id: 'git', label: 'Git 提交', icon: GitBranch, tone: 'bg-danger' },
   { id: 'relay', label: '中继', icon: RadioTower, tone: 'bg-success' },
   { id: 'account', label: '账户', icon: CircleUserRound, tone: 'bg-neutral' },
 ]
@@ -115,6 +124,10 @@ const executionError = ref<string | null>(null)
 const codexRuntime = computed(() => executionRuntime.status)
 const codexChecking = computed(() => executionRuntime.loading)
 const codexError = computed(() => executionRuntime.error)
+const windowsClient = isWindowsClient(navigator.userAgent)
+const needsDeviceAgent = computed(
+  () => !codexChecking.value && codexRuntime.value === null && Boolean(codexError.value),
+)
 
 const numericLimit = computed(() => Number(executionLimit.value))
 const executionValid = computed(
@@ -177,6 +190,89 @@ async function saveExecutionSettings() {
 
 async function detectCodex() {
   await executionRuntime.check(true)
+}
+
+function openClientDownload() {
+  void router.push({ name: 'download' })
+}
+
+const gitCommitForm = reactive<GitCommitSettings>({
+  enabled: true,
+  defaultType: 'feat',
+  defaultScope: '',
+  subjectTemplate: '{type}({ticket}): {title}',
+  bodyTemplate: '',
+  validationPattern: '(?s)^(feat|fix|refactor|docs|test|build|chore|perf|ci|style)(\\(\\d{6}\\))?: [^\\r\\n]+(?:\\R\\R[\\s\\S]+)?$',
+  validationHint: '格式：type(6位Bug编号): 中文说明；未关联 Bug 时生成 type: 中文说明。例如 feat(102008): 优化告警记录处理逻辑，或 feat: 完善变更审阅',
+})
+const savedGitCommitForm = reactive<GitCommitSettings>({ ...gitCommitForm })
+const gitCommitLoading = ref(false)
+const gitCommitSaving = ref(false)
+const gitCommitLoaded = ref(false)
+const gitCommitError = ref<string | null>(null)
+const gitCommitTemplateValid = computed(() => {
+  const template = gitCommitForm.subjectTemplate.trim()
+  return template.length > 0
+    && (template.includes('{title}') || template.includes('{taskId}'))
+})
+const gitCommitPatternValid = computed(() => {
+  const pattern = gitCommitForm.validationPattern.trim()
+  return pattern.length <= 1024
+})
+const gitCommitDirty = computed(
+  () => gitCommitLoaded.value
+    && Object.keys(gitCommitForm).some(
+      (key) => gitCommitForm[key as keyof GitCommitSettings]
+        !== savedGitCommitForm[key as keyof GitCommitSettings],
+    ),
+)
+const gitCommitCanSave = computed(
+  () => gitCommitLoaded.value
+    && gitCommitTemplateValid.value
+    && gitCommitPatternValid.value
+    && gitCommitDirty.value
+    && !gitCommitSaving.value,
+)
+
+function applyGitCommitSettings(settings: GitCommitSettings) {
+  Object.assign(gitCommitForm, settings)
+  Object.assign(savedGitCommitForm, settings)
+  gitCommitLoaded.value = true
+}
+
+async function loadGitCommitSettings() {
+  gitCommitLoading.value = true
+  gitCommitError.value = null
+  try {
+    applyGitCommitSettings(await getGitCommitSettings())
+  } catch (error) {
+    gitCommitError.value = messageOf(error, '无法读取 Git 提交规范')
+  } finally {
+    gitCommitLoading.value = false
+  }
+}
+
+async function saveGitCommitSettings() {
+  if (!gitCommitCanSave.value) return
+  gitCommitSaving.value = true
+  gitCommitError.value = null
+  try {
+    const settings = await updateGitCommitSettings({
+      enabled: gitCommitForm.enabled,
+      defaultType: gitCommitForm.defaultType.trim(),
+      defaultScope: gitCommitForm.defaultScope.trim(),
+      subjectTemplate: gitCommitForm.subjectTemplate.trim(),
+      bodyTemplate: gitCommitForm.bodyTemplate.trim(),
+      validationPattern: gitCommitForm.validationPattern.trim(),
+      validationHint: gitCommitForm.validationHint.trim(),
+    })
+    applyGitCommitSettings(settings)
+    toast.success('Git 提交规范已保存')
+  } catch (error) {
+    gitCommitError.value = messageOf(error, '无法保存 Git 提交规范')
+  } finally {
+    gitCommitSaving.value = false
+  }
 }
 
 const relayForm = reactive({
@@ -490,6 +586,9 @@ watch(activeSection, (section) => {
   if (section === 'relay' && !relayLoaded.value) {
     void loadRelaySettings()
   }
+  if (section === 'git' && !gitCommitLoaded.value) {
+    void loadGitCommitSettings()
+  }
   syncRelayPolling()
 })
 
@@ -502,6 +601,9 @@ onMounted(() => {
   void loadExecutionSettings()
   if (activeSection.value === 'relay') {
     void loadRelaySettings()
+  }
+  if (activeSection.value === 'git') {
+    void loadGitCommitSettings()
   }
   document.addEventListener('visibilitychange', handleVisibilityChange)
   syncRelayPolling()
@@ -592,6 +694,37 @@ onBeforeUnmount(() => {
             </p>
           </header>
 
+          <section
+            v-if="needsDeviceAgent"
+            class="mb-4 overflow-hidden rounded-panel border border-warning/30 bg-warning/8 shadow-panel"
+          >
+            <div class="flex items-start gap-3 px-4 py-4">
+              <span class="grid size-9 shrink-0 place-items-center rounded-panel bg-warning/15 text-warning">
+                <Icon :as="MonitorDown" size="regular" />
+              </span>
+              <div class="min-w-0 flex-1">
+                <p class="text-body font-emphasis text-label">当前设备还没有运行 Regent 设备代理</p>
+                <p class="mt-1 text-caption leading-5 text-label-secondary">
+                  <template v-if="windowsClient">
+                    Windows 浏览器不能直接启动本地程序。下载 Windows 便携版，解压后运行一次
+                    Install-Device-Agent-Autostart.cmd；登录后设备代理会自动启动，
+                    再回到本页重新检测。
+                  </template>
+                  <template v-else>
+                    请打开 Regent 桌面客户端，或按使用说明启动当前设备的 Regent 设备代理。
+                  </template>
+                </p>
+                <p v-if="codexError" class="mt-1.5 text-caption text-danger">
+                  {{ codexError }}
+                </p>
+              </div>
+              <Button class="shrink-0" size="sm" variant="primary" @click="openClientDownload">
+                <Icon :as="Download" size="inline" />
+                {{ windowsClient ? '下载 Windows 版' : '打开下载页' }}
+              </Button>
+            </div>
+          </section>
+
           <section class="mb-4 overflow-hidden rounded-panel bg-content shadow-panel">
             <div class="flex items-start gap-4 px-4 py-4">
               <div class="min-w-0 flex-1">
@@ -668,7 +801,10 @@ onBeforeUnmount(() => {
                 最近检测：{{ codexCheckedAt }}。可用只代表可执行文件能启动，不代表 Codex 已完成登录。
               </p>
             </template>
-            <p v-if="codexError" class="border-t border-separator-soft px-4 py-2 text-caption text-danger">
+            <p
+              v-if="codexError && !needsDeviceAgent"
+              class="border-t border-separator-soft px-4 py-2 text-caption text-danger"
+            >
               {{ codexError }}
             </p>
           </section>
@@ -723,6 +859,126 @@ onBeforeUnmount(() => {
               @click="saveExecutionSettings"
             >
               {{ executionSaving ? '保存中…' : '保存' }}
+            </Button>
+          </div>
+        </template>
+
+        <template v-else-if="activeSection === 'git'">
+          <header class="mb-6">
+            <h1 class="text-metric font-emphasis text-label">Git 提交</h1>
+            <p class="mt-1 text-body text-label-secondary">
+              审阅通过后可按企业规范生成提交说明，并只提交本次审阅涉及的文件。
+            </p>
+          </header>
+
+          <div class="overflow-hidden rounded-panel bg-content shadow-panel">
+            <div class="flex items-start gap-6 px-4 py-3">
+              <div class="min-w-0">
+                <div class="text-body font-emphasis text-label">启用审阅后提交</div>
+                <div class="mt-0.5 text-caption text-label-secondary">
+                  关闭后仍可审阅和部署，但不再展示 Git 提交入口。
+                </div>
+              </div>
+              <Switch
+                v-model="gitCommitForm.enabled"
+                class="ml-auto"
+                :disabled="gitCommitLoading || gitCommitSaving"
+              />
+            </div>
+            <div class="h-px bg-separator-soft" />
+            <div class="grid gap-3 px-4 py-3 sm:grid-cols-2">
+              <label class="min-w-0">
+                <span class="text-caption font-emphasis text-label-secondary">默认类型</span>
+                <Input
+                  v-model="gitCommitForm.defaultType"
+                  class="mt-1.5 font-mono"
+                  placeholder="feat"
+                  :disabled="gitCommitLoading || gitCommitSaving || !gitCommitForm.enabled"
+                />
+              </label>
+              <label v-if="gitCommitForm.subjectTemplate.includes('{scope}')" class="min-w-0">
+                <span class="text-caption font-emphasis text-label-secondary">默认范围</span>
+                <Input
+                  v-model="gitCommitForm.defaultScope"
+                  class="mt-1.5 font-mono"
+                  placeholder="留空时使用项目标识"
+                  :disabled="gitCommitLoading || gitCommitSaving || !gitCommitForm.enabled"
+                />
+              </label>
+            </div>
+            <div class="h-px bg-separator-soft" />
+            <div class="px-4 py-3">
+              <label class="block">
+                <span class="text-caption font-emphasis text-label-secondary">提交标题模板</span>
+                <Input
+                  v-model="gitCommitForm.subjectTemplate"
+                  class="mt-1.5 font-mono"
+                  :invalid="!gitCommitTemplateValid"
+                  :disabled="gitCommitLoading || gitCommitSaving || !gitCommitForm.enabled"
+                />
+              </label>
+              <p v-if="!gitCommitTemplateValid" class="mt-1.5 text-caption text-danger">
+                标题模板必须包含 {title} 或 {taskId}。
+              </p>
+              <p v-else class="mt-1.5 text-caption text-label-tertiary">
+                可用变量：{type}、{ticket}、{scope}、{taskId}、{title}、{projectCode}、{projectName}、{fileCount}、{files}
+              </p>
+              <p class="mt-1 text-caption text-label-tertiary">
+                {ticket} 只在任务关联 Bug 时自动填入；未关联时“({ticket})”会自动省略。
+              </p>
+            </div>
+            <div class="h-px bg-separator-soft" />
+            <div class="px-4 py-3">
+              <label class="block">
+                <span class="text-caption font-emphasis text-label-secondary">提交正文模板</span>
+                <Textarea
+                  v-model="gitCommitForm.bodyTemplate"
+                  class="mt-1.5 font-mono"
+                  :rows="4"
+                  placeholder="可选，例如：Refs: #{taskId}"
+                  :disabled="gitCommitLoading || gitCommitSaving || !gitCommitForm.enabled"
+                />
+              </label>
+            </div>
+            <div class="h-px bg-separator-soft" />
+            <div class="px-4 py-3">
+              <label class="block">
+                <span class="text-caption font-emphasis text-label-secondary">提交信息校验正则</span>
+                <Input
+                  v-model="gitCommitForm.validationPattern"
+                  class="mt-1.5 font-mono"
+                  placeholder="留空表示不限制"
+                  :invalid="!gitCommitPatternValid"
+                  :disabled="gitCommitLoading || gitCommitSaving || !gitCommitForm.enabled"
+                />
+              </label>
+              <p v-if="!gitCommitPatternValid" class="mt-1.5 text-caption text-danger">
+                正则表达式不能超过 1024 个字符。
+              </p>
+              <label class="mt-3 block">
+                <span class="text-caption font-emphasis text-label-secondary">校验失败提示</span>
+                <Input
+                  v-model="gitCommitForm.validationHint"
+                  class="mt-1.5"
+                  placeholder="格式不符合当前企业提交规范"
+                  :disabled="gitCommitLoading || gitCommitSaving || !gitCommitForm.enabled"
+                />
+              </label>
+            </div>
+          </div>
+
+          <p v-if="gitCommitError" class="mt-3 text-caption text-danger">{{ gitCommitError }}</p>
+          <div class="mt-5 flex items-center justify-end gap-2">
+            <span v-if="gitCommitDirty" class="mr-auto text-caption text-label-secondary">
+              有未保存的更改
+            </span>
+            <Button
+              variant="primary"
+              size="lg"
+              :disabled="!gitCommitCanSave"
+              @click="saveGitCommitSettings"
+            >
+              {{ gitCommitSaving ? '保存中…' : '保存' }}
             </Button>
           </div>
         </template>
@@ -841,13 +1097,22 @@ onBeforeUnmount(() => {
                 <div class="mt-0.5 text-caption text-label-secondary">安装前必填</div>
               </div>
               <div class="min-w-0">
-                <Input
-                  v-model="relayForm.serverIp"
-                  size="lg"
-                  placeholder="203.0.113.10"
-                  :disabled="relayLoading || relaySaving || relayInstalling"
-                  :invalid="relayForm.serverIp.length > 0 && !relayServerIpValid"
-                />
+                <div class="flex items-center gap-2">
+                  <Input
+                    v-model="relayForm.serverIp"
+                    size="lg"
+                    placeholder="203.0.113.10"
+                    :disabled="relayLoading || relaySaving || relayInstalling"
+                    :invalid="relayForm.serverIp.length > 0 && !relayServerIpValid"
+                    class="min-w-0 flex-1"
+                  />
+                  <CopyButton
+                    :text="relayForm.serverIp.trim()"
+                    label="复制服务器 IP"
+                    success-message="服务器 IP 已复制"
+                    size="lg"
+                  />
+                </div>
                 <p
                   v-if="relayForm.serverIp.length > 0 && !relayServerIpValid"
                   class="mt-1.5 text-caption text-danger"

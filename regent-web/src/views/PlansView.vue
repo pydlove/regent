@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  ArrowUpRight,
   CalendarClock,
   ChevronLeft,
   ListChecks,
@@ -10,12 +11,14 @@ import {
   X,
 } from '@lucide/vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/http'
-import { getPlan, listPlans, runPlan } from '@/api/plans'
+import { getPlan, getPlanRun, listPlans, runPlan } from '@/api/plans'
 import PlanFormDialog from '@/components/business/PlanFormDialog.vue'
 import TaskStatusBadge from '@/components/business/TaskStatusBadge.vue'
 import Button from '@/components/ui/button/Button.vue'
+import CopyButton from '@/components/ui/copy-button/CopyButton.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
@@ -26,7 +29,13 @@ import Table from '@/components/ui/table/Table.vue'
 import type { TableColumn } from '@/components/ui/table/table.types'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
 import { useToast } from '@/composables/useToast'
-import type { PlanDetail, PlanRunSummary, PlanSummary } from '@/types/api'
+import type {
+  PlanDetail,
+  PlanRunDetail,
+  PlanRunItem,
+  PlanRunSummary,
+  PlanSummary,
+} from '@/types/api'
 import {
   planRunStatusLabel,
   planStatusLabel,
@@ -36,6 +45,7 @@ import {
   type PlanTaskStatus,
 } from '@/types/plan'
 import { formatDateTime } from '@/utils/format'
+import { orderPlanRunItems, planRunHeadline } from '@/utils/planRunSummary'
 
 const plans = ref<PlanSummary[]>([])
 const detail = ref<PlanDetail | null>(null)
@@ -46,6 +56,11 @@ const formOpen = ref(false)
 const error = ref<string | null>(null)
 const keyword = ref('')
 const toast = useToast()
+const router = useRouter()
+const runDetail = ref<PlanRunDetail | null>(null)
+const runDetailLoading = ref(false)
+const runDetailError = ref<string | null>(null)
+let runDetailSequence = 0
 
 const columns: TableColumn[] = [
   // 编号只是定位符，并进计划名，把宽度留给名称本身
@@ -127,15 +142,73 @@ function taskDot(status: PlanTaskStatus | null): string {
         : 'bg-danger'
 }
 
+const runItems = computed(() => orderPlanRunItems(runDetail.value?.items ?? []))
+const attentionRunItems = computed(() =>
+  runItems.value.filter((item) =>
+    ['FAILED', 'BLOCKED', 'CANCELLED', 'SKIPPED'].includes(item.status),
+  ),
+)
+const runProgress = computed(() => {
+  const run = detail.value?.plan.latestRun
+  if (!run || run.taskCount <= 0) return 0
+  return Math.min(100, Math.round((run.progressCount / run.taskCount) * 100))
+})
+const runProgressClass = computed(() => {
+  const status = detail.value?.plan.latestRun?.status
+  if (status === 'COMPLETED') return 'bg-success'
+  if (status === 'PARTIAL') return 'bg-warning'
+  if (status === 'FAILED') return 'bg-danger'
+  return 'bg-accent'
+})
+
+async function loadRunDetail(run: PlanRunSummary | null) {
+  const sequence = ++runDetailSequence
+  if (!run) {
+    runDetail.value = null
+    runDetailLoading.value = false
+    runDetailError.value = null
+    return
+  }
+
+  const switching = runDetail.value?.run.id !== run.id
+  if (switching) {
+    runDetail.value = null
+    runDetailLoading.value = true
+  }
+  runDetailError.value = null
+  try {
+    const loaded = await getPlanRun(run.id)
+    if (sequence === runDetailSequence) runDetail.value = loaded
+  } catch (value) {
+    if (sequence === runDetailSequence) runDetailError.value = messageOf(value)
+  } finally {
+    if (sequence === runDetailSequence) runDetailLoading.value = false
+  }
+}
+
+function retryRunDetail() {
+  const run = detail.value?.plan.latestRun
+  if (run) void loadRunDetail(run)
+}
+
+function openTask(item: PlanRunItem) {
+  void router.push({ path: '/tasks', query: { taskId: String(item.taskId) } })
+}
+
 async function loadDetail(id = selectedId.value) {
   if (id === null) {
     detail.value = null
+    void loadRunDetail(null)
     return
   }
   try {
-    detail.value = await getPlan(id)
+    const loaded = await getPlan(id)
+    if (selectedId.value !== id) return
+    detail.value = loaded
+    void loadRunDetail(loaded.plan.latestRun)
   } catch (value) {
     detail.value = null
+    void loadRunDetail(null)
     error.value = messageOf(value)
   }
 }
@@ -262,7 +335,12 @@ const latestRun = computed<PlanRunSummary | null>(() => detail.value?.plan.lates
           <template #cell="{ row, column }">
             <span v-if="column.key === 'name'" class="flex min-w-0 items-center gap-2">
               <span class="tnum shrink-0 text-caption text-label-tertiary">#{{ row.id }}</span>
-              <span class="truncate font-emphasis text-label" :title="row.name">{{ row.name }}</span>
+              <span class="min-w-0 flex-1 truncate font-emphasis text-label">{{ row.name }}</span>
+              <CopyButton
+                :text="row.name"
+                label="复制计划名称"
+                success-message="计划名称已复制"
+              />
             </span>
             <StatusDot v-else-if="column.key === 'status'" :dot="planDot(row.status)">
               {{ planStatusLabel(row.status) }}
@@ -328,9 +406,16 @@ const latestRun = computed<PlanRunSummary | null>(() => detail.value?.plan.lates
         </button>
 
         <div class="flex items-start gap-2">
-          <div class="min-w-0 flex-1">
-            <p class="text-caption text-label-tertiary">计划 #{{ selected.id }}</p>
-            <h2 class="mt-1 text-body font-emphasis text-label">{{ selected.name }}</h2>
+          <div class="flex min-w-0 flex-1 items-start gap-1">
+            <div class="min-w-0 flex-1">
+              <p class="text-caption text-label-tertiary">计划 #{{ selected.id }}</p>
+              <h2 class="mt-1 text-body font-emphasis text-label">{{ selected.name }}</h2>
+            </div>
+            <CopyButton
+              :text="selected.name"
+              label="复制计划名称"
+              success-message="计划名称已复制"
+            />
           </div>
           <StatusDot :dot="planDot(selected.status)">
             {{ planStatusLabel(selected.status) }}
@@ -402,44 +487,150 @@ const latestRun = computed<PlanRunSummary | null>(() => detail.value?.plan.lates
           <div class="flex items-center gap-2">
             <Icon :as="CalendarClock" size="inline" class="text-label-secondary" />
             <p class="text-caption font-emphasis text-label-secondary">执行总结</p>
-            <span v-if="latestRun" class="ml-auto text-caption text-label-tertiary">
+            <StatusDot
+              v-if="latestRun"
+              class="ml-auto"
+              :dot="runDot(latestRun.status)"
+            >
               {{ planRunStatusLabel(latestRun.status) }}
-            </span>
+            </StatusDot>
           </div>
 
           <template v-if="latestRun">
-            <div class="mt-2 grid grid-cols-4 gap-1 text-center">
-              <div class="rounded-control bg-success/10 px-1 py-1.5">
-                <p class="tnum text-body text-success">{{ latestRun.succeededCount }}</p>
-                <p class="text-[10px] text-label-tertiary">成功</p>
+            <div class="mt-2 rounded-panel border border-separator-soft bg-content p-3">
+              <p class="text-body font-emphasis leading-snug text-label">
+                {{ planRunHeadline(latestRun) }}
+              </p>
+              <p class="mt-1 text-caption text-label-tertiary">
+                {{ latestRun.progressCount }}/{{ latestRun.taskCount }} 个任务已收场 ·
+                {{ latestRun.trigger === 'MANUAL' ? '手动执行' : '定时执行' }}
+              </p>
+
+              <div class="mt-3 h-1 overflow-hidden rounded-full bg-neutral/10">
+                <div
+                  class="h-full rounded-full transition-[width,background-color] duration-300"
+                  :class="runProgressClass"
+                  :style="{ width: `${runProgress}%` }"
+                />
               </div>
-              <div class="rounded-control bg-danger/10 px-1 py-1.5">
-                <p class="tnum text-body text-danger">{{ latestRun.failedCount }}</p>
-                <p class="text-[10px] text-label-tertiary">失败</p>
+
+              <div class="mt-3 grid grid-cols-4 gap-1.5 text-center">
+                <div class="rounded-control border border-success/15 bg-success/10 px-1 py-1.5">
+                  <p class="tnum text-body font-emphasis text-success">
+                    {{ latestRun.succeededCount }}
+                  </p>
+                  <p class="text-[10px] leading-tight text-label-tertiary">成功</p>
+                </div>
+                <div class="rounded-control border border-danger/15 bg-danger/10 px-1 py-1.5">
+                  <p class="tnum text-body font-emphasis text-danger">
+                    {{ latestRun.failedCount }}
+                  </p>
+                  <p class="text-[10px] leading-tight text-label-tertiary">失败</p>
+                </div>
+                <div class="rounded-control border border-accent/15 bg-accent/10 px-1 py-1.5">
+                  <p class="tnum text-body font-emphasis text-accent">
+                    {{ latestRun.runningCount }}
+                  </p>
+                  <p class="text-[10px] leading-tight text-label-tertiary">进行中</p>
+                </div>
+                <div class="rounded-control border border-separator-soft bg-window px-1 py-1.5">
+                  <p class="tnum text-body font-emphasis text-label-secondary">
+                    {{ latestRun.cancelledCount + latestRun.skippedCount }}
+                  </p>
+                  <p class="text-[10px] leading-tight text-label-tertiary">终止/跳过</p>
+                </div>
               </div>
-              <div class="rounded-control bg-accent/10 px-1 py-1.5">
-                <p class="tnum text-body text-accent">{{ latestRun.runningCount }}</p>
-                <p class="text-[10px] text-label-tertiary">运行</p>
-              </div>
-              <div class="rounded-control bg-neutral/10 px-1 py-1.5">
-                <p class="tnum text-body text-label-secondary">
-                  {{ latestRun.skippedCount + latestRun.cancelledCount }}
-                </p>
-                <p class="text-[10px] text-label-tertiary">跳过</p>
-              </div>
+
+              <p
+                v-if="latestRun.blockedCount > 0"
+                class="mt-2 flex items-center gap-1.5 text-caption text-warning"
+              >
+                <span class="size-1.5 shrink-0 rounded-full bg-warning" />
+                {{ latestRun.blockedCount }} 个任务等待决策
+              </p>
+            </div>
+
+            <div class="mt-3 flex items-center gap-2">
+              <p class="text-caption font-emphasis text-label-secondary">需要关注</p>
+              <span
+                v-if="attentionRunItems.length > 0"
+                class="tnum ml-auto text-caption text-label-tertiary"
+              >
+                {{ attentionRunItems.length }}
+              </span>
+            </div>
+
+            <p v-if="runDetailLoading" class="mt-2 text-caption text-label-tertiary">
+              正在读取任务结果…
+            </p>
+            <div
+              v-else-if="runDetailError"
+              class="mt-2 rounded-panel border border-danger/15 bg-danger/5 px-2.5 py-2"
+            >
+              <p class="text-caption font-emphasis text-danger">任务结果读取失败</p>
+              <p class="mt-0.5 line-clamp-2 text-caption text-label-tertiary">
+                {{ runDetailError }}
+              </p>
+              <button
+                type="button"
+                class="mt-1 text-caption font-emphasis text-accent hover:underline"
+                @click="retryRunDetail"
+              >
+                重新读取
+              </button>
             </div>
             <p
-              v-if="latestRun.summary"
-              class="mt-3 whitespace-pre-wrap rounded-panel border border-separator-soft bg-content px-3 py-2 text-caption leading-relaxed text-label-secondary"
+              v-else-if="attentionRunItems.length === 0"
+              class="mt-2 flex items-center gap-1.5 text-caption text-success"
             >
-              {{ latestRun.summary }}
+              <span class="size-1.5 shrink-0 rounded-full bg-success" />
+              没有失败、终止或等待决策的任务。
             </p>
-            <p v-else class="mt-3 text-caption text-label-tertiary">
-              任务全部收场后生成执行总结。
-              <template v-if="latestRun.blockedCount > 0">
-                当前有 {{ latestRun.blockedCount }} 个任务在等待决策。
-              </template>
-            </p>
+            <ol v-else class="scroll-area mt-2 max-h-80 space-y-1.5 overflow-y-auto pr-0.5">
+              <li v-for="item in attentionRunItems" :key="item.taskId">
+                <button
+                  type="button"
+                  class="group w-full rounded-panel border border-separator-soft bg-content px-2.5 py-2 text-left transition-colors duration-100 ease-apple hover:border-accent/30 hover:bg-hover"
+                  :title="`查看任务 #${item.taskId}`"
+                  @click="openTask(item)"
+                >
+                  <span class="flex items-center gap-2">
+                    <span class="tnum text-caption text-label-tertiary">#{{ item.taskId }}</span>
+                    <StatusDot :dot="taskDot(item.status)" class="ml-auto">
+                      {{ planTaskStatusLabel(item.status) }}
+                    </StatusDot>
+                    <Icon
+                      :as="ArrowUpRight"
+                      size="inline"
+                      class="shrink-0 text-label-tertiary opacity-50 transition-opacity group-hover:text-accent group-hover:opacity-100"
+                    />
+                  </span>
+                  <span class="mt-1 line-clamp-2 text-caption font-emphasis leading-snug text-label">
+                    {{ item.title }}
+                  </span>
+                  <span
+                    v-if="item.detail"
+                    class="mt-1 line-clamp-2 text-caption leading-relaxed text-label-tertiary"
+                  >
+                    {{ item.detail }}
+                  </span>
+                </button>
+              </li>
+            </ol>
+
+            <details
+              v-if="latestRun.summary && (runDetailError || runItems.length === 0)"
+              class="mt-3"
+            >
+              <summary class="cursor-pointer text-caption text-label-tertiary hover:text-label">
+                查看原始执行总结
+              </summary>
+              <p
+                class="mt-2 whitespace-pre-wrap rounded-control border border-separator-soft bg-content px-2.5 py-2 text-caption leading-relaxed text-label-tertiary"
+              >
+                {{ latestRun.summary }}
+              </p>
+            </details>
           </template>
           <p v-else class="mt-3 text-caption text-label-tertiary">
             计划尚未执行，到点后由平台自动启动。
