@@ -72,7 +72,8 @@ public class HttpRelayHealthProbe implements RelayHealthProbe {
     }
 
     private static URI healthUri(String serverUrl) {
-        return URI.create(serverUrl).resolve("/health");
+        String base = serverUrl.endsWith("/") ? serverUrl : serverUrl + "/";
+        return URI.create(base).resolve("health");
     }
 
     private static long elapsedMillis(long startedAt) {

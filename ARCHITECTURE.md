@@ -49,7 +49,7 @@ DDD 的第一步是回答「哪里值得投入最多精力」。这个平台的�
 | `DeploymentRun` | `deployment` | 一次远程部署事实：配置快照、退出码、终态与日志文件标识 |
 | `Requirement` | `requirement` | 需求，持有 `List<TaskId>` **弱引用** |
 | `Initiative` | `delivery` | 版本立项单：业务目标、范围、成功指标、会议纪要与审批结论；通过 `versionId` 弱引用产品版本 |
-| `ProductVersion` | `delivery` | 项目级产品版本：版本号、规划范围与 `PLANNING / CONFIRMED / CLOSED` 状态 |
+| `ProductVersion` | `delivery` | 项目级产品版本：版本号、规划范围与 `PLANNING / CLOSED` 状态 |
 | `RequirementDelivery` | `delivery` | 需求研发交付单：阶段、设计内容与门禁历史 |
 | `BuildArtifact` | `delivery` | 不可变构建制品：版本、Git 提交、摘要与构建事实 |
 | `Release` | `delivery` | 一次发布轮次：绑定制品、需求交付、阶段与回滚方案 |

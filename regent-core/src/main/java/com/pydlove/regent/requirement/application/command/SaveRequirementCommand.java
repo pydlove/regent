@@ -1,6 +1,7 @@
 package com.pydlove.regent.requirement.application.command;
 
 import com.pydlove.regent.delivery.domain.model.InitiativeId;
+import com.pydlove.regent.delivery.domain.model.ProductVersionId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.requirement.domain.model.RequirementSource;
 
@@ -12,7 +13,19 @@ public record SaveRequirementCommand(
         String title,
         String rawText,
         String acceptanceText,
-        String clarificationText) {
+        String clarificationText,
+        ProductVersionId versionId) {
+
+    public SaveRequirementCommand(ProjectId projectId,
+                                  InitiativeId initiativeId,
+                                  RequirementSource source,
+                                  String title,
+                                  String rawText,
+                                  String acceptanceText,
+                                  String clarificationText) {
+        this(projectId, initiativeId, source, title, rawText,
+                acceptanceText, clarificationText, null);
+    }
 
     public SaveRequirementCommand(ProjectId projectId,
                                   String title,
@@ -20,7 +33,7 @@ public record SaveRequirementCommand(
                                   String acceptanceText,
                                   String clarificationText) {
         this(projectId, null, RequirementSource.MANUAL,
-                title, rawText, acceptanceText, clarificationText);
+                title, rawText, acceptanceText, clarificationText, null);
     }
 
     public SaveRequirementCommand(ProjectId projectId,
@@ -30,6 +43,6 @@ public record SaveRequirementCommand(
                                   String acceptanceText,
                                   String clarificationText) {
         this(projectId, initiativeId, RequirementSource.MANUAL,
-                title, rawText, acceptanceText, clarificationText);
+                title, rawText, acceptanceText, clarificationText, null);
     }
 }

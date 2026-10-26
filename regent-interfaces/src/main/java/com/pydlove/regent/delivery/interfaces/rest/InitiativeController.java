@@ -82,8 +82,7 @@ public class InitiativeController {
         var initiative = commandService.approve(
                 InitiativeId.of(id),
                 currentUser(request),
-                body == null ? null : body.comment(),
-                body == null ? null : body.meetingMinutes());
+                body == null ? null : body.comment());
         return InitiativeResponse.from(queryService.get(initiative.getId(), currentUser(request)));
     }
 
@@ -94,8 +93,7 @@ public class InitiativeController {
         var initiative = commandService.reject(
                 InitiativeId.of(id),
                 currentUser(request),
-                body == null ? null : body.comment(),
-                body == null ? null : body.meetingMinutes());
+                body == null ? null : body.comment());
         return InitiativeResponse.from(queryService.get(initiative.getId(), currentUser(request)));
     }
 

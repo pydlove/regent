@@ -2,7 +2,6 @@ package com.pydlove.regent.delivery.application.command;
 
 import com.pydlove.regent.delivery.domain.model.ProductVersion;
 import com.pydlove.regent.delivery.domain.model.ProductVersionId;
-import com.pydlove.regent.delivery.domain.model.InitiativeStatus;
 import com.pydlove.regent.delivery.domain.repository.InitiativeRepository;
 import com.pydlove.regent.delivery.domain.repository.ProductVersionRepository;
 import com.pydlove.regent.identity.domain.model.UserId;
@@ -10,8 +9,12 @@ import com.pydlove.regent.project.application.query.ProjectMemberAccessService;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.model.ProjectMemberRole;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
+import com.pydlove.regent.project.domain.repository.WorkflowTemplateRepository;
+import com.pydlove.regent.requirement.domain.repository.RequirementRepository;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
+
+import java.time.Instant;
 
 /** 产品版本规划命令。 */
 public class ProductVersionCommandService {
@@ -20,21 +23,30 @@ public class ProductVersionCommandService {
     private final ProjectProfileRepository projectProfileRepository;
     private final ProjectMemberAccessService memberAccessService;
     private final InitiativeRepository initiativeRepository;
+    private final RequirementRepository requirementRepository;
+    private final WorkflowTemplateRepository workflowTemplateRepository;
 
     public ProductVersionCommandService(ProductVersionRepository versionRepository,
                                         ProjectProfileRepository projectProfileRepository,
-                                        ProjectMemberAccessService memberAccessService) {
-        this(versionRepository, projectProfileRepository, memberAccessService, null);
+                                        ProjectMemberAccessService memberAccessService,
+                                        InitiativeRepository initiativeRepository,
+                                        RequirementRepository requirementRepository) {
+        this(versionRepository, projectProfileRepository, memberAccessService,
+                initiativeRepository, requirementRepository, null);
     }
 
     public ProductVersionCommandService(ProductVersionRepository versionRepository,
                                         ProjectProfileRepository projectProfileRepository,
                                         ProjectMemberAccessService memberAccessService,
-                                        InitiativeRepository initiativeRepository) {
+                                        InitiativeRepository initiativeRepository,
+                                        RequirementRepository requirementRepository,
+                                        WorkflowTemplateRepository workflowTemplateRepository) {
         this.versionRepository = versionRepository;
         this.projectProfileRepository = projectProfileRepository;
         this.memberAccessService = memberAccessService;
         this.initiativeRepository = initiativeRepository;
+        this.requirementRepository = requirementRepository;
+        this.workflowTemplateRepository = workflowTemplateRepository;
     }
 
     public ProductVersion create(ProjectId projectId,
@@ -55,6 +67,7 @@ public class ProductVersionCommandService {
                 description,
                 actorId);
         versionRepository.save(version);
+        snapshotWorkflowTemplate(version);
         return version;
     }
 
@@ -72,21 +85,6 @@ public class ProductVersionCommandService {
         return version;
     }
 
-    public ProductVersion confirm(ProductVersionId id, UserId actorId) {
-        ProductVersion version = load(id, actorId);
-        memberAccessService.requireRoleOrOwner(
-                version.getProjectId(), actorId, ProjectMemberRole.PRODUCT);
-        if (initiativeRepository != null
-                && initiativeRepository.findByVersion(version.getId())
-                        .filter(initiative -> initiative.getStatus() == InitiativeStatus.APPROVED)
-                        .isEmpty()) {
-            throw new DomainException("请先完成版本立项审批，再确认产品版本");
-        }
-        version.confirm();
-        versionRepository.update(version);
-        return version;
-    }
-
     public ProductVersion close(ProductVersionId id, UserId actorId) {
         ProductVersion version = load(id, actorId);
         memberAccessService.requireRoleOrOwner(
@@ -94,6 +92,17 @@ public class ProductVersionCommandService {
         version.close();
         versionRepository.update(version);
         return version;
+    }
+
+    public void delete(ProductVersionId id, UserId actorId) {
+        ProductVersion version = load(id, actorId);
+        memberAccessService.requireRole(
+                version.getProjectId(), actorId, ProjectMemberRole.OWNER);
+        if (initiativeRepository.findByVersion(id).isPresent()
+                || requirementRepository.existsByVersion(id)) {
+            throw new DomainException("产品版本已有立项或需求记录，不能删除；请改为关闭版本");
+        }
+        versionRepository.delete(id);
     }
 
     private ProductVersion load(ProductVersionId id, UserId actorId) {
@@ -108,5 +117,16 @@ public class ProductVersionCommandService {
         projectProfileRepository.findById(projectId, actorId)
                 .orElseThrow(() -> new EntityNotFoundException(
                         "项目不存在：" + projectId.value()));
+    }
+
+    private void snapshotWorkflowTemplate(ProductVersion version) {
+        if (workflowTemplateRepository == null || version.getId() == null) return;
+        var templateId = workflowTemplateRepository.findProjectTemplate(version.getProjectId())
+                .orElseGet(() -> workflowTemplateRepository.findDefault()
+                        .map(template -> template.id())
+                        .orElse(null));
+        if (templateId != null) {
+            workflowTemplateRepository.bindVersion(version.getId(), templateId, Instant.now());
+        }
     }
 }

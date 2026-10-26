@@ -28,7 +28,14 @@ import {
 import { ApiError } from '@/api/http'
 import { listProjectMembers } from '@/api/projectMembers'
 import { listProductVersions } from '@/api/productVersions'
+import { listWorkflowTemplates, type WorkflowTemplate } from '@/api/workflowTemplates'
 import { listRequirements } from '@/api/requirements'
+import {
+  decideRequirementReview,
+  listRequirementReviewRecords,
+  submitRequirementReview,
+  type RequirementReviewRecord,
+} from '@/api/requirementReviews'
 import {
   listInitiativeAttachments,
   uploadInitiativeAttachment,
@@ -69,6 +76,11 @@ import {
   releaseNextStep,
 } from '@/utils/deliveryWorkflow'
 import { projectMemberRoleLabels } from '@/utils/projectMemberRoles'
+import {
+  formatRequirementNo,
+  requirementDisplayStatus,
+  type RequirementDisplayStatus,
+} from '@/utils/requirementPool'
 
 type Mode = 'flows' | 'initiatives' | 'releases'
 
@@ -84,10 +96,12 @@ const toast = useToast()
 
 const mode = ref<Mode>('flows')
 const versions = ref<ProductVersion[]>([])
+const workflowTemplates = ref<WorkflowTemplate[]>([])
 const initiatives = ref<Initiative[]>([])
 const deliveries = ref<RequirementDelivery[]>([])
 const releases = ref<Release[]>([])
 const requirements = ref<Requirement[]>([])
+const reviewRecords = ref<RequirementReviewRecord[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 
@@ -96,6 +110,34 @@ const selectedVersionId = ref<number | null>(props.versionId)
 const selectedInitiativeId = ref<number | null>(null)
 const selectedReleaseId = ref<number | null>(null)
 const projectMembers = ref<Record<number, ProjectMember[]>>({})
+const requirementsSection = ref<HTMLElement | null>(null)
+const reviewRecordOpen = ref(false)
+const reviewRecordSaving = ref(false)
+const reviewRecordError = ref<string | null>(null)
+const reviewDate = ref('')
+const requirementReviewMinutes = ref('')
+const reviewFiles = ref<File[]>([])
+const requirementReviewFileInput = ref<HTMLInputElement | null>(null)
+const reviewDecisionOpen = ref(false)
+const reviewDecisionRecord = ref<RequirementReviewRecord | null>(null)
+const reviewDecisionComment = ref('')
+const reviewDecisionSaving = ref(false)
+const reviewDecisionError = ref<string | null>(null)
+const canSubmitReviewRecord = computed(() =>
+  Boolean(reviewDate.value)
+  && (
+    requirementReviewMinutes.value.trim().length > 0
+    || reviewFiles.value.length > 0
+  )
+  && !reviewRecordSaving.value,
+)
+
+function localDateInputValue() {
+  const now = new Date()
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 10)
+}
 
 const deliverySteps = [
   { value: 'REQUIREMENT_REVIEW', label: '需求评审' },
@@ -151,24 +193,45 @@ const initiativeStatusLabels: Record<InitiativeStatus, string> = {
   CANCELLED: '已取消',
 }
 
-const requirementPoolLabels: Record<Requirement['poolStatus'], string> = {
-  POOL: '需求池',
+const requirementPoolLabels: Record<RequirementDisplayStatus, string> = {
+  PENDING_VERSION: '待纳入版本',
+  PENDING_REVIEW: '待需求评审',
   IN_REVIEW: '评审中',
   FORMAL: '正式需求',
   REJECTED: '已驳回',
 }
 
 const requirementPoolTone = (
-  status: Requirement['poolStatus'],
-): 'neutral' | 'accent' | 'success' | 'danger' => {
+  status: RequirementDisplayStatus,
+): 'neutral' | 'accent' | 'success' | 'warning' | 'danger' => {
   if (status === 'FORMAL') return 'success'
   if (status === 'IN_REVIEW') return 'accent'
   if (status === 'REJECTED') return 'danger'
-  return 'neutral'
+  if (status === 'PENDING_VERSION') return 'warning'
+  return 'accent'
+}
+
+const requirementReviewStatusMeta: Record<
+  RequirementReviewRecord['status'],
+  { label: string; tone: 'accent' | 'success' | 'danger' }
+> = {
+  SUBMITTED: { label: '待审核', tone: 'accent' },
+  APPROVED: { label: '已通过', tone: 'success' },
+  REJECTED: { label: '已驳回', tone: 'danger' },
+}
+
+const requirementNoLabel = (id: number) => {
+  const requirement = requirements.value.find((item) => item.id === id)
+  return requirement ? formatRequirementNo(requirement.requirementNo) : String(id)
 }
 
 const selectedVersion = computed(
   () => versions.value.find((version) => version.id === selectedVersionId.value) ?? null,
+)
+const selectedWorkflowTemplate = computed(() =>
+  workflowTemplates.value.find(
+    (template) => template.id === selectedVersion.value?.workflowTemplateId,
+  ) ?? null,
 )
 const hasSelectedProject = computed(() => store.projectId !== null)
 const versionInitiatives = computed(() =>
@@ -185,6 +248,27 @@ const versionRequirements = computed(() =>
         (requirement) => requirement.versionId === selectedVersion.value?.id,
       )
     : [],
+)
+const latestReviewRecord = computed(() => reviewRecords.value[0] ?? null)
+const pendingReviewRequirements = computed(() =>
+  versionRequirements.value.filter((requirement) => {
+    const status = requirementDisplayStatus(requirement)
+    return status === 'PENDING_REVIEW'
+      || status === 'REJECTED'
+  }),
+)
+const reviewSubmissionPending = computed(() =>
+  latestReviewRecord.value?.status === 'SUBMITTED',
+)
+const canSubmitRequirementReview = computed(() =>
+  selectedVersion.value
+    ? canRole(selectedVersion.value.projectId, 'PRODUCT')
+    : false,
+)
+const canDecideRequirementReview = computed(() =>
+  selectedVersion.value
+    ? canRole(selectedVersion.value.projectId, 'OWNER')
+    : false,
 )
 const versionRequirementIds = computed(
   () => new Set(versionRequirements.value.map((requirement) => requirement.id)),
@@ -320,7 +404,6 @@ const canCreateRelease = computed(() => {
     canRole(Number(projectId), 'RELEASE_MANAGER'),
   )
 })
-
 type PendingWorkflowItem = {
   key: string
   mode: Mode
@@ -459,15 +542,35 @@ const versionSetup = computed(() => {
       action: 'pool',
       label: '录入并纳入需求',
       title: '版本已批准，还没有需求',
-      description: '先在需求池录入需求，再把它纳入当前版本并提交需求评审。',
+      description: '先在需求池录入需求，再把它纳入当前版本并组织线下需求评审。',
     } as const
   }
   if (versionDeliveries.value.length === 0) {
+    if (reviewSubmissionPending.value) {
+      return {
+        action: 'requirements',
+        label: canDecideRequirementReview.value
+          ? '审核需求评审'
+          : '等待需求评审审核',
+        title: '需求评审材料待项目负责人审核',
+        description: '产品负责人已提交线下评审材料，请项目负责人查看纪要和附件后给出审核意见。',
+      } as const
+    }
+    if (pendingReviewRequirements.value.length > 0) {
+      return {
+        action: 'requirements',
+        label: canSubmitRequirementReview.value
+          ? '提交需求评审'
+          : '等待提交需求评审',
+        title: `当前版本有 ${pendingReviewRequirements.value.length} 条需求待提交评审`,
+        description: '产品负责人整理线下评审纪要和附件后提交，项目负责人再审核并通过或驳回。',
+      } as const
+    }
     return {
-      action: 'pool',
-      label: '继续需求评审',
+      action: 'requirements',
+      label: '查看需求评审',
       title: `当前版本已有 ${versionRequirements.value.length} 条需求`,
-      description: '完成需求评审后，系统会自动创建详细设计交付。',
+      description: '需求评审通过后，系统会批量创建详细设计交付。',
     } as const
   }
   return {
@@ -538,18 +641,21 @@ async function load(quiet = false) {
       nextReleases,
       nextRequirements,
       nextVersions,
+      nextWorkflowTemplates,
     ] = await Promise.all([
       listInitiatives(store.projectId),
       listRequirementDeliveries(store.projectId),
       listReleases(store.projectId),
       listRequirements(store.projectId),
       store.projectId ? listProductVersions(store.projectId) : Promise.resolve([]),
+      listWorkflowTemplates(),
     ])
     initiatives.value = nextInitiatives
     deliveries.value = nextDeliveries
     releases.value = nextReleases
     requirements.value = nextRequirements
     versions.value = nextVersions
+    workflowTemplates.value = nextWorkflowTemplates
     await loadProjectMembers()
     if (nextVersions.some((version) => version.id === props.versionId)) {
       selectedVersionId.value = props.versionId
@@ -567,6 +673,7 @@ async function load(quiet = false) {
     if (selectedReleaseId.value && !nextReleases.some((item) => item.id === selectedReleaseId.value)) {
       selectedReleaseId.value = null
     }
+    await loadReviewRecords()
   } catch (value) {
     error.value = messageOf(value)
     if (!quiet) {
@@ -574,9 +681,23 @@ async function load(quiet = false) {
       deliveries.value = []
       releases.value = []
       versions.value = []
+      workflowTemplates.value = []
+      reviewRecords.value = []
     }
   } finally {
     if (!quiet) loading.value = false
+  }
+}
+
+async function loadReviewRecords() {
+  if (!selectedVersionId.value) {
+    reviewRecords.value = []
+    return
+  }
+  try {
+    reviewRecords.value = await listRequirementReviewRecords(selectedVersionId.value)
+  } catch {
+    reviewRecords.value = []
   }
 }
 
@@ -617,6 +738,16 @@ function startWorkflow() {
   }
   if (!selectedVersion.value) {
     openVersionPlanning()
+    return
+  }
+  if (versionSetup.value.action === 'requirements') {
+    mode.value = 'flows'
+    selectedDeliveryId.value = null
+    selectedInitiativeId.value = null
+    selectedReleaseId.value = null
+    requestAnimationFrame(() => {
+      requirementsSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
     return
   }
   if (!versionInitiative.value) {
@@ -846,19 +977,13 @@ const initiativeAttachmentsLoading = ref(false)
 const reviewOpen = ref(false)
 const reviewMode = ref<'approve' | 'reject'>('approve')
 const reviewInitiative = ref<Initiative | null>(null)
-const reviewMinutes = ref('')
 const reviewComment = ref('')
 const reviewSaving = ref(false)
-const reviewUploading = ref(false)
 const reviewError = ref<string | null>(null)
-const reviewFileInput = ref<HTMLInputElement | null>(null)
 
 const canSubmitInitiativeReview = computed(() => {
-  if (reviewSaving.value || reviewUploading.value) return false
-  if (reviewMode.value === 'approve') {
-    return reviewMinutes.value.trim().length > 0 || initiativeAttachments.value.length > 0
-  }
-  return reviewComment.value.trim().length > 0
+  if (reviewSaving.value) return false
+  return reviewMode.value === 'approve' || reviewComment.value.trim().length > 0
 })
 
 async function loadInitiativeAttachmentList(initiativeId: number | null) {
@@ -882,30 +1007,11 @@ async function openInitiativeReview(
 ) {
   reviewInitiative.value = initiative
   reviewMode.value = mode
-  reviewMinutes.value = initiative.meetingMinutes ?? ''
   reviewComment.value = ''
   reviewError.value = null
   reviewOpen.value = true
+  initiativeAttachments.value = []
   await loadInitiativeAttachmentList(initiative.id)
-}
-
-async function onReviewFiles(event: Event) {
-  const input = event.target as HTMLInputElement
-  const files = Array.from(input.files ?? [])
-  input.value = ''
-  if (!reviewInitiative.value || files.length === 0) return
-  reviewUploading.value = true
-  reviewError.value = null
-  try {
-    for (const file of files) {
-      const uploaded = await uploadInitiativeAttachment(reviewInitiative.value.id, file)
-      initiativeAttachments.value = [...initiativeAttachments.value, uploaded]
-    }
-  } catch (value) {
-    reviewError.value = messageOf(value)
-  } finally {
-    reviewUploading.value = false
-  }
 }
 
 async function submitInitiativeReview() {
@@ -917,12 +1023,10 @@ async function submitInitiativeReview() {
     if (reviewMode.value === 'approve') {
       await approveInitiative(initiative.id, {
         comment: reviewComment.value.trim(),
-        meetingMinutes: reviewMinutes.value.trim(),
       })
     } else {
       await rejectInitiative(initiative.id, {
         comment: reviewComment.value.trim(),
-        meetingMinutes: reviewMinutes.value.trim(),
       })
     }
     reviewOpen.value = false
@@ -1083,11 +1187,111 @@ const deliveryForRequirement = (requirementId: number) =>
 
 function openDeliveryForRequirement(requirement: Requirement) {
   const delivery = deliveryForRequirement(requirement.id)
-  if (delivery) {
-    selectDelivery(delivery)
+  if (delivery) selectDelivery(delivery)
+}
+
+function openReviewRecord() {
+  if (!selectedVersion.value
+      || pendingReviewRequirements.value.length === 0
+      || reviewSubmissionPending.value
+      || !canSubmitRequirementReview.value) {
     return
   }
-  openRequirementPool()
+  reviewDate.value = localDateInputValue()
+  requirementReviewMinutes.value = ''
+  reviewFiles.value = []
+  reviewRecordError.value = null
+  reviewRecordOpen.value = true
+}
+
+function onRequirementReviewFiles(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  input.value = ''
+  if (files.length === 0) return
+  reviewFiles.value = [...reviewFiles.value, ...files]
+}
+
+function removeRequirementReviewFile(index: number) {
+  reviewFiles.value = reviewFiles.value.filter((_, current) => current !== index)
+}
+
+async function saveReviewRecord() {
+  if (!selectedVersion.value || reviewRecordSaving.value) return
+  if (!reviewDate.value) {
+    reviewRecordError.value = '请填写评审日期'
+    return
+  }
+  if (!requirementReviewMinutes.value.trim() && reviewFiles.value.length === 0) {
+    reviewRecordError.value = '请填写会议纪要或至少上传一份纪要文件'
+    return
+  }
+  reviewRecordSaving.value = true
+  reviewRecordError.value = null
+  try {
+    const record = await submitRequirementReview(selectedVersion.value.id, {
+      reviewDate: reviewDate.value,
+      minutes: requirementReviewMinutes.value.trim(),
+      files: reviewFiles.value,
+    })
+    await load(true)
+    emit('changed')
+    reviewRecordOpen.value = false
+    toast.success(
+      `第 ${record.reviewNo} 次需求评审已提交`,
+      `共 ${record.requirements.length} 条需求，等待项目负责人审核`,
+    )
+  } catch (value) {
+    reviewRecordError.value = messageOf(value)
+  } finally {
+    reviewRecordSaving.value = false
+  }
+}
+
+function openReviewDecision(record: RequirementReviewRecord) {
+  if (record.status !== 'SUBMITTED' || !canDecideRequirementReview.value) return
+  reviewDecisionRecord.value = record
+  reviewDecisionComment.value = ''
+  reviewDecisionError.value = null
+  reviewDecisionOpen.value = true
+}
+
+async function decideReview(decision: 'APPROVE' | 'REJECT') {
+  const record = reviewDecisionRecord.value
+  if (!record || reviewDecisionSaving.value) return
+  if (decision === 'REJECT' && !reviewDecisionComment.value.trim()) {
+    reviewDecisionError.value = '驳回时必须填写审核意见'
+    return
+  }
+  reviewDecisionSaving.value = true
+  reviewDecisionError.value = null
+  try {
+    await decideRequirementReview(
+      record.id,
+      decision,
+      reviewDecisionComment.value.trim(),
+    )
+    reviewDecisionOpen.value = false
+    await load(true)
+    emit('changed')
+    if (decision === 'APPROVE') {
+      const firstRequirementId = record.requirements[0]?.requirementId
+      const delivery = firstRequirementId
+        ? deliveryForRequirement(firstRequirementId)
+        : null
+      if (delivery) selectDelivery(delivery)
+    }
+    toast.success(
+      decision === 'APPROVE' ? '需求评审已通过' : '需求评审已驳回',
+      decision === 'APPROVE'
+        ? '当前版本需求已正式化并创建详细设计交付'
+        : '需求已退回，产品负责人可补充材料后重新提交',
+    )
+  } catch (value) {
+    reviewDecisionError.value = messageOf(value)
+  } finally {
+    reviewDecisionSaving.value = false
+  }
 }
 
 function selectRelease(release: Release) {
@@ -1115,6 +1319,7 @@ watch(selectedVersionId, () => {
   selectedInitiativeId.value = null
   selectedReleaseId.value = null
   mode.value = 'flows'
+  void loadReviewRecords()
 })
 </script>
 
@@ -1134,6 +1339,12 @@ watch(selectedVersionId, () => {
             </p>
           </div>
           <div class="flex items-center gap-2">
+            <span
+              v-if="selectedWorkflowTemplate"
+              class="rounded-badge bg-window px-2 py-1 text-[10px] text-label-secondary"
+            >
+              {{ selectedWorkflowTemplate.displayName }}
+            </span>
             <span class="text-caption text-label-tertiary">
               我的角色：{{ currentProjectRoleLabels.length > 0 ? currentProjectRoleLabels.join(' / ') : '未分配' }}
             </span>
@@ -1265,35 +1476,129 @@ watch(selectedVersionId, () => {
         v-if="versionInitiative?.status === 'APPROVED'"
         class="scroll-area min-h-0 flex-1 overflow-auto"
       >
-        <div class="-mx-4 -mt-1 divide-y divide-separator-soft">
-          <section class="px-4 py-3">
+        <div class="divide-y divide-separator-soft">
+          <section ref="requirementsSection" class="px-4 py-4">
             <div class="flex items-center gap-2">
               <p class="text-caption font-emphasis text-label">需求与交付</p>
               <span class="tnum text-caption text-label-tertiary">{{ versionRequirements.length }}</span>
-              <Button class="ml-auto" size="sm" @click="openRequirementPool">
-                去需求池
-              </Button>
+              <div class="ml-auto flex items-center gap-2">
+                <Button
+                  v-if="reviewSubmissionPending
+                    && latestReviewRecord
+                    && canDecideRequirementReview"
+                  variant="primary"
+                  size="sm"
+                  @click="openReviewDecision(latestReviewRecord)"
+                >
+                  审核需求评审
+                </Button>
+                <Button
+                  v-else-if="pendingReviewRequirements.length > 0
+                    && !reviewSubmissionPending
+                    && canSubmitRequirementReview"
+                  variant="primary"
+                  size="sm"
+                  @click="openReviewRecord"
+                >
+                  提交需求评审
+                </Button>
+                <Button size="sm" @click="openRequirementPool">
+                  去需求池
+                </Button>
+              </div>
             </div>
-            <p v-if="versionRequirements.length === 0" class="mt-2 text-caption text-label-tertiary">
+            <div
+              v-if="latestReviewRecord"
+              class="mt-3 rounded-control border border-separator-soft bg-window px-3 py-2.5 text-caption"
+            >
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-emphasis text-label">
+                  第 {{ latestReviewRecord.reviewNo }} 次需求评审
+                </span>
+                <Badge :tone="requirementReviewStatusMeta[latestReviewRecord.status].tone">
+                  {{ requirementReviewStatusMeta[latestReviewRecord.status].label }}
+                </Badge>
+                <span class="text-label-tertiary">{{ latestReviewRecord.reviewDate }}</span>
+                <span class="text-label-tertiary">
+                  提交人 {{ memberNameForProject(selectedVersion?.projectId, latestReviewRecord.submittedBy) }}
+                </span>
+                <span class="text-label-tertiary">
+                  {{ latestReviewRecord.requirements.length }} 条需求
+                </span>
+              </div>
+              <p class="mt-1 text-label-secondary">
+                结论：{{ latestReviewRecord.conclusion }}
+              </p>
+              <p
+                v-if="latestReviewRecord.reviewComment"
+                class="mt-1 text-label-secondary"
+              >
+                审核意见：{{ latestReviewRecord.reviewComment }}
+                <span
+                  v-if="latestReviewRecord.decidedBy"
+                  class="text-label-tertiary"
+                >
+                  · {{ memberNameForProject(selectedVersion?.projectId, latestReviewRecord.decidedBy) }}
+                </span>
+              </p>
+              <p
+                v-if="latestReviewRecord.minutes"
+                class="mt-1 line-clamp-2 whitespace-pre-wrap text-label-tertiary"
+              >
+                {{ latestReviewRecord.minutes }}
+              </p>
+              <div
+                v-if="latestReviewRecord.attachments.length > 0"
+                class="mt-1.5 flex flex-wrap gap-2"
+              >
+                <a
+                  v-for="attachment in latestReviewRecord.attachments"
+                  :key="attachment.id"
+                  :href="attachment.contentUrl"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="inline-flex items-center gap-1 text-accent hover:underline"
+                >
+                  <Icon :as="Paperclip" size="inline" />{{ attachment.filename }}
+                </a>
+              </div>
+              <p
+                v-if="reviewRecords.length > 1"
+                class="mt-1 text-label-tertiary"
+              >
+                共 {{ reviewRecords.length }} 次需求评审记录
+              </p>
+            </div>
+            <p
+              v-else-if="pendingReviewRequirements.length > 0"
+              class="mt-3 text-caption text-label-tertiary"
+            >
+              产品负责人提交线下评审纪要和附件后，由项目负责人审核通过或驳回。
+            </p>
+            <p v-if="versionRequirements.length === 0" class="mt-3 text-caption text-label-tertiary">
               当前版本还没有需求。进入需求池录入需求后，会自动纳入这个版本。
             </p>
-            <div v-else class="mt-2 overflow-hidden rounded-panel border border-separator-soft">
-              <button
+            <div v-else class="mt-3 overflow-hidden rounded-panel border border-separator-soft">
+              <div
                 v-for="requirement in versionRequirements"
                 :key="requirement.id"
-                type="button"
+                role="button"
+                tabindex="0"
                 class="flex w-full items-center gap-3 border-b border-separator-soft bg-content px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-hover"
                 @click="openDeliveryForRequirement(requirement)"
+                @keydown.enter.prevent="openDeliveryForRequirement(requirement)"
               >
-                <span class="tnum w-12 shrink-0 text-caption text-label-tertiary">#{{ requirement.id }}</span>
+                <span class="tnum shrink-0 text-caption text-label-tertiary">
+                  #{{ formatRequirementNo(requirement.requirementNo) }}
+                </span>
                 <span class="min-w-0 flex-1">
                   <span class="block truncate text-caption font-emphasis text-label">{{ requirement.title }}</span>
                   <span class="mt-0.5 block truncate text-[10px] text-label-tertiary">
                     {{ deliveryForRequirement(requirement.id)?.initiativeTitle || versionInitiative?.title }}
                   </span>
                 </span>
-                <Badge :tone="requirementPoolTone(requirement.poolStatus)">
-                  {{ requirementPoolLabels[requirement.poolStatus] }}
+                <Badge :tone="requirementPoolTone(requirementDisplayStatus(requirement))">
+                  {{ requirementPoolLabels[requirementDisplayStatus(requirement)] }}
                 </Badge>
                 <Badge
                   v-if="deliveryForRequirement(requirement.id)"
@@ -1302,16 +1607,16 @@ watch(selectedVersionId, () => {
                   {{ deliveryStageLabels[deliveryForRequirement(requirement.id)!.stage] }}
                 </Badge>
                 <span v-else class="text-caption text-label-tertiary">待建立交付</span>
-              </button>
+              </div>
             </div>
           </section>
 
-          <section v-if="versionDeliveries.length > 0" class="px-4 py-3">
+          <section v-if="versionDeliveries.length > 0" class="px-4 py-4">
             <div class="flex items-center gap-2">
               <p class="text-caption font-emphasis text-label">研发交付明细</p>
               <span class="tnum text-caption text-label-tertiary">{{ versionDeliveries.length }}</span>
             </div>
-            <div class="mt-2 space-y-1.5">
+            <div class="mt-3 space-y-1.5">
               <button
                 v-for="delivery in versionDeliveries"
                 :key="delivery.id"
@@ -1331,7 +1636,7 @@ watch(selectedVersionId, () => {
             </div>
           </section>
 
-          <section class="px-4 py-3">
+          <section class="px-4 py-4">
             <div class="flex items-center gap-2">
               <p class="text-caption font-emphasis text-label">版本发布</p>
               <span class="tnum text-caption text-label-tertiary">{{ versionReleases.length }}</span>
@@ -1344,10 +1649,10 @@ watch(selectedVersionId, () => {
                 <Icon :as="Plus" size="inline" />新建发布
               </Button>
             </div>
-            <p v-if="versionReleases.length === 0" class="mt-2 text-caption text-label-tertiary">
+            <p v-if="versionReleases.length === 0" class="mt-3 text-caption text-label-tertiary">
               需求完成冒烟与自动化回归、达到待转测后，由发布负责人创建发布轮次。
             </p>
-            <div v-else class="mt-2 space-y-1.5">
+            <div v-else class="mt-3 space-y-1.5">
               <button
                 v-for="release in versionReleases"
                 :key="release.id"
@@ -1407,7 +1712,9 @@ watch(selectedVersionId, () => {
           <div class="mt-4 grid grid-cols-2 gap-2">
             <div class="rounded-panel border border-separator-soft bg-content px-3 py-2">
               <p class="text-[10px] text-label-tertiary">关联需求</p>
-              <p class="tnum mt-0.5 text-caption text-label">#{{ selectedDelivery.requirementId }}</p>
+              <p class="tnum mt-0.5 text-caption text-label">
+                #{{ requirementNoLabel(selectedDelivery.requirementId) }}
+              </p>
             </div>
             <div class="rounded-panel border border-separator-soft bg-content px-3 py-2">
               <p class="text-[10px] text-label-tertiary">最近更新</p>
@@ -1833,7 +2140,9 @@ watch(selectedVersionId, () => {
                 class="flex w-full items-center gap-2 rounded-control border border-separator-soft bg-content px-2.5 py-2 text-left transition-colors hover:bg-hover"
                 @click="openDeliveryForRequirement(requirement)"
               >
-                <span class="tnum text-caption text-label-tertiary">#{{ requirement.id }}</span>
+                <span class="tnum text-caption text-label-tertiary">
+                  #{{ formatRequirementNo(requirement.requirementNo) }}
+                </span>
                 <span class="min-w-0 flex-1 truncate text-caption text-label">{{ requirement.title }}</span>
                 <Badge
                   v-if="deliveryForRequirement(requirement.id)"
@@ -2240,8 +2549,8 @@ watch(selectedVersionId, () => {
     size="large"
     :title="reviewMode === 'approve' ? '审批版本立项' : '驳回版本立项'"
     :description="reviewMode === 'approve'
-      ? '填写会议纪要或上传纪要附件后，再同意立项。'
-      : '记录驳回原因；会议纪要可作为评审依据保留。'"
+      ? '会议纪要已在发起立项时提交，本环节只记录审批意见。'
+      : '会议纪要已在发起立项时提交，本环节填写驳回原因。'"
     :icon="FileText"
   >
     <div v-if="reviewInitiative" class="flex flex-col gap-3">
@@ -2255,39 +2564,14 @@ watch(selectedVersionId, () => {
         </p>
       </div>
 
-      <DialogField
-        label="会议纪要"
-        hint="在线填写或上传附件，至少提供一项"
-      >
-        <Textarea
-          v-model="reviewMinutes"
-          :rows="6"
-          placeholder="记录会议结论、范围确认、风险与待办事项"
-        />
-      </DialogField>
-
-      <DialogField label="纪要附件">
-        <input
-          ref="reviewFileInput"
-          type="file"
-          class="hidden"
-          multiple
-          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.md,.csv,.json,.yaml,.yml,.xml,.rtf,image/png,image/jpeg,image/gif,image/webp"
-          @change="onReviewFiles"
-        />
-        <div class="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            :disabled="reviewUploading"
-            @click="reviewFileInput?.click()"
-          >
-            <Icon :as="Paperclip" size="inline" />
-            {{ reviewUploading ? '上传中…' : '上传会议纪要' }}
-          </Button>
-          <span class="text-[10px] text-label-tertiary">
-            支持 PDF、Office、文本和图片，单份不超过 25MB
-          </span>
-        </div>
+      <div class="rounded-panel border border-separator-soft bg-content p-3">
+        <p class="text-caption font-emphasis text-label-secondary">发起立项时提交的会议纪要</p>
+        <p
+          v-if="reviewInitiative.meetingMinutes"
+          class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-control bg-window p-2.5 text-caption text-label-secondary"
+        >
+          {{ reviewInitiative.meetingMinutes }}
+        </p>
         <ul v-if="initiativeAttachments.length > 0" class="mt-2 space-y-1.5">
           <li
             v-for="attachment in initiativeAttachments"
@@ -2309,12 +2593,18 @@ watch(selectedVersionId, () => {
           </li>
         </ul>
         <p
+          v-else-if="!reviewInitiative.meetingMinutes && !initiativeAttachmentsLoading"
+          class="mt-2 text-caption text-label-tertiary"
+        >
+          该历史立项未记录会议纪要。
+        </p>
+        <p
           v-else-if="initiativeAttachmentsLoading"
           class="mt-2 text-caption text-label-tertiary"
         >
           正在读取附件…
         </p>
-      </DialogField>
+      </div>
 
       <DialogField
         label="审批意见"
@@ -2329,14 +2619,6 @@ watch(selectedVersionId, () => {
       </DialogField>
 
       <p v-if="reviewError" class="text-caption text-danger">{{ reviewError }}</p>
-      <p
-        v-if="reviewMode === 'approve'
-          && !reviewMinutes.trim()
-          && initiativeAttachments.length === 0"
-        class="text-caption text-warning"
-      >
-        请填写会议纪要，或至少上传一份纪要附件后再同意立项。
-      </p>
     </div>
     <template #footer>
       <Button :disabled="reviewSaving" @click="reviewOpen = false">取消</Button>
@@ -2350,6 +2632,188 @@ watch(selectedVersionId, () => {
           : reviewMode === 'approve'
             ? '同意版本立项'
             : '确认驳回' }}
+      </Button>
+    </template>
+  </Dialog>
+
+  <Dialog
+    v-model:open="reviewRecordOpen"
+    layout="form"
+    size="large"
+    title="提交需求评审"
+    description="提交线下评审形成的会议纪要和附件；项目负责人审核通过后，需求才会正式化并进入详细设计。"
+    :icon="FileText"
+  >
+    <div class="flex flex-col gap-3">
+      <div class="rounded-panel border border-accent/20 bg-accent/5 px-3 py-2.5 text-caption text-label-secondary">
+        本次将提交 {{ pendingReviewRequirements.length }} 条需求的评审材料。
+      </div>
+      <DialogField label="评审日期" required>
+        <Input v-model="reviewDate" type="date" :max="localDateInputValue()" />
+      </DialogField>
+      <div class="rounded-panel border border-success/20 bg-success/5 px-3 py-2.5 text-caption text-label-secondary">
+        提交后需求进入评审中，等待项目负责人查看材料并给出审核结论。
+      </div>
+      <DialogField label="会议纪要">
+        <Textarea
+          v-model="requirementReviewMinutes"
+          :rows="6"
+          placeholder="记录评审范围、讨论结论、待办和风险；也可只上传纪要文件"
+        />
+      </DialogField>
+      <DialogField label="纪要附件">
+        <input
+          ref="requirementReviewFileInput"
+          type="file"
+          class="hidden"
+          multiple
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.md,.csv,.json,.yaml,.yml,.xml,.rtf,image/png,image/jpeg,image/gif,image/webp"
+          @change="onRequirementReviewFiles"
+        />
+        <Button size="sm" @click="requirementReviewFileInput?.click()">
+          <Icon :as="Paperclip" size="inline" />上传会议纪要
+        </Button>
+        <ul v-if="reviewFiles.length > 0" class="mt-2 space-y-1.5">
+          <li
+            v-for="(file, index) in reviewFiles"
+            :key="`${index}-${file.name}`"
+            class="flex items-center gap-2 rounded-control border border-separator-soft bg-content px-2.5 py-2"
+          >
+            <Icon :as="Paperclip" size="inline" class="text-label-tertiary" />
+            <span class="min-w-0 flex-1 truncate text-caption text-label">{{ file.name }}</span>
+            <span class="text-[10px] text-label-tertiary">{{ formatBytes(file.size) }}</span>
+            <button
+              type="button"
+              class="text-caption text-danger"
+              @click="removeRequirementReviewFile(index)"
+            >
+              移除
+            </button>
+          </li>
+        </ul>
+      </DialogField>
+      <p class="text-caption text-label-tertiary">
+        会议纪要正文和附件至少填写或上传一项。
+      </p>
+      <p v-if="reviewRecordError" class="text-caption text-danger">
+        {{ reviewRecordError }}
+      </p>
+    </div>
+    <template #footer>
+      <Button :disabled="reviewRecordSaving" @click="reviewRecordOpen = false">
+        取消
+      </Button>
+      <Button
+        variant="primary"
+        :disabled="!canSubmitReviewRecord"
+        @click="saveReviewRecord"
+      >
+        {{ reviewRecordSaving ? '提交中…' : '提交评审' }}
+      </Button>
+    </template>
+  </Dialog>
+
+  <Dialog
+    v-model:open="reviewDecisionOpen"
+    layout="form"
+    size="large"
+    title="审核需求评审"
+    description="查看产品负责人提交的评审材料和需求范围，填写审核意见后通过或驳回。"
+    :icon="FileText"
+  >
+    <div v-if="reviewDecisionRecord" class="flex flex-col gap-3">
+      <div class="rounded-panel border border-separator-soft bg-window px-3 py-2.5">
+        <div class="flex flex-wrap items-center gap-2">
+          <p class="text-caption font-emphasis text-label">
+            第 {{ reviewDecisionRecord.reviewNo }} 次需求评审
+          </p>
+          <Badge tone="accent">待审核</Badge>
+          <span class="text-caption text-label-tertiary">{{ reviewDecisionRecord.reviewDate }}</span>
+          <span class="text-caption text-label-tertiary">
+            提交人 {{ memberNameForProject(
+              selectedVersion?.projectId,
+              reviewDecisionRecord.submittedBy,
+            ) }}
+          </span>
+        </div>
+        <div class="mt-2 space-y-1">
+          <div
+            v-for="requirement in reviewDecisionRecord.requirements"
+            :key="requirement.requirementId"
+            class="flex items-center gap-2 text-caption"
+          >
+            <span class="tnum shrink-0 font-mono text-label-tertiary">
+              #{{ formatRequirementNo(requirement.requirementNo) }}
+            </span>
+            <span class="min-w-0 flex-1 truncate text-label">{{ requirement.title }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-panel border border-separator-soft bg-content p-3">
+        <p class="text-caption font-emphasis text-label-secondary">评审材料</p>
+        <p
+          v-if="reviewDecisionRecord.minutes"
+          class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-control bg-window p-2.5 text-caption text-label-secondary"
+        >
+          {{ reviewDecisionRecord.minutes }}
+        </p>
+        <div
+          v-if="reviewDecisionRecord.attachments.length > 0"
+          class="mt-2 flex flex-wrap gap-2"
+        >
+          <a
+            v-for="attachment in reviewDecisionRecord.attachments"
+            :key="attachment.id"
+            :href="attachment.contentUrl"
+            target="_blank"
+            rel="noreferrer"
+            class="inline-flex items-center gap-1 rounded-control border border-separator-soft bg-window px-2 py-1 text-caption text-accent hover:underline"
+          >
+            <Icon :as="Paperclip" size="inline" />{{ attachment.filename }}
+          </a>
+        </div>
+        <p
+          v-if="!reviewDecisionRecord.minutes && reviewDecisionRecord.attachments.length === 0"
+          class="mt-2 text-caption text-warning"
+        >
+          本次评审没有提交会议纪要或附件。
+        </p>
+      </div>
+
+      <DialogField
+        label="审核意见"
+        :required="false"
+        hint="驳回时必须填写；通过时可选填"
+      >
+        <Textarea
+          v-model="reviewDecisionComment"
+          :rows="4"
+          placeholder="填写对评审材料、需求范围或验收标准的审核意见"
+        />
+      </DialogField>
+
+      <p v-if="reviewDecisionError" class="text-caption text-danger">
+        {{ reviewDecisionError }}
+      </p>
+    </div>
+    <template #footer>
+      <Button :disabled="reviewDecisionSaving" @click="reviewDecisionOpen = false">
+        取消
+      </Button>
+      <Button
+        variant="danger"
+        :disabled="reviewDecisionSaving || !reviewDecisionComment.trim()"
+        @click="decideReview('REJECT')"
+      >
+        {{ reviewDecisionSaving ? '提交中…' : '驳回' }}
+      </Button>
+      <Button
+        variant="primary"
+        :disabled="reviewDecisionSaving"
+        @click="decideReview('APPROVE')"
+      >
+        {{ reviewDecisionSaving ? '提交中…' : '审核通过' }}
       </Button>
     </template>
   </Dialog>

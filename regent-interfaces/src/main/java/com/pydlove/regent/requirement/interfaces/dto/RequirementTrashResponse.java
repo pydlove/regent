@@ -7,7 +7,9 @@ import java.time.Instant;
 
 public record RequirementTrashResponse(
         long id,
+        long requirementNo,
         long projectId,
+        Long createdBy,
         Long versionId,
         String title,
         String rawText,
@@ -19,7 +21,11 @@ public record RequirementTrashResponse(
         Requirement requirement = item.requirement();
         return new RequirementTrashResponse(
                 requirement.getId().value(),
+                requirement.getRequirementNo(),
                 requirement.getProjectId().value(),
+                requirement.getCreatedBy() == null
+                        ? null
+                        : requirement.getCreatedBy().value(),
                 requirement.getVersionId() == null
                         ? null : requirement.getVersionId().value(),
                 requirement.getTitle(),

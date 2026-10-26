@@ -1,6 +1,6 @@
 {
   "name": "regent-desktop",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "description": "Regent AI 桌面客户端",
   "main": "bootstrap.js",
   "private": true,

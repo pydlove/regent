@@ -188,7 +188,7 @@ async function save() {
   <Dialog
     v-model:open="open"
     layout="form"
-    size="large"
+    size="wide"
     :title="editing ? '编辑需求池需求' : initialMode === 'ai' ? 'AI 生成需求' : '录入需求池'"
     :description="isAiMode
       ? 'AI 会把一个想法拆成多条可独立评审的需求，并自动加入需求池。'
@@ -196,6 +196,7 @@ async function save() {
       ? '修改后仍需纳入产品版本并提交需求评审。'
       : '先进入需求池，纳入产品版本后走需求评审；通过后成为正式需求。'"
     :icon="FileText"
+    :close-on-outside-click="false"
   >
     <div class="flex flex-col gap-3">
       <DialogField label="所属版本立项" required :hint="loadingInitiatives ? '正在读取版本立项…' : '只展示已批准的版本立项'">
@@ -228,24 +229,29 @@ async function save() {
       </div>
 
       <template v-if="!isAiMode">
-      <div class="grid gap-3 sm:grid-cols-2">
         <DialogField label="需求标题" required>
-          <Input v-model="title" :maxlength="256" placeholder="例如：组织数据隔离" />
+          <div class="flex items-center gap-2">
+            <Input
+              v-model="title"
+              :maxlength="256"
+              placeholder="例如：组织数据隔离"
+              class="min-w-0 flex-1"
+            />
+            <span class="shrink-0 rounded-badge bg-window px-2 py-1 text-caption text-label-tertiary">
+              {{ source === 'AI' ? 'AI 生成' : source === 'IMPORT' ? '批量导入' : '手工录入' }}
+            </span>
+          </div>
         </DialogField>
-        <DialogField label="来源">
-          <Input :model-value="source === 'AI' ? 'AI 生成' : source === 'IMPORT' ? '批量导入' : '手工录入'" disabled />
-        </DialogField>
-      </div>
 
-      <DialogField label="需求描述" required hint="写业务目标、当前问题、期望结果和边界">
-        <Textarea v-model="rawText" :rows="6" placeholder="描述需求背景和期望结果" />
-      </DialogField>
-      <DialogField label="验收标准" hint="建议每行写一条可验证结果">
-        <Textarea v-model="acceptanceText" :rows="3" placeholder="哪些路径必须通过" />
-      </DialogField>
-      <DialogField label="补充澄清" hint="记录已确认的假设、依赖和边界">
-        <Textarea v-model="clarificationText" :rows="3" placeholder="例如：本期不包含历史数据迁移" />
-      </DialogField>
+        <DialogField label="需求描述" required hint="写业务目标、当前问题、期望结果和边界">
+          <Textarea v-model="rawText" :rows="8" placeholder="描述需求背景和期望结果" />
+        </DialogField>
+        <DialogField label="验收标准" hint="建议每行写一条可验证结果">
+          <Textarea v-model="acceptanceText" :rows="4" placeholder="哪些路径必须通过" />
+        </DialogField>
+        <DialogField label="补充澄清" hint="记录已确认的假设、依赖和边界">
+          <Textarea v-model="clarificationText" :rows="3" placeholder="例如：本期不包含历史数据迁移" />
+        </DialogField>
       </template>
 
       <p v-if="error" class="text-caption text-danger">{{ error }}</p>

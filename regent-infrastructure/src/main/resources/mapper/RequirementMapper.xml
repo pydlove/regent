@@ -3,12 +3,18 @@
 <mapper namespace="com.pydlove.regent.requirement.infrastructure.persistence.RequirementMapper">
 
     <sql id="columns">
-        r.id, r.project_id, r.initiative_id, r.version_id, r.title, r.raw_text,
+        r.id, r.requirement_no, r.project_id, r.created_by, r.initiative_id, r.version_id,
+        r.title, r.raw_text,
         r.acceptance_text, r.clarification_text, r.status, r.pool_status, r.source,
         r.review_comment, r.reviewed_by, r.reviewed_at,
         r.clarification_questions, r.assumptions, r.task_drafts,
         r.planned_at, r.clarified_at, r.created_at, r.updated_at
     </sql>
+
+    <insert id="insertNumberSequence" useGeneratedKeys="true" keyProperty="requirementNo">
+        INSERT INTO requirement_number_sequence (requirement_no)
+        VALUES (NULL)
+    </insert>
 
     <select id="selectById" resultType="com.pydlove.regent.requirement.infrastructure.persistence.RequirementData">
         SELECT <include refid="columns"/>
@@ -105,14 +111,22 @@
         ORDER BY r.deleted_at DESC, r.id DESC
     </select>
 
+    <select id="countByVersion" resultType="int">
+        SELECT COUNT(*)
+        FROM requirement
+        WHERE version_id = #{versionId}
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO requirement (
-            project_id, initiative_id, version_id, title, raw_text, acceptance_text,
+            requirement_no, project_id, created_by, initiative_id, version_id, title, raw_text,
+            acceptance_text,
             clarification_text, status, pool_status, source, review_comment, reviewed_by, reviewed_at,
             clarification_questions, assumptions, task_drafts, planned_at, clarified_at,
             deleted, created_at, updated_at
         ) VALUES (
-            #{projectId}, #{initiativeId}, #{versionId}, #{title}, #{rawText}, #{acceptanceText},
+            #{requirementNo}, #{projectId}, #{createdBy}, #{initiativeId}, #{versionId},
+            #{title}, #{rawText}, #{acceptanceText},
             #{clarificationText}, #{status}, #{poolStatus}, #{source}, #{reviewComment},
             #{reviewedBy}, #{reviewedAt},
             #{clarificationQuestions}, #{assumptions}, #{taskDrafts}, #{plannedAt}, #{clarifiedAt},
@@ -127,6 +141,7 @@
             acceptance_text = #{acceptanceText},
             clarification_text = #{clarificationText},
             status = #{status},
+            initiative_id = #{initiativeId},
             version_id = #{versionId},
             pool_status = #{poolStatus},
             source = #{source},

@@ -4,6 +4,7 @@ import type { DecisionLevel } from '@/types/task'
 
 export type CreateProjectInput = {
   organizationId: number
+  workflowTemplateId: number | null
   code: string
   name: string
   path: string | null
@@ -12,7 +13,10 @@ export type CreateProjectInput = {
   fallbackVersion: string | null
 }
 
-export type UpdateProjectInput = Omit<CreateProjectInput, 'code' | 'organizationId'> & {
+export type UpdateProjectInput = Omit<
+  CreateProjectInput,
+  'code' | 'organizationId' | 'workflowTemplateId'
+> & {
   enabled: boolean
 }
 

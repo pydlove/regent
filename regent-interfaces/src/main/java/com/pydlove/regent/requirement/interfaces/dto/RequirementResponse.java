@@ -9,7 +9,9 @@ import java.util.List;
 /** 需求详情的对外契约。 */
 public record RequirementResponse(
         long id,
+        long requirementNo,
         long projectId,
+        Long createdBy,
         Long initiativeId,
         Long versionId,
         String title,
@@ -34,7 +36,11 @@ public record RequirementResponse(
         Requirement requirement = view.requirement();
         return new RequirementResponse(
                 requirement.getId().value(),
+                requirement.getRequirementNo(),
                 requirement.getProjectId().value(),
+                requirement.getCreatedBy() == null
+                        ? null
+                        : requirement.getCreatedBy().value(),
                 requirement.getInitiativeId() == null
                         ? null
                         : requirement.getInitiativeId().value(),

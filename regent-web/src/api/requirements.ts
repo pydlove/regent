@@ -4,6 +4,7 @@ import type { Requirement, RequirementTaskDraft } from '@/types/api'
 export type SaveRequirementInput = {
   projectId: number
   initiativeId?: number | null
+  versionId?: number | null
   source?: 'MANUAL' | 'IMPORT' | 'AI'
   title: string
   rawText: string
@@ -35,15 +36,11 @@ export const cancelRequirement = (id: number) =>
 export const assignRequirementVersion = (id: number, versionId: number | null) =>
   putJson<Requirement>(`/requirements/${id}/version`, { versionId })
 
-export const reviewRequirement = (
-  id: number,
-  action: 'SUBMIT' | 'APPROVE' | 'REJECT',
-  comment = '',
-) => postJson<Requirement>(`/requirements/${id}/review`, { action, comment })
-
 export type RequirementTrashItem = {
   id: number
+  requirementNo: number
   projectId: number
+  createdBy: number | null
   versionId: number | null
   title: string
   rawText: string
@@ -57,6 +54,20 @@ export const listRequirementTrash = (projectId: number) =>
 
 export const deleteRequirement = (id: number) =>
   deleteRequest(`/requirements/${id}`)
+
+export type RequirementBatchDeleteResult = {
+  deletedCount: number
+}
+
+export const deleteRequirements = (ids: number[]) =>
+  postJson<RequirementBatchDeleteResult>('/requirements/batch-delete', { ids })
+
+export type RequirementPurgeResult = {
+  deletedCount: number
+}
+
+export const purgeRequirements = (ids: number[]) =>
+  postJson<RequirementPurgeResult>('/requirements/trash/purge', { ids })
 
 export const restoreRequirement = (id: number) =>
   postJson<Requirement>(`/requirements/${id}/restore`, {})

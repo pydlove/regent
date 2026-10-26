@@ -1,4 +1,4 @@
-import { get, postJson, putJson } from '@/api/http'
+import { deleteRequest, get, postJson, putJson } from '@/api/http'
 import type { ProductVersion } from '@/types/delivery'
 
 export type ProductVersionInput = {
@@ -18,8 +18,8 @@ export const updateProductVersion = (
   input: { description: string },
 ) => putJson<ProductVersion>(`/product-versions/${id}`, input)
 
-export const confirmProductVersion = (id: number) =>
-  postJson<ProductVersion>(`/product-versions/${id}/confirm`, {})
-
 export const closeProductVersion = (id: number) =>
   postJson<ProductVersion>(`/product-versions/${id}/close`, {})
+
+export const deleteProductVersion = (id: number) =>
+  deleteRequest(`/product-versions/${id}`)

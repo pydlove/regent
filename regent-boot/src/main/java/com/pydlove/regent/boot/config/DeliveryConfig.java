@@ -16,6 +16,8 @@ import com.pydlove.regent.delivery.domain.repository.ProductVersionRepository;
 import com.pydlove.regent.delivery.domain.repository.ReleaseRepository;
 import com.pydlove.regent.delivery.domain.repository.RequirementDeliveryRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
+import com.pydlove.regent.project.domain.repository.WorkflowTemplateRepository;
+import com.pydlove.regent.project.application.query.WorkflowTemplateQueryService;
 import com.pydlove.regent.project.application.query.ProjectMemberAccessService;
 import com.pydlove.regent.requirement.domain.repository.RequirementRepository;
 import com.pydlove.regent.shared.domain.TransactionRunner;
@@ -34,10 +36,18 @@ public class DeliveryConfig {
             ProductVersionRepository versionRepository,
             ProjectProfileRepository projectProfileRepository,
             ProjectMemberAccessService memberAccessService,
-            InitiativeRepository initiativeRepository) {
+            InitiativeRepository initiativeRepository,
+            RequirementRepository requirementRepository,
+            WorkflowTemplateRepository workflowTemplateRepository) {
         return new ProductVersionCommandService(
                 versionRepository, projectProfileRepository, memberAccessService,
-                initiativeRepository);
+                initiativeRepository, requirementRepository, workflowTemplateRepository);
+    }
+
+    @Bean
+    public WorkflowTemplateQueryService workflowTemplateQueryService(
+            WorkflowTemplateRepository workflowTemplateRepository) {
+        return new WorkflowTemplateQueryService(workflowTemplateRepository);
     }
 
     @Bean

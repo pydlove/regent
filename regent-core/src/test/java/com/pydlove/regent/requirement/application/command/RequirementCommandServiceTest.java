@@ -1,5 +1,6 @@
 package com.pydlove.regent.requirement.application.command;
 
+import com.pydlove.regent.delivery.domain.model.ProductVersionId;
 import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskSource;
 import com.pydlove.regent.execution.domain.model.TaskId;
@@ -37,6 +38,7 @@ class RequirementCommandServiceTest {
 
     private static final UserId OWNER = UserId.of(1L);
     private static final ProjectId PROJECT = ProjectId.of(7L);
+    private static final ProjectId OTHER_PROJECT = ProjectId.of(8L);
 
     @Test
     @DisplayName("需求确认后事务性创建任务并保存依赖")
@@ -65,6 +67,7 @@ class RequirementCommandServiceTest {
                 "部署需要支持多个项目",
                 "编辑后仍然可以筛选",
                 null), OWNER);
+        assertEquals(OWNER, created.getCreatedBy());
         Requirement analyzed = service.analyze(created.getId(), OWNER);
         assertEquals(2, analyzed.getTaskDrafts().size());
         Requirement confirmed = service.confirm(created.getId(), analyzed.getTaskDrafts(), OWNER);
@@ -75,6 +78,34 @@ class RequirementCommandServiceTest {
         assertEquals(TaskSource.REQUIREMENT, createdTasks.get(0).getSource());
         assertEquals(List.of(createdTasks.get(0).getId()),
                 dependencies.findDependencies(createdTasks.get(1).getId()));
+    }
+
+    @Test
+    @DisplayName("不同项目创建需求共用全局编号")
+    void allocatesGlobalRequirementNumbersAcrossProjects() {
+        RequirementCommandService service = new RequirementCommandService(
+                new Requirements(),
+                new ExecutionFakes.Tasks(),
+                new Dependencies(),
+                new Projects(),
+                null,
+                new DirectTransactions());
+
+        Requirement first = service.create(new SaveRequirementCommand(
+                PROJECT,
+                "项目 A 需求",
+                "项目 A 的需求描述",
+                null,
+                null), OWNER);
+        Requirement second = service.create(new SaveRequirementCommand(
+                OTHER_PROJECT,
+                "项目 B 需求",
+                "项目 B 的需求描述",
+                null,
+                null), OWNER);
+
+        assertEquals(1L, first.getRequirementNo());
+        assertEquals(2L, second.getRequirementNo());
     }
 
     private static RequirementTaskDraft draft(String key, List<String> dependencies) {
@@ -95,6 +126,12 @@ class RequirementCommandServiceTest {
 
         private final Map<Long, Requirement> store = new LinkedHashMap<>();
         private long sequence;
+        private long requirementSequence;
+
+        @Override
+        public long nextRequirementNo() {
+            return ++requirementSequence;
+        }
 
         @Override
         public Optional<Requirement> findById(RequirementId id) {
@@ -122,6 +159,11 @@ class RequirementCommandServiceTest {
         public Optional<RequirementTrashItem> findDeletedByIdOwned(RequirementId id,
                                                                    UserId ownerId) {
             return Optional.empty();
+        }
+
+        @Override
+        public boolean existsByVersion(ProductVersionId versionId) {
+            return false;
         }
 
         @Override
@@ -160,23 +202,29 @@ class RequirementCommandServiceTest {
 
     private static final class Projects implements ProjectProfileRepository {
 
-        private final ProjectProfile profile = new ProjectProfile(
-                PROJECT, "regent", "Regent", "/tmp/regent",
-                DecisionLevel.L1, true);
+        private final Map<ProjectId, ProjectProfile> profiles = Map.of(
+                PROJECT, new ProjectProfile(
+                        PROJECT, "regent", "Regent", "/tmp/regent",
+                        DecisionLevel.L1, true),
+                OTHER_PROJECT, new ProjectProfile(
+                        OTHER_PROJECT, "other", "Other", "/tmp/other",
+                        DecisionLevel.L1, true));
 
         @Override
         public Optional<ProjectProfile> findById(ProjectId id) {
-            return id.equals(PROJECT) ? Optional.of(profile) : Optional.empty();
+            return Optional.ofNullable(profiles.get(id));
         }
 
         @Override
         public Optional<ProjectProfile> findByCode(String code) {
-            return "regent".equals(code) ? Optional.of(profile) : Optional.empty();
+            return profiles.values().stream()
+                    .filter(profile -> profile.code().equals(code))
+                    .findFirst();
         }
 
         @Override
         public List<ProjectProfile> findAll() {
-            return List.of(profile);
+            return List.copyOf(profiles.values());
         }
     }
 

@@ -11,11 +11,16 @@ public record ProductVersionResponse(
         String name,
         String description,
         String status,
+        Long workflowTemplateId,
         long createdBy,
         Instant createdAt,
         Instant updatedAt) {
 
     public static ProductVersionResponse from(ProductVersion version) {
+        return from(version, null);
+    }
+
+    public static ProductVersionResponse from(ProductVersion version, Long workflowTemplateId) {
         return new ProductVersionResponse(
                 version.getId().value(),
                 version.getProjectId().value(),
@@ -23,6 +28,7 @@ public record ProductVersionResponse(
                 version.getName(),
                 version.getDescription(),
                 version.getStatus().name(),
+                workflowTemplateId,
                 version.getCreatedBy().value(),
                 version.getCreatedAt(),
                 version.getUpdatedAt());

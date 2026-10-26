@@ -23,12 +23,12 @@ export const submitInitiative = (id: number) =>
 
 export const approveInitiative = (
   id: number,
-  input: { comment?: string; meetingMinutes?: string } = {},
+  input: { comment?: string } = {},
 ) => postJson<Initiative>(`/initiatives/${id}/approve`, input)
 
 export const rejectInitiative = (
   id: number,
-  input: { comment?: string; meetingMinutes?: string } = {},
+  input: { comment?: string } = {},
 ) => postJson<Initiative>(`/initiatives/${id}/reject`, input)
 
 export const listRequirementDeliveries = (projectId: number | null = null) =>

@@ -26,7 +26,7 @@ class HttpRelayHealthProbeTest {
             Assumptions.abort("当前沙箱不允许监听本地端口，跳过中继健康检查测试");
             return;
         }
-        server.createContext("/health", exchange -> {
+        server.createContext("/regent/health", exchange -> {
             byte[] body = """
                     {"status":"UP","connectorOnline":true,"queueDepth":4}
                     """.trim().getBytes(StandardCharsets.UTF_8);
@@ -44,7 +44,7 @@ class HttpRelayHealthProbeTest {
             );
 
             RelayHealthProbe.ProbeResult result = probe.probe(
-                    "http://127.0.0.1:" + server.getAddress().getPort()
+                    "http://127.0.0.1:" + server.getAddress().getPort() + "/regent/"
             );
 
             assertTrue(result.reachable());

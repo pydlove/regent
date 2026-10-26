@@ -121,7 +121,8 @@ public final class RelayConnector implements AutoCloseable {
             return errorResponse(400, "中继只允许访问本地 /api");
         }
 
-        HttpRequest.Builder builder = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(60));
+        // 与中继请求超时保持一致：AI 需求生成等长任务不能在后端这一跳被 60 秒截断。
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri).timeout(config.requestTimeout());
         headers.forEach((name, values) ->
             RelayHeaders.splitValues(values).forEach(value -> builder.header(name, value)));
         if (body.length == 0 || "GET".equals(method) || "HEAD".equals(method)) {

@@ -26,6 +26,7 @@ import com.pydlove.regent.requirement.domain.model.RequirementPlanningResult;
 import com.pydlove.regent.requirement.domain.model.RequirementTaskDraft;
 import com.pydlove.regent.requirement.domain.model.RequirementTrashItem;
 import com.pydlove.regent.requirement.domain.port.RequirementPlanner;
+import com.pydlove.regent.requirement.domain.port.RequirementPurgePort;
 import com.pydlove.regent.requirement.domain.repository.RequirementRepository;
 import com.pydlove.regent.requirement.domain.repository.TaskDependencyRepository;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
@@ -33,6 +34,7 @@ import com.pydlove.regent.shared.domain.TransactionRunner;
 import com.pydlove.regent.shared.domain.port.TaskStandardBinder;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.time.Instant;
@@ -51,6 +53,7 @@ public class RequirementCommandService {
     private final ProjectMemberAccessService memberAccessService;
     private final TransactionRunner transactionRunner;
     private final TaskStandardBinder taskStandardBinder;
+    private final RequirementPurgePort requirementPurgePort;
 
     public RequirementCommandService(RequirementRepository requirementRepository,
                                      TaskRepository taskRepository,
@@ -60,7 +63,7 @@ public class RequirementCommandService {
                                      TransactionRunner transactionRunner) {
         this(requirementRepository, taskRepository, dependencyRepository,
                 projectProfileRepository, planner, transactionRunner, null, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     public RequirementCommandService(RequirementRepository requirementRepository,
@@ -72,7 +75,7 @@ public class RequirementCommandService {
                                      TaskStandardBinder taskStandardBinder) {
         this(requirementRepository, taskRepository, dependencyRepository,
                 projectProfileRepository, planner, transactionRunner, taskStandardBinder, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     public RequirementCommandService(RequirementRepository requirementRepository,
@@ -85,7 +88,8 @@ public class RequirementCommandService {
                                      InitiativeRepository initiativeRepository,
                                      ProductVersionRepository productVersionRepository,
                                      RequirementDeliveryRepository deliveryRepository,
-                                     ProjectMemberAccessService memberAccessService) {
+                                     ProjectMemberAccessService memberAccessService,
+                                     RequirementPurgePort requirementPurgePort) {
         this.requirementRepository = requirementRepository;
         this.taskRepository = taskRepository;
         this.dependencyRepository = dependencyRepository;
@@ -97,22 +101,31 @@ public class RequirementCommandService {
         this.productVersionRepository = productVersionRepository;
         this.deliveryRepository = deliveryRepository;
         this.memberAccessService = memberAccessService;
+        this.requirementPurgePort = requirementPurgePort;
     }
 
     public Requirement create(SaveRequirementCommand command, UserId ownerId) {
-        ProjectProfile project = requireProject(command.projectId(), ownerId);
-        InitiativeId initiativeId = requireInitiative(
-                command.initiativeId(), command.projectId());
-        Requirement requirement = Requirement.create(
-                project.id(),
-                initiativeId,
-                command.title(),
-                command.rawText(),
-                command.acceptanceText(),
-                command.clarificationText(),
-                command.source() == null ? RequirementSource.MANUAL : command.source());
-        requirementRepository.save(requirement);
-        return requirement;
+        return transactionRunner.inTransaction(() -> {
+            ProjectProfile project = requireProject(command.projectId(), ownerId);
+            InitiativeId initiativeId = requireInitiative(
+                    command.initiativeId(), command.projectId());
+            Requirement requirement = Requirement.create(
+                    project.id(),
+                    initiativeId,
+                    command.title(),
+                    command.rawText(),
+                    command.acceptanceText(),
+                    command.clarificationText(),
+                    command.source() == null ? RequirementSource.MANUAL : command.source(),
+                    ownerId);
+            if (command.versionId() != null) {
+                requireProductPlanner(project.id(), ownerId);
+                assignVersionTo(requirement, command.versionId());
+            }
+            requirement.assignNumber(requirementRepository.nextRequirementNo());
+            requirementRepository.save(requirement);
+            return requirement;
+        });
     }
 
     public Requirement update(RequirementId id,
@@ -206,6 +219,12 @@ public class RequirementCommandService {
                                      UserId ownerId) {
         Requirement requirement = load(id, ownerId);
         requireProductPlanner(requirement.getProjectId(), ownerId);
+        assignVersionTo(requirement, versionId);
+        requirementRepository.save(requirement);
+        return requirement;
+    }
+
+    private void assignVersionTo(Requirement requirement, ProductVersionId versionId) {
         ProductVersion version = requirePlannedVersion(versionId, requirement.getProjectId());
         Initiative versionInitiative = initiativeRepository == null
                 ? null
@@ -214,14 +233,7 @@ public class RequirementCommandService {
             throw new com.pydlove.regent.shared.domain.DomainException(
                     "请先完成该产品版本的立项审批，再纳入需求");
         }
-        if (requirement.getInitiativeId() == null
-                || !requirement.getInitiativeId().equals(versionInitiative.getId())) {
-            throw new com.pydlove.regent.shared.domain.DomainException(
-                    "需求必须归属于当前产品版本的立项");
-        }
-        requirement.assignVersion(version.getId());
-        requirementRepository.save(requirement);
-        return requirement;
+        requirement.assignVersion(version.getId(), versionInitiative.getId());
     }
 
     public Requirement removeVersion(RequirementId id, UserId ownerId) {
@@ -234,14 +246,72 @@ public class RequirementCommandService {
 
     public void moveToTrash(RequirementId id, UserId ownerId) {
         Requirement requirement = load(id, ownerId);
-        requirement.requireTrashable();
+        if (!isProjectOwner(requirement, ownerId)) {
+            requirement.requireTrashable();
+        }
         requirementRepository.moveToTrash(id, ownerId, Instant.now());
+    }
+
+    public int moveManyToTrash(List<RequirementId> ids, UserId ownerId) {
+        if (ids == null || ids.isEmpty()) {
+            throw new com.pydlove.regent.shared.domain.DomainException("请选择要删除的需求");
+        }
+        List<RequirementId> uniqueIds = List.copyOf(new LinkedHashSet<>(ids));
+        return transactionRunner.inTransaction(() -> {
+            List<Requirement> requirements = uniqueIds.stream()
+                    .map(id -> load(id, ownerId))
+                    .toList();
+            com.pydlove.regent.project.domain.model.ProjectId projectId =
+                    requirements.get(0).getProjectId();
+            if (requirements.stream()
+                    .anyMatch(requirement -> !projectId.equals(requirement.getProjectId()))) {
+                throw new com.pydlove.regent.shared.domain.DomainException(
+                        "一次只能批量删除同一个项目的需求");
+            }
+            requireProjectOwner(projectId, ownerId);
+            Instant deletedAt = Instant.now();
+            for (RequirementId id : uniqueIds) {
+                requirementRepository.moveToTrash(id, ownerId, deletedAt);
+            }
+            return uniqueIds.size();
+        });
+    }
+
+    public int purgeFromTrash(List<RequirementId> ids, UserId ownerId) {
+        if (ids == null || ids.isEmpty()) {
+            throw new com.pydlove.regent.shared.domain.DomainException("请选择要彻底删除的需求");
+        }
+        List<RequirementId> uniqueIds = List.copyOf(new LinkedHashSet<>(ids));
+        return transactionRunner.inTransaction(() -> {
+            List<RequirementTrashItem> items = uniqueIds.stream()
+                    .map(id -> requirementRepository.findDeletedByIdOwned(id, ownerId)
+                            .orElseThrow(() -> new EntityNotFoundException(
+                                    "回收站中不存在该需求：" + id.value())))
+                    .toList();
+            com.pydlove.regent.project.domain.model.ProjectId projectId =
+                    items.get(0).requirement().getProjectId();
+            if (items.stream().anyMatch(item ->
+                    !projectId.equals(item.requirement().getProjectId()))) {
+                throw new com.pydlove.regent.shared.domain.DomainException(
+                        "一次只能彻底删除同一个项目的需求");
+            }
+            requireProjectOwner(projectId, ownerId);
+            if (requirementPurgePort == null) {
+                throw new com.pydlove.regent.shared.domain.DomainException(
+                        "当前环境未启用需求永久删除");
+            }
+            int purged = requirementPurgePort.purge(projectId, uniqueIds);
+            if (purged != uniqueIds.size()) {
+                throw new com.pydlove.regent.shared.domain.DomainException(
+                        "部分需求永久删除失败，请刷新回收站后重试");
+            }
+            return purged;
+        });
     }
 
     public Requirement restoreFromTrash(RequirementId id, UserId ownerId) {
         RequirementTrashItem item = requirementRepository.findDeletedByIdOwned(id, ownerId)
                 .orElseThrow(() -> new EntityNotFoundException("回收站中不存在该需求：" + id.value()));
-        item.requirement().requireTrashable();
         requirementRepository.restore(id, Instant.now());
         return load(id, ownerId);
     }
@@ -278,6 +348,20 @@ public class RequirementCommandService {
         requirement.rejectPoolReview(ownerId, comment);
         requirementRepository.save(requirement);
         return requirement;
+    }
+
+    public Requirement approveOfflineReview(RequirementId id,
+                                            UserId ownerId,
+                                            String comment) {
+        return transactionRunner.inTransaction(() -> {
+            Requirement requirement = load(id, ownerId);
+            requireProductReviewer(requirement.getProjectId(), ownerId);
+            requireVersionFor(requirement);
+            requirement.approveOfflineReview(ownerId, comment);
+            requirementRepository.save(requirement);
+            createFormalDelivery(requirement, ownerId);
+            return requirement;
+        });
     }
 
     private ProductVersion requirePlannedVersion(ProductVersionId id,
@@ -344,6 +428,22 @@ public class RequirementCommandService {
                     "当前环境未启用" + feature);
         }
         memberAccessService.requireRoleOrOwner(projectId, ownerId, ProjectMemberRole.PRODUCT);
+    }
+
+    private boolean isProjectOwner(Requirement requirement, UserId ownerId) {
+        return memberAccessService != null
+                && memberAccessService.roles(requirement.getProjectId(), ownerId)
+                .contains(ProjectMemberRole.OWNER);
+    }
+
+    private void requireProjectOwner(
+            com.pydlove.regent.project.domain.model.ProjectId projectId,
+            UserId ownerId) {
+        if (memberAccessService == null) {
+            throw new com.pydlove.regent.shared.domain.DomainException(
+                    "当前环境未启用需求删除权限校验");
+        }
+        memberAccessService.requireRole(projectId, ownerId, ProjectMemberRole.OWNER);
     }
 
     private void createFormalDelivery(Requirement requirement, UserId ownerId) {

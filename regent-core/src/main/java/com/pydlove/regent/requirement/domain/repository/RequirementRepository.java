@@ -1,6 +1,7 @@
 package com.pydlove.regent.requirement.domain.repository;
 
 import com.pydlove.regent.identity.domain.model.UserId;
+import com.pydlove.regent.delivery.domain.model.ProductVersionId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.requirement.domain.model.Requirement;
 import com.pydlove.regent.requirement.domain.model.RequirementId;
@@ -12,6 +13,8 @@ import java.util.Optional;
 
 /** 需求聚合仓储。 */
 public interface RequirementRepository {
+
+    long nextRequirementNo();
 
     Optional<Requirement> findById(RequirementId id);
 
@@ -30,6 +33,8 @@ public interface RequirementRepository {
     List<RequirementTrashItem> findDeletedByProject(ProjectId projectId, UserId ownerId);
 
     Optional<RequirementTrashItem> findDeletedByIdOwned(RequirementId id, UserId ownerId);
+
+    boolean existsByVersion(ProductVersionId versionId);
 
     void moveToTrash(RequirementId id, UserId deletedBy, Instant deletedAt);
 

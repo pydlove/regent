@@ -66,7 +66,7 @@ public class RelaySettingsService {
     public RelayInstallView install(String password) {
         RelaySettings settings = settings();
         if (!settings.installConfigured()) {
-            throw new DomainException("安装中继前必须填写服务器 IP");
+            throw new DomainException("安装中继前必须填写服务器域名或 IP");
         }
         if (password != null && password.length() > MAX_PASSWORD_LENGTH) {
             throw new DomainException("SSH 密码长度超出限制");
@@ -78,6 +78,7 @@ public class RelaySettingsService {
             RelayInstaller.InstallResult result = installer.install(
                     new RelayInstaller.InstallRequest(
                             settings.serverIp(),
+                            settings.serverUrl(),
                             settings.sshUsername(),
                             password == null ? "" : password,
                             settings.installDirectory()

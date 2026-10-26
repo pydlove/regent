@@ -16,9 +16,21 @@ public record ProjectCreateRequest(
         String path,
         String defaultDecisionLevel,
         String versionSource,
-        String fallbackVersion) {
+        String fallbackVersion,
+        Long workflowTemplateId) {
 
     public ProjectCreateRequest(String code, String name, String path, String defaultDecisionLevel) {
-        this(null, code, name, path, defaultDecisionLevel, "GIT_TAG", null);
+        this(null, code, name, path, defaultDecisionLevel, "GIT_TAG", null, null);
+    }
+
+    public ProjectCreateRequest(Long organizationId,
+                                String code,
+                                String name,
+                                String path,
+                                String defaultDecisionLevel,
+                                String versionSource,
+                                String fallbackVersion) {
+        this(organizationId, code, name, path, defaultDecisionLevel, versionSource,
+                fallbackVersion, null);
     }
 }

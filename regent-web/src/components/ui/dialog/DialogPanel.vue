@@ -16,7 +16,7 @@ import {
 const props = withDefaults(
   defineProps<{
     layout?: DialogVariantProps['layout']
-    /** 弹框宽度：large 用于长表单，wide 只给需要横排查看的日志类弹框 */
+    /** 弹框宽度：large 用于一般长表单，wide 用于复杂录入和日志类弹框 */
     size?: DialogVariantProps['size']
     /** compact 把最大高度收敛到视口的 80% */
     maxHeight?: DialogVariantProps['maxHeight']

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import {
+  ChevronLeft,
   Download,
+  Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -21,15 +23,17 @@ import {
   assignRequirementVersion,
   createRequirement,
   deleteRequirement,
+  deleteRequirements,
   listRequirements,
   listRequirementTrash,
-  reviewRequirement,
+  purgeRequirements,
   restoreRequirement,
   type RequirementTrashItem,
 } from '@/api/requirements'
 import RequirementPoolEditorDialog from '@/components/business/RequirementPoolEditorDialog.vue'
 import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
+import Checkbox from '@/components/ui/checkbox/Checkbox.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import DialogField from '@/components/ui/dialog/DialogField.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
@@ -41,16 +45,21 @@ import Select from '@/components/ui/select/Select.vue'
 import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
 import Table from '@/components/ui/table/Table.vue'
 import type { TableColumn } from '@/components/ui/table/table.types'
-import Textarea from '@/components/ui/input/Textarea.vue'
 import Tooltip from '@/components/ui/tooltip/Tooltip.vue'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/useAuthStore'
 import { useTaskStore } from '@/stores/useTaskStore'
-import type { Requirement, RequirementPoolStatus } from '@/types/api'
+import type { Requirement } from '@/types/api'
 import type { Initiative, ProductVersion } from '@/types/delivery'
 import type { ProjectMember } from '@/types/projectMember'
 import { canActWithRoles } from '@/utils/deliveryWorkflow'
 import { formatRelative } from '@/utils/format'
+import { findDuplicateImportRows } from '@/utils/requirementImport'
+import {
+  formatRequirementNo,
+  requirementDisplayStatus,
+  type RequirementDisplayStatus,
+} from '@/utils/requirementPool'
 
 type ImportRow = {
   title: string
@@ -73,8 +82,9 @@ const members = ref<ProjectMember[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const keyword = ref('')
-const statusFilter = ref<'ALL' | RequirementPoolStatus>('ALL')
+const statusFilter = ref<'ALL' | RequirementDisplayStatus>('ALL')
 const viewMode = ref('active')
+const selectedRequirementId = ref<number | null>(null)
 
 const editorOpen = ref(false)
 const editorMode = ref<'manual' | 'ai'>('manual')
@@ -86,17 +96,23 @@ const assignTarget = ref<Requirement | null>(null)
 const assignVersionId = ref('')
 const assignError = ref<string | null>(null)
 
-const reviewOpen = ref(false)
-const reviewSaving = ref(false)
-const reviewTarget = ref<Requirement | null>(null)
-const reviewComment = ref('')
-const reviewError = ref<string | null>(null)
+const selectedRequirementIds = ref<number[]>([])
+const batchAssignOpen = ref(false)
+const batchAssignSaving = ref(false)
+const batchAssignVersionId = ref('')
+const batchAssignError = ref<string | null>(null)
+const batchDeleteOpen = ref(false)
+const batchDeleteSaving = ref(false)
+const batchDeleteError = ref<string | null>(null)
+const purgeOpen = ref(false)
+const purgeSaving = ref(false)
+const purgeError = ref<string | null>(null)
+const purgeTargets = ref<RequirementTrashItem[]>([])
 
 const importOpen = ref(false)
 const importSaving = ref(false)
 const importProjectId = ref('')
-const importInitiativeId = ref('')
-const importInitiatives = ref<Initiative[]>([])
+const importVersionId = ref('NONE')
 const importFileName = ref('')
 const importRows = ref<ImportRow[]>([])
 const importError = ref<string | null>(null)
@@ -111,23 +127,34 @@ const activeProjectId = computed(() =>
     ? store.projectId
     : null,
 )
-
 const activeColumns: TableColumn[] = [
+  { key: 'selection', label: '', width: '32px' },
+  { key: 'requirementNo', label: '编号', width: '88px' },
   { key: 'title', label: '需求' },
   { key: 'version', label: '产品版本', width: '130px', hideBelow: 'md' },
   { key: 'poolStatus', label: '需求状态', width: '102px' },
   { key: 'source', label: '来源', width: '86px', hideBelow: 'lg' },
+  { key: 'createdBy', label: '创建人', width: '96px', hideBelow: 'xl' },
   { key: 'updated', label: '更新', width: '92px', hideBelow: 'xl' },
   { key: 'actions', label: '', width: '210px', align: 'right' },
 ]
 const trashColumns: TableColumn[] = [
+  { key: 'selection', label: '', width: '32px' },
+  { key: 'requirementNo', label: '编号', width: '88px' },
   { key: 'title', label: '需求' },
   { key: 'version', label: '产品版本', width: '130px', hideBelow: 'md' },
   { key: 'source', label: '来源', width: '86px', hideBelow: 'lg' },
+  { key: 'createdBy', label: '创建人', width: '96px', hideBelow: 'xl' },
   { key: 'deletedAt', label: '删除时间', width: '112px' },
-  { key: 'actions', label: '', width: '110px', align: 'right' },
+  { key: 'actions', label: '', width: '210px', align: 'right' },
 ]
 const isTrashView = computed(() => viewMode.value === 'trash')
+const selectedRequirement = computed(() =>
+  isTrashView.value
+    ? null
+    : requirements.value.find((requirement) =>
+        requirement.id === selectedRequirementId.value) ?? null,
+)
 const columns = computed(() => isTrashView.value ? trashColumns : activeColumns)
 const viewItems = [
   { value: 'active', label: '需求池' },
@@ -135,10 +162,11 @@ const viewItems = [
 ]
 
 const statusMeta: Record<
-  RequirementPoolStatus,
-  { label: string; tone: 'neutral' | 'accent' | 'success' | 'danger' }
+  RequirementDisplayStatus,
+  { label: string; tone: 'neutral' | 'accent' | 'success' | 'warning' | 'danger' }
 > = {
-  POOL: { label: '需求池', tone: 'neutral' },
+  PENDING_VERSION: { label: '待纳入版本', tone: 'warning' },
+  PENDING_REVIEW: { label: '待需求评审', tone: 'accent' },
   IN_REVIEW: { label: '评审中', tone: 'accent' },
   FORMAL: { label: '正式需求', tone: 'success' },
   REJECTED: { label: '已驳回', tone: 'danger' },
@@ -153,6 +181,12 @@ const versionMap = computed(() =>
 )
 const planningVersions = computed(() =>
   versions.value.filter((version) => version.status === 'PLANNING'),
+)
+const assignableVersions = computed(() =>
+  planningVersions.value.filter((version) =>
+    allInitiatives.value.some((initiative) =>
+      initiative.versionId === version.id && initiative.status === 'APPROVED'),
+  ),
 )
 const targetVersionId = computed(() => {
   const value = Number(route.query.versionId)
@@ -178,33 +212,232 @@ const filtered = computed<Array<Requirement | RequirementTrashItem>>(() => {
       !isTrashView.value
       && 'poolStatus' in requirement
       && statusFilter.value !== 'ALL'
-      && requirement.poolStatus !== statusFilter.value
+      && requirementDisplayStatus(requirement) !== statusFilter.value
     ) return false
     if (!query) return true
     const reviewComment = 'reviewComment' in requirement ? requirement.reviewComment ?? '' : ''
-    return [requirement.title, requirement.rawText, reviewComment]
+    return [
+      requirement.title,
+      requirement.rawText,
+      reviewComment,
+      formatRequirementNo(requirement.requirementNo),
+      String(requirement.requirementNo),
+      sourceLabel(requirement),
+      memberName(requirement.createdBy),
+    ]
       .some((value) => value.toLocaleLowerCase('zh-CN').includes(query))
   })
 })
-const importValidCount = computed(() =>
-  importRows.value.filter((row) => row.error === null).length,
-)
 const canReview = computed(() => {
   const roles = members.value.find((member) => member.userId === auth.user?.id)?.roles ?? []
   return roles.includes('OWNER')
     || canActWithRoles('PRODUCT', roles, members.value.length)
 })
+const canDeleteAnyRequirement = computed(() =>
+  members.value
+    .find((member) => member.userId === auth.user?.id)
+    ?.roles.includes('OWNER') ?? false,
+)
+const canPurgeRequirements = canDeleteAnyRequirement
+const importVersionOptions = computed(() =>
+  planningVersions.value.flatMap((version) => {
+    const initiative = allInitiatives.value.find((item) =>
+      item.versionId === version.id && item.status === 'APPROVED')
+    return initiative ? [{ version, initiative }] : []
+  }),
+)
+const importVersionItems = computed(() => [
+  { value: 'NONE', label: '不关联版本（仅进入需求池）' },
+  ...(canReview.value
+    ? importVersionOptions.value.map(({ version, initiative }) => ({
+        value: String(version.id),
+        label: `${version.versionNo} · ${initiative.title}`,
+      }))
+    : []),
+])
+const selectedImportVersion = computed(() =>
+  importVersionOptions.value.find(({ version }) => String(version.id) === importVersionId.value),
+)
+const evaluatedImportRows = computed(() => {
+  const duplicateErrors = findDuplicateImportRows(
+    importRows.value,
+    requirements.value.map((requirement) => ({
+      title: requirement.title,
+    })),
+  )
+  return importRows.value.map((row, index) => ({
+    ...row,
+    error: row.error ?? duplicateErrors[index],
+  }))
+})
+const importValidCount = computed(() =>
+  evaluatedImportRows.value.filter((row) => row.error === null).length,
+)
+const importDuplicateCount = computed(() =>
+  evaluatedImportRows.value.filter((row) =>
+    row.error?.includes('重复') || row.error?.includes('同名需求')).length,
+)
+const importOtherInvalidCount = computed(() =>
+  evaluatedImportRows.value.length - importValidCount.value - importDuplicateCount.value,
+)
+function isRequirementAssignable(requirement: Requirement) {
+  return requirement.poolStatus === 'POOL' || requirement.poolStatus === 'REJECTED'
+}
+function isRequirementSelectable(requirement: Requirement) {
+  return canDeleteAnyRequirement.value || isRequirementAssignable(requirement)
+}
+const selectableRequirements = computed<Array<Requirement | RequirementTrashItem>>(() =>
+  (filtered.value as Array<Requirement | RequirementTrashItem>).filter((item) => {
+    if (isTrashView.value) return canPurgeRequirements.value
+    return canReview.value && isRequirementSelectable(item as Requirement)
+  }),
+)
+const selectedRequirementSet = computed(() => new Set(selectedRequirementIds.value))
+const selectedRequirements = computed(() =>
+  requirements.value.filter((requirement) =>
+    selectedRequirementSet.value.has(requirement.id)),
+)
+const selectedAssignableRequirements = computed(() =>
+  selectedRequirements.value.filter(isRequirementAssignable),
+)
+const selectedTrashItems = computed(() =>
+  trash.value.filter((item) => selectedRequirementSet.value.has(item.id)),
+)
+const selectionState = computed<boolean | 'indeterminate'>(() => {
+  const selectableIds = new Set(selectableRequirements.value.map((requirement) => requirement.id))
+  const selectedCount = selectedRequirementIds.value
+    .filter((id) => selectableIds.has(id)).length
+  if (selectedCount === 0) return false
+  return selectedCount === selectableRequirements.value.length ? true : 'indeterminate'
+})
 const productWorkPending = computed(() =>
   requirements.value.some((requirement) =>
-    requirement.poolStatus === 'POOL'
-    || requirement.poolStatus === 'IN_REVIEW'
-    || requirement.poolStatus === 'REJECTED',
+    requirement.poolStatus === 'POOL' || requirement.poolStatus === 'REJECTED',
   ),
 )
 
 function messageOf(value: unknown): string {
   if (value instanceof ApiError) return value.message
   return value instanceof Error ? value.message : '操作失败'
+}
+
+function clearRequirementSelection() {
+  selectedRequirementIds.value = []
+}
+
+function toggleRequirementSelection(id: number, checked: boolean) {
+  const next = new Set(selectedRequirementIds.value)
+  if (checked) next.add(id)
+  else next.delete(id)
+  selectedRequirementIds.value = [...next]
+}
+
+function toggleAllRequirements() {
+  const selectableIds = selectableRequirements.value.map((requirement) => requirement.id)
+  if (selectionState.value === true) {
+    const removing = new Set(selectableIds)
+    selectedRequirementIds.value = selectedRequirementIds.value.filter(
+      (id) => !removing.has(id),
+    )
+    return
+  }
+  selectedRequirementIds.value = [
+    ...new Set([...selectedRequirementIds.value, ...selectableIds]),
+  ]
+}
+
+function openBatchAssign() {
+  if (
+    selectedAssignableRequirements.value.length === 0
+    || assignableVersions.value.length === 0
+  ) return
+  batchAssignVersionId.value = String(
+    assignableVersions.value.find((version) => version.id === targetVersionId.value)?.id
+      ?? assignableVersions.value[0]?.id
+      ?? '',
+  )
+  batchAssignError.value = null
+  batchAssignOpen.value = true
+}
+
+async function assignSelectedRequirements() {
+  if (
+    batchAssignSaving.value
+    || selectedAssignableRequirements.value.length === 0
+    || !batchAssignVersionId.value
+  ) return
+  const requirementsToAssign = [...selectedAssignableRequirements.value]
+  const versionId = Number(batchAssignVersionId.value)
+  const version = versions.value.find((item) => item.id === versionId)
+  batchAssignSaving.value = true
+  batchAssignError.value = null
+  try {
+    const results = await Promise.allSettled(
+      requirementsToAssign.map((requirement) =>
+        assignRequirementVersion(requirement.id, versionId)),
+    )
+    const failures = results.flatMap((result, index) =>
+      result.status === 'rejected'
+        ? [{
+            requirement: requirementsToAssign[index]!,
+            message: messageOf(result.reason),
+          }]
+        : [])
+    await load()
+    if (failures.length === 0) {
+      clearRequirementSelection()
+      batchAssignOpen.value = false
+      toast.success(
+        '需求已加入版本',
+        `共 ${requirementsToAssign.length} 条，已纳入 ${version?.versionNo ?? '目标版本'}`,
+      )
+      return
+    }
+    selectedRequirementIds.value = failures.map((failure) => failure.requirement.id)
+    batchAssignError.value = [
+      `成功 ${requirementsToAssign.length - failures.length} 条`,
+      `失败 ${failures.length} 条`,
+      ...failures.slice(0, 3).map((failure) =>
+        `${failure.requirement.title}：${failure.message}`),
+    ].join('；')
+    toast.warning('部分需求未能加入版本', '失败项已保留选中，可重试')
+  } catch (value) {
+    batchAssignError.value = messageOf(value)
+  } finally {
+    batchAssignSaving.value = false
+  }
+}
+
+function openBatchDelete() {
+  if (!canDeleteAnyRequirement.value || selectedRequirements.value.length === 0) return
+  batchDeleteError.value = null
+  batchDeleteOpen.value = true
+}
+
+async function confirmBatchDelete() {
+  if (
+    batchDeleteSaving.value
+    || !canDeleteAnyRequirement.value
+    || selectedRequirements.value.length === 0
+  ) return
+  const targets = [...selectedRequirements.value]
+  batchDeleteSaving.value = true
+  batchDeleteError.value = null
+  try {
+    const result = await deleteRequirements(targets.map((requirement) => requirement.id))
+    batchDeleteOpen.value = false
+    clearRequirementSelection()
+    selectedRequirementId.value = null
+    await load()
+    toast.success(
+      '需求已移入回收站',
+      `共 ${result.deletedCount} 条，可在回收站中恢复`,
+    )
+  } catch (value) {
+    batchDeleteError.value = messageOf(value)
+  } finally {
+    batchDeleteSaving.value = false
+  }
 }
 
 function versionLabel(requirement: Requirement | RequirementTrashItem) {
@@ -216,10 +449,10 @@ function sourceLabel(requirement: Requirement | RequirementTrashItem) {
   return requirement.source === 'AI' ? 'AI' : requirement.source === 'IMPORT' ? '导入' : '手工'
 }
 
-function requirementHint(row: Requirement | RequirementTrashItem) {
-  return 'reviewComment' in row
-    ? row.reviewComment || '等待纳入版本与评审'
-    : '已移入回收站'
+function memberName(userId: number | null | undefined) {
+  if (!userId) return '未知'
+  const member = members.value.find((item) => item.userId === userId)
+  return member?.displayName ?? `用户 #${userId}`
 }
 
 function rowUpdatedAt(row: Requirement | RequirementTrashItem) {
@@ -236,6 +469,8 @@ async function load() {
       versions.value = []
       members.value = []
       allInitiatives.value = []
+      clearRequirementSelection()
+      selectedRequirementId.value = null
       return
     }
     const [nextRequirements, nextTrash, nextVersions, nextMembers, nextInitiatives] = await Promise.all([
@@ -250,6 +485,16 @@ async function load() {
     versions.value = nextVersions
     members.value = nextMembers
     allInitiatives.value = nextInitiatives
+    const existingRequirementIds = new Set(
+      (isTrashView.value ? nextTrash : nextRequirements)
+        .map((requirement) => requirement.id),
+    )
+    selectedRequirementIds.value = selectedRequirementIds.value.filter(
+      (id) => existingRequirementIds.has(id),
+    )
+    if (!nextRequirements.some((requirement) => requirement.id === selectedRequirementId.value)) {
+      selectedRequirementId.value = null
+    }
   } catch (value) {
     error.value = messageOf(value)
     requirements.value = []
@@ -257,6 +502,8 @@ async function load() {
     versions.value = []
     allInitiatives.value = []
     members.value = []
+    clearRequirementSelection()
+    selectedRequirementId.value = null
   } finally {
     loading.value = false
   }
@@ -268,26 +515,20 @@ function openEditor(mode: 'manual' | 'ai', requirement: Requirement | null = nul
   editorOpen.value = true
 }
 
-function openRequirementRow(requirement: Requirement) {
-  if (requirement.poolStatus === 'POOL' || requirement.poolStatus === 'REJECTED') {
-    openEditor('manual', requirement)
+function selectRow(row: Requirement | RequirementTrashItem) {
+  if (isTrashView.value) {
+    selectedRequirementId.value = null
     return
   }
-  toast.show(
-    requirement.poolStatus === 'FORMAL'
-      ? '正式需求已进入详细设计'
-      : '需求正在评审',
-    {
-      description: requirement.poolStatus === 'FORMAL'
-        ? '请到“版本”页继续推进详细设计与研发。'
-        : '评审结束后才能继续编辑需求内容。',
-    },
-  )
+  selectedRequirementId.value = row.id
 }
 
-function selectRow(row: Requirement | RequirementTrashItem) {
-  if (isTrashView.value) return
-  openRequirementRow(row as Requirement)
+function editRequirementFromRow(row: Requirement | RequirementTrashItem) {
+  if (!('poolStatus' in row)) return
+  selectedRequirementId.value = row.id
+  if (isRequirementAssignable(row)) {
+    openEditor('manual', row)
+  }
 }
 
 async function saved(requirement: Requirement) {
@@ -337,6 +578,39 @@ async function confirmDelete() {
   }
 }
 
+function openPurge(items: RequirementTrashItem[]) {
+  if (!canPurgeRequirements.value || items.length === 0) return
+  purgeTargets.value = [...items]
+  purgeError.value = null
+  purgeOpen.value = true
+}
+
+async function confirmPurge() {
+  if (
+    purgeSaving.value
+    || !canPurgeRequirements.value
+    || purgeTargets.value.length === 0
+  ) return
+  const targets = [...purgeTargets.value]
+  purgeSaving.value = true
+  purgeError.value = null
+  try {
+    const result = await purgeRequirements(targets.map((item) => item.id))
+    purgeOpen.value = false
+    purgeTargets.value = []
+    clearRequirementSelection()
+    await load()
+    toast.success(
+      '需求已彻底删除',
+      `共 ${result.deletedCount} 条，无法恢复`,
+    )
+  } catch (value) {
+    purgeError.value = messageOf(value)
+  } finally {
+    purgeSaving.value = false
+  }
+}
+
 async function restoreFromTrash(item: RequirementTrashItem) {
   try {
     await restoreRequirement(item.id)
@@ -353,7 +627,7 @@ function openAssign(requirement: Requirement) {
   assignVersionId.value = String(
     requirement.versionId
     ?? targetVersionId.value
-    ?? planningVersions.value[0]?.id
+    ?? assignableVersions.value[0]?.id
     ?? '',
   )
   assignError.value = null
@@ -368,44 +642,11 @@ async function saveAssignment() {
     await assignRequirementVersion(assignTarget.value.id, Number(assignVersionId.value))
     assignOpen.value = false
     await load()
-    toast.success('需求已纳入产品版本', '现在可以提交需求评审')
+    toast.success('需求已纳入产品版本', '现在可以组织线下需求评审')
   } catch (value) {
     assignError.value = messageOf(value)
   } finally {
     assignSaving.value = false
-  }
-}
-
-async function submitReview(requirement: Requirement) {
-  try {
-    await reviewRequirement(requirement.id, 'SUBMIT')
-    await load()
-    toast.success('需求已提交评审')
-  } catch (value) {
-    toast.warning('提交需求评审失败', messageOf(value))
-  }
-}
-
-function openReview(requirement: Requirement) {
-  reviewTarget.value = requirement
-  reviewComment.value = ''
-  reviewError.value = null
-  reviewOpen.value = true
-}
-
-async function decideReview(action: 'APPROVE' | 'REJECT') {
-  if (!reviewTarget.value || reviewSaving.value) return
-  reviewSaving.value = true
-  reviewError.value = null
-  try {
-    await reviewRequirement(reviewTarget.value.id, action, reviewComment.value.trim())
-    reviewOpen.value = false
-    await load()
-    toast.success(action === 'APPROVE' ? '需求评审通过' : '需求已驳回')
-  } catch (value) {
-    reviewError.value = messageOf(value)
-  } finally {
-    reviewSaving.value = false
   }
 }
 
@@ -428,29 +669,11 @@ function downloadTemplate() {
 
 function openImport() {
   importProjectId.value = String(activeProjectId.value ?? '')
-  importInitiativeId.value = ''
-  importInitiatives.value = []
+  importVersionId.value = 'NONE'
   importFileName.value = ''
   importRows.value = []
   importError.value = null
   importOpen.value = true
-  void loadImportInitiatives()
-}
-
-async function loadImportInitiatives() {
-  const projectId = Number(importProjectId.value)
-  importInitiatives.value = []
-  importInitiativeId.value = ''
-  if (!projectId) return
-  try {
-    const items = await listInitiatives(projectId)
-    importInitiatives.value = items.filter(
-      (initiative) => initiative.status === 'APPROVED' && initiative.versionId !== null,
-    )
-    importInitiativeId.value = String(importInitiatives.value[0]?.id ?? '')
-  } catch (value) {
-    importError.value = messageOf(value)
-  }
 }
 
 function parseCsv(text: string): string[][] {
@@ -536,19 +759,20 @@ async function runImport() {
   if (
     importSaving.value
     || !importProjectId.value
-    || !importInitiativeId.value
     || importValidCount.value === 0
   ) return
   importSaving.value = true
   importError.value = null
   const failures: string[] = []
   let succeeded = 0
-  for (const row of importRows.value) {
+  const selectedVersion = canReview.value ? selectedImportVersion.value : undefined
+  for (const row of evaluatedImportRows.value) {
     if (row.error) continue
     try {
       await createRequirement({
         projectId: Number(importProjectId.value),
-        initiativeId: Number(importInitiativeId.value),
+        initiativeId: selectedVersion?.initiative.id ?? null,
+        versionId: selectedVersion?.version.id ?? null,
         source: 'IMPORT',
         title: row.title,
         rawText: row.rawText,
@@ -567,19 +791,33 @@ async function runImport() {
     toast.warning('部分需求导入失败', '请根据错误信息修正后重新导入')
   } else {
     importOpen.value = false
-    toast.success('需求导入完成', `已导入 ${succeeded} 条到需求池`)
+    toast.success(
+      '需求导入完成',
+      selectedVersion
+        ? `已导入 ${succeeded} 条并纳入 ${selectedVersion.version.versionNo}`
+        : `已导入 ${succeeded} 条到需求池`,
+    )
   }
 }
 
 watch(
   () => activeProjectId.value,
-  () => void load(),
+  () => {
+    clearRequirementSelection()
+    selectedRequirementId.value = null
+    void load()
+  },
 )
 watch(viewMode, () => {
+  clearRequirementSelection()
+  selectedRequirementId.value = null
   keyword.value = ''
   statusFilter.value = 'ALL'
 })
-watch(importProjectId, () => void loadImportInitiatives())
+watch([keyword, statusFilter], () => {
+  clearRequirementSelection()
+  selectedRequirementId.value = null
+})
 onMounted(() => void load())
 </script>
 
@@ -587,13 +825,16 @@ onMounted(() => void load())
   <div class="flex h-full min-h-0 flex-col">
     <ListToolbar>
       <template #title>
-        <h1 class="text-body font-emphasis text-label">
-          {{ isTrashView ? '需求回收站' : '需求池' }}
-        </h1>
+        <h1 class="shrink-0 text-body font-emphasis text-label">需求池</h1>
+        <SegmentedControl
+          v-model="viewMode"
+          :items="viewItems"
+          size="lg"
+          class="shrink-0"
+        />
         <span class="tnum text-caption text-label-tertiary">{{ filtered.length }}</span>
       </template>
       <template #filters>
-        <SegmentedControl v-model="viewMode" :items="viewItems" size="lg" />
         <Select
           v-if="!isTrashView"
           v-model="statusFilter"
@@ -610,7 +851,7 @@ onMounted(() => void load())
           <Input
             v-model="keyword"
             size="lg"
-            :placeholder="isTrashView ? '搜索已删除需求' : '搜索需求'"
+            :placeholder="isTrashView ? '搜索已删除需求' : '搜索标题、编号或创建人'"
             class="pl-7 pr-7"
           />
           <button
@@ -664,21 +905,105 @@ onMounted(() => void load())
       v-if="productWorkPending && !canReview && !isTrashView"
       class="border-b border-warning/20 bg-warning/5 px-4 py-2 text-caption text-warning"
     >
-      产品版本规划与需求评审需要“产品负责人”或“项目负责人”；当前账号可以录入和查看需求，但不能纳入版本或评审。
+      产品版本规划与需求纳入需要“产品负责人”或“项目负责人”；当前账号可以录入和查看需求，但不能纳入版本。需求评审请到“版本”页登记线下评审记录。
     </p>
-
-    <div class="scroll-area min-h-0 flex-1 overflow-auto">
-      <Table
-        :columns="columns"
-        :rows="filtered"
-        :show-empty="false"
-        @select="selectRow($event as Requirement | RequirementTrashItem)"
+    <div
+      v-if="!isTrashView && selectedRequirements.length > 0"
+      class="flex flex-wrap items-center gap-2 border-b border-accent/20 bg-accent/5 px-4 py-2 text-caption text-label-secondary"
+    >
+      <span class="font-emphasis text-label">已选 {{ selectedRequirements.length }} 条需求</span>
+      <span class="text-label-tertiary">
+        {{ selectedAssignableRequirements.length > 0
+          ? `${selectedAssignableRequirements.length} 条可加入规划版本`
+          : '当前选择不支持加入版本' }}
+      </span>
+      <Button
+        class="ml-auto"
+        size="sm"
+        variant="primary"
+        :disabled="!canReview
+          || assignableVersions.length === 0
+          || selectedAssignableRequirements.length === 0"
+        @click="openBatchAssign"
       >
+        加入版本 {{ selectedAssignableRequirements.length }}
+      </Button>
+      <Button
+        v-if="canDeleteAnyRequirement"
+        variant="danger"
+        size="sm"
+        @click="openBatchDelete"
+      >
+        批量移入回收站
+      </Button>
+      <Button size="sm" @click="clearRequirementSelection">取消选择</Button>
+    </div>
+    <div
+      v-if="isTrashView && selectedTrashItems.length > 0"
+      class="flex flex-wrap items-center gap-2 border-b border-danger/20 bg-danger/5 px-4 py-2 text-caption text-label-secondary"
+    >
+      <span class="font-emphasis text-label">已选 {{ selectedTrashItems.length }} 条需求</span>
+      <span class="text-label-tertiary">彻底删除后无法恢复</span>
+      <Button
+        v-if="canPurgeRequirements"
+        class="ml-auto"
+        variant="danger"
+        size="sm"
+        @click="openPurge(selectedTrashItems)"
+      >
+        彻底删除 {{ selectedTrashItems.length }} 条
+      </Button>
+      <Button size="sm" @click="clearRequirementSelection">取消选择</Button>
+    </div>
+
+    <div class="flex min-h-0 flex-1">
+      <div class="flex min-w-0 flex-1 flex-col">
+        <div class="scroll-area min-h-0 flex-1 overflow-auto">
+          <Table
+            :columns="columns"
+            :rows="filtered"
+            :selected-id="selectedRequirementId"
+            :checked-ids="selectedRequirementIds"
+            :show-empty="false"
+            @select="selectRow($event as Requirement | RequirementTrashItem)"
+            @row-dblclick="editRequirementFromRow($event as Requirement | RequirementTrashItem)"
+          >
+        <template #header="{ column }">
+          <Checkbox
+            v-if="column.key === 'selection'"
+            :model-value="selectionState"
+            :disabled="selectableRequirements.length === 0"
+            aria-label="选择当前列表全部可操作需求"
+            @update:model-value="toggleAllRequirements"
+          />
+          <span v-else>{{ column.label }}</span>
+        </template>
         <template #cell="{ row, column }">
-          <span v-if="column.key === 'title'" class="min-w-0">
+          <div v-if="column.key === 'selection'" class="flex items-center" @click.stop>
+            <Checkbox
+              :model-value="selectedRequirementSet.has(row.id)"
+              :disabled="isTrashView
+                ? !canPurgeRequirements
+                : !canReview
+                  || !('poolStatus' in row)
+                  || !isRequirementSelectable(row as Requirement)"
+              :aria-label="`选择需求 ${row.title}`"
+              @update:model-value="toggleRequirementSelection(row.id, $event === true)"
+            />
+          </div>
+          <span
+            v-else-if="column.key === 'requirementNo'"
+            class="tnum font-mono text-caption text-label-secondary"
+          >
+            #{{ formatRequirementNo(row.requirementNo) }}
+          </span>
+          <span v-else-if="column.key === 'title'" class="min-w-0">
             <span class="block truncate text-caption font-emphasis text-label">{{ row.title }}</span>
-            <span class="mt-0.5 block truncate text-[10px] text-label-tertiary">
-              #{{ row.id }} · {{ requirementHint(row as Requirement | RequirementTrashItem) }}
+            <span
+              v-if="'reviewComment' in row && row.reviewComment"
+              class="mt-0.5 block truncate text-[10px] text-label-tertiary"
+            >
+              {{ row.reviewComment }}
             </span>
           </span>
           <span v-else-if="column.key === 'version'" class="text-caption text-label-secondary">
@@ -693,13 +1018,16 @@ onMounted(() => void load())
             </Badge>
             <Badge
               v-else
-              :tone="statusMeta[(row as Requirement).poolStatus].tone"
+              :tone="statusMeta[requirementDisplayStatus(row as Requirement)].tone"
             >
-              {{ statusMeta[(row as Requirement).poolStatus].label }}
+              {{ statusMeta[requirementDisplayStatus(row as Requirement)].label }}
             </Badge>
           </template>
           <span v-else-if="column.key === 'source'" class="text-caption text-label-tertiary">
             {{ sourceLabel(row as Requirement | RequirementTrashItem) }}
+          </span>
+          <span v-else-if="column.key === 'createdBy'" class="truncate text-caption text-label-secondary">
+            {{ memberName(row.createdBy) }}
           </span>
           <span v-else-if="column.key === 'updated'" class="text-caption text-label-tertiary">
             {{ formatRelative(String(rowUpdatedAt(row as Requirement | RequirementTrashItem))) }}
@@ -707,43 +1035,62 @@ onMounted(() => void load())
           <span v-else-if="column.key === 'deletedAt'" class="text-caption text-label-tertiary">
             {{ formatRelative(String((row as RequirementTrashItem).deletedAt)) }}
           </span>
-          <div v-else-if="column.key === 'actions'" class="flex justify-end gap-1">
+          <div v-else-if="column.key === 'actions'" class="flex items-center justify-end gap-1">
             <template v-if="isTrashView">
-              <Button size="sm" @click.stop="restoreFromTrash(row as RequirementTrashItem)">
+              <Button
+                variant="ghost"
+                size="sm"
+                @click.stop="restoreFromTrash(row as RequirementTrashItem)"
+              >
                 <Icon :as="RotateCcw" size="inline" />移回需求池
               </Button>
+              <Button
+                v-if="canPurgeRequirements"
+                variant="danger"
+                size="sm"
+                @click.stop="openPurge([row as RequirementTrashItem])"
+              >
+                <Icon :as="Trash2" size="inline" />彻底删除
+              </Button>
             </template>
-            <template v-else-if="(row as Requirement).poolStatus === 'POOL' || (row as Requirement).poolStatus === 'REJECTED'">
-              <Button size="sm" :disabled="!canReview" @click.stop="openAssign(row as Requirement)">
+            <template v-else-if="isRequirementAssignable(row as Requirement)">
+              <Button
+                variant="ghost"
+                size="sm"
+                :disabled="!canReview"
+                @click.stop="openAssign(row as Requirement)"
+              >
                 {{ row.versionId ? '更换版本' : '加入版本' }}
               </Button>
-              <Button
-                v-if="row.versionId"
-                size="sm"
-                variant="primary"
-                :disabled="!canReview"
-                @click.stop="submitReview(row as Requirement)"
-              >
-                提交评审
-              </Button>
-              <IconButton
-                label="移入回收站"
-                size="sm"
-                @click.stop="openDelete(row as Requirement)"
-              >
-                <Icon :as="Trash2" size="inline" />
-              </IconButton>
+              <Tooltip content="编辑需求">
+                <IconButton
+                  label="编辑需求"
+                  size="sm"
+                  @click.stop="openEditor('manual', row as Requirement)"
+                >
+                  <Icon :as="Pencil" size="inline" />
+                </IconButton>
+              </Tooltip>
             </template>
-            <Button
+            <span
               v-else-if="(row as Requirement).poolStatus === 'IN_REVIEW'"
-              size="sm"
-              variant="primary"
-              :disabled="!canReview"
-              @click.stop="openReview(row as Requirement)"
+              class="text-caption text-accent"
             >
-              评审
-            </Button>
-            <Badge v-else tone="success">已进入研发</Badge>
+              请到版本页评审
+            </span>
+            <Badge v-else-if="(row as Requirement).poolStatus === 'FORMAL'" tone="success">
+              已进入研发
+            </Badge>
+            <IconButton
+              v-if="!isTrashView
+                && (canDeleteAnyRequirement
+                  || ('poolStatus' in row && isRequirementAssignable(row as Requirement)))"
+              label="移入回收站"
+              size="sm"
+              @click.stop="openDelete(row as Requirement)"
+            >
+              <Icon :as="Trash2" size="inline" />
+            </IconButton>
           </div>
         </template>
       </Table>
@@ -770,6 +1117,126 @@ onMounted(() => void load())
         :title="isTrashView ? '回收站没有匹配的需求' : '没有匹配的需求'"
         description="换个关键词再试。"
       />
+        </div>
+      </div>
+
+      <aside
+        v-if="!isTrashView"
+        :class="[
+          'overflow-y-auto border-separator bg-window',
+          selectedRequirement
+            ? 'fixed inset-0 z-40 w-full p-4 lg:static lg:inset-auto lg:z-auto lg:w-[320px] lg:shrink-0 lg:border-l'
+            : 'hidden lg:block lg:w-[320px] lg:shrink-0 lg:border-l lg:p-4',
+        ]"
+      >
+        <template v-if="selectedRequirement">
+          <button
+            type="button"
+            class="mb-3 inline-flex items-center gap-0.5 text-caption text-accent lg:hidden"
+            @click="selectedRequirementId = null"
+          >
+            <Icon :as="ChevronLeft" size="inline" />返回列表
+          </button>
+          <div class="flex items-center gap-2">
+            <span class="tnum font-mono text-caption text-label-tertiary">
+              #{{ formatRequirementNo(selectedRequirement.requirementNo) }}
+            </span>
+            <Badge :tone="statusMeta[requirementDisplayStatus(selectedRequirement)].tone">
+              {{ statusMeta[requirementDisplayStatus(selectedRequirement)].label }}
+            </Badge>
+            <IconButton
+              class="ml-auto"
+              label="关闭需求详情"
+              size="sm"
+              @click="selectedRequirementId = null"
+            >
+              <Icon :as="X" size="inline" />
+            </IconButton>
+          </div>
+          <h2 class="mt-2 text-body font-emphasis text-label">
+            {{ selectedRequirement.title }}
+          </h2>
+          <p class="mt-1 text-caption text-label-tertiary">
+            {{ versionLabel(selectedRequirement) }} ·
+            来源：{{ sourceLabel(selectedRequirement) }} ·
+            创建人：{{ memberName(selectedRequirement.createdBy) }} ·
+            {{ formatRelative(selectedRequirement.updatedAt) }}
+          </p>
+
+          <div class="mt-4 rounded-panel border border-separator-soft bg-content p-3">
+            <p class="text-caption font-emphasis text-label-secondary">需求描述</p>
+            <p class="mt-1 whitespace-pre-wrap text-caption text-label-secondary">
+              {{ selectedRequirement.rawText }}
+            </p>
+          </div>
+          <div
+            v-if="selectedRequirement.acceptanceText"
+            class="mt-3 rounded-panel border border-separator-soft bg-content p-3"
+          >
+            <p class="text-caption font-emphasis text-label-secondary">验收标准</p>
+            <p class="mt-1 whitespace-pre-wrap text-caption text-label-secondary">
+              {{ selectedRequirement.acceptanceText }}
+            </p>
+          </div>
+          <div
+            v-if="selectedRequirement.clarificationText"
+            class="mt-3 rounded-panel border border-separator-soft bg-content p-3"
+          >
+            <p class="text-caption font-emphasis text-label-secondary">补充澄清</p>
+            <p class="mt-1 whitespace-pre-wrap text-caption text-label-secondary">
+              {{ selectedRequirement.clarificationText }}
+            </p>
+          </div>
+          <div
+            v-if="selectedRequirement.reviewComment"
+            class="mt-3 rounded-panel border border-separator-soft bg-content p-3"
+          >
+            <p class="text-caption font-emphasis text-label-secondary">评审意见</p>
+            <p class="mt-1 whitespace-pre-wrap text-caption text-label-secondary">
+              {{ selectedRequirement.reviewComment }}
+            </p>
+          </div>
+
+          <p
+            v-if="selectedRequirement.poolStatus === 'IN_REVIEW'"
+            class="mt-4 rounded-panel border border-accent/20 bg-accent/5 p-3 text-caption text-label-secondary"
+          >
+            需求评审请在“版本”页登记线下评审结论和会议纪要。
+          </p>
+          <p
+            v-else-if="selectedRequirement.poolStatus === 'FORMAL'"
+            class="mt-4 rounded-panel border border-success/20 bg-success/5 p-3 text-caption text-label-secondary"
+          >
+            正式需求已进入详细设计，请到“版本”页继续推进研发流程。
+          </p>
+          <div class="mt-4 flex flex-wrap items-center gap-2 border-t border-separator pt-3">
+            <template v-if="isRequirementAssignable(selectedRequirement)">
+              <Button size="sm" @click="openEditor('manual', selectedRequirement)">
+                <Icon :as="Pencil" size="inline" />编辑
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                :disabled="!canReview"
+                @click="openAssign(selectedRequirement)"
+              >
+                {{ selectedRequirement.versionId ? '更换版本' : '加入版本' }}
+              </Button>
+            </template>
+            <IconButton
+              v-if="canDeleteAnyRequirement || isRequirementAssignable(selectedRequirement)"
+              label="移入回收站"
+              size="sm"
+              @click="openDelete(selectedRequirement)"
+            >
+              <Icon :as="Trash2" size="inline" />
+            </IconButton>
+          </div>
+        </template>
+        <div v-else class="flex h-full items-center justify-center px-4 text-center">
+          <p class="text-caption text-label-tertiary">选中一条需求查看完整内容</p>
+        </div>
+      </aside>
     </div>
 
     <RequirementPoolEditorDialog
@@ -793,7 +1260,7 @@ onMounted(() => void load())
         <div class="rounded-panel border border-warning/25 bg-warning/5 p-3">
           <p class="text-caption font-emphasis text-label">{{ deleteTarget?.title }}</p>
           <p class="mt-1 text-caption text-label-secondary">
-            #{{ deleteTarget?.id }} · 删除后可在回收站移回需求池
+            #{{ formatRequirementNo(deleteTarget?.requirementNo) }} · 删除后可在回收站移回需求池
           </p>
         </div>
         <p v-if="deleteError" class="text-caption text-danger">{{ deleteError }}</p>
@@ -807,10 +1274,83 @@ onMounted(() => void load())
     </Dialog>
 
     <Dialog
+      v-model:open="batchDeleteOpen"
+      layout="form"
+      size="large"
+      title="批量移入需求回收站"
+      description="项目负责人可以删除任意状态的需求；研发记录会保留，需求之后仍可从回收站恢复。"
+      :icon="Trash2"
+    >
+      <div class="flex flex-col gap-3">
+        <div class="max-h-56 space-y-1 overflow-y-auto rounded-panel border border-separator-soft p-2">
+          <div
+            v-for="requirement in selectedRequirements"
+            :key="requirement.id"
+            class="flex items-center gap-2 rounded-control px-1.5 py-1 text-caption"
+          >
+            <span class="tnum shrink-0 font-mono text-label-tertiary">
+              #{{ formatRequirementNo(requirement.requirementNo) }}
+            </span>
+            <span class="min-w-0 flex-1 truncate text-label">{{ requirement.title }}</span>
+            <Badge :tone="statusMeta[requirementDisplayStatus(requirement)].tone">
+              {{ statusMeta[requirementDisplayStatus(requirement)].label }}
+            </Badge>
+          </div>
+        </div>
+        <p class="text-caption text-label-secondary">
+          共 {{ selectedRequirements.length }} 条需求，删除后可在回收站恢复。
+        </p>
+        <p v-if="batchDeleteError" class="text-caption text-danger">{{ batchDeleteError }}</p>
+      </div>
+      <template #footer>
+        <Button :disabled="batchDeleteSaving" @click="batchDeleteOpen = false">取消</Button>
+        <Button variant="danger" :disabled="batchDeleteSaving" @click="confirmBatchDelete">
+          {{ batchDeleteSaving
+            ? '删除中…'
+            : `确认删除 ${selectedRequirements.length} 条` }}
+        </Button>
+      </template>
+    </Dialog>
+
+    <Dialog
+      v-model:open="purgeOpen"
+      layout="form"
+      size="large"
+      title="彻底删除需求"
+      description="此操作不可恢复。关联任务与发布历史会保留，但会解除与这些需求的关联。"
+      :icon="Trash2"
+    >
+      <div class="flex flex-col gap-3">
+        <div class="max-h-56 space-y-1 overflow-y-auto rounded-panel border border-danger/20 p-2">
+          <div
+            v-for="item in purgeTargets"
+            :key="item.id"
+            class="flex items-center gap-2 rounded-control px-1.5 py-1 text-caption"
+          >
+            <span class="tnum shrink-0 font-mono text-label-tertiary">
+              #{{ formatRequirementNo(item.requirementNo) }}
+            </span>
+            <span class="min-w-0 flex-1 truncate text-label">{{ item.title }}</span>
+          </div>
+        </div>
+        <p class="text-caption text-danger">
+          共 {{ purgeTargets.length }} 条需求将被永久删除，无法恢复。
+        </p>
+        <p v-if="purgeError" class="text-caption text-danger">{{ purgeError }}</p>
+      </div>
+      <template #footer>
+        <Button :disabled="purgeSaving" @click="purgeOpen = false">取消</Button>
+        <Button variant="danger" :disabled="purgeSaving" @click="confirmPurge">
+          {{ purgeSaving ? '删除中…' : `确认彻底删除 ${purgeTargets.length} 条` }}
+        </Button>
+      </template>
+    </Dialog>
+
+    <Dialog
       v-model:open="assignOpen"
       layout="form"
       title="纳入产品版本"
-      description="需求纳入规划中的产品版本后，才能提交需求评审。"
+      description="需求纳入规划中的产品版本后，才能登记线下需求评审记录。"
     >
       <div class="flex flex-col gap-3">
         <div class="rounded-control bg-window px-3 py-2 text-caption text-label">
@@ -819,16 +1359,16 @@ onMounted(() => void load())
         <DialogField label="产品版本" required>
           <Select
             v-model="assignVersionId"
-            :items="planningVersions.map((version) => ({
+            :items="assignableVersions.map((version) => ({
               value: String(version.id),
               label: version.versionNo,
             }))"
-            placeholder="先创建一个规划中的版本"
+            placeholder="先创建一个完成立项审批的规划版本"
             class="w-full"
           />
         </DialogField>
-        <p v-if="planningVersions.length === 0" class="text-caption text-warning">
-          当前项目没有规划中的产品版本，请先到“版本”页创建。
+        <p v-if="assignableVersions.length === 0" class="text-caption text-warning">
+          当前项目没有可纳入的规划版本，请先创建版本并完成版本立项审批。
         </p>
         <p v-if="assignError" class="text-caption text-danger">{{ assignError }}</p>
       </div>
@@ -845,41 +1385,56 @@ onMounted(() => void load())
     </Dialog>
 
     <Dialog
-      v-model:open="reviewOpen"
+      v-model:open="batchAssignOpen"
       layout="form"
-      title="需求评审"
-      description="产品负责人确认需求价值、范围和验收标准。通过后需求成为正式需求并进入详细设计。"
+      size="large"
+      title="批量加入产品版本"
+      description="已选中的需求会统一纳入所选版本；原本关联其他版本的需求会被调整到目标版本。"
     >
       <div class="flex flex-col gap-3">
-        <div class="rounded-control bg-window px-3 py-2 text-caption text-label">
-          {{ reviewTarget?.title }}
+        <div class="max-h-48 space-y-1 overflow-y-auto rounded-panel border border-separator-soft p-2">
+          <div
+            v-for="requirement in selectedAssignableRequirements"
+            :key="requirement.id"
+            class="flex items-center gap-2 rounded-control px-1.5 py-1 text-caption"
+          >
+            <span class="tnum shrink-0 font-mono text-label-tertiary">
+              #{{ formatRequirementNo(requirement.requirementNo) }}
+            </span>
+            <span class="min-w-0 flex-1 truncate text-label">{{ requirement.title }}</span>
+            <span v-if="requirement.versionId" class="shrink-0 text-label-tertiary">
+              {{ versionLabel(requirement) }}
+            </span>
+          </div>
         </div>
-        <p class="whitespace-pre-wrap text-caption text-label-secondary">
-          {{ reviewTarget?.rawText }}
-        </p>
-        <p v-if="reviewTarget?.acceptanceText" class="rounded-control bg-content px-3 py-2 text-caption text-label-secondary">
-          验收标准：{{ reviewTarget.acceptanceText }}
-        </p>
-        <DialogField label="评审意见">
-          <Textarea v-model="reviewComment" :rows="3" placeholder="通过可选填；驳回必须填写原因" />
+        <DialogField label="目标产品版本" required>
+          <Select
+            v-model="batchAssignVersionId"
+            :items="assignableVersions.map((version) => ({
+              value: String(version.id),
+              label: version.versionNo,
+            }))"
+            placeholder="选择规划中的产品版本"
+            class="w-full"
+          />
         </DialogField>
-        <p v-if="reviewError" class="text-caption text-danger">{{ reviewError }}</p>
+        <p v-if="assignableVersions.length === 0" class="text-caption text-warning">
+          当前项目没有可纳入的规划版本，请先创建版本并完成版本立项审批。
+        </p>
+        <p v-if="batchAssignError" class="text-caption text-danger">{{ batchAssignError }}</p>
       </div>
       <template #footer>
-        <Button :disabled="reviewSaving" @click="reviewOpen = false">取消</Button>
-        <Button
-          variant="danger"
-          :disabled="reviewSaving || !reviewComment.trim()"
-          @click="decideReview('REJECT')"
-        >
-          驳回
-        </Button>
+        <Button :disabled="batchAssignSaving" @click="batchAssignOpen = false">取消</Button>
         <Button
           variant="primary"
-          :disabled="reviewSaving"
-          @click="decideReview('APPROVE')"
+          :disabled="batchAssignSaving
+            || !batchAssignVersionId
+            || selectedAssignableRequirements.length === 0"
+          @click="assignSelectedRequirements"
         >
-          {{ reviewSaving ? '提交中…' : '评审通过' }}
+          {{ batchAssignSaving
+            ? '纳入中…'
+            : `纳入 ${selectedAssignableRequirements.length} 条需求` }}
         </Button>
       </template>
     </Dialog>
@@ -889,7 +1444,7 @@ onMounted(() => void load())
       layout="form"
       size="large"
       title="导入需求池"
-      description="按模板整理后导入 CSV；每行会创建一条待版本规划的需求。"
+      description="按模板整理后导入 CSV；可选择直接关联一个规划中的产品版本。"
       :icon="Upload"
     >
       <div class="flex flex-col gap-3">
@@ -911,23 +1466,27 @@ onMounted(() => void load())
             {{ importFileName }} · {{ importRows.length }} 行
           </span>
         </div>
-        <DialogField label="所属版本立项" required>
+        <DialogField label="关联产品版本（可选）">
           <Select
-            v-model="importInitiativeId"
-            :items="importInitiatives.map((initiative) => ({
-              value: String(initiative.id),
-              label: initiative.title,
-            }))"
-            placeholder="选择已批准的版本立项"
+            v-model="importVersionId"
+            :items="importVersionItems"
             class="w-full"
           />
         </DialogField>
+        <p class="text-caption text-label-tertiary">
+          选择“不关联版本”时只进入需求池，稍后仍可加入版本；关联版本后会同时纳入该版本。
+        </p>
+        <p class="text-caption text-label-tertiary">
+          重复检测按当前项目内的需求名称判断，忽略大小写和多余空格；同名需求会自动跳过。
+        </p>
         <p v-if="importRows.length > 0" class="text-caption text-label-secondary">
-          可导入 {{ importValidCount }} 条，异常 {{ importRows.length - importValidCount }} 条
+          可导入 {{ importValidCount }} 条
+          <span v-if="importDuplicateCount > 0">，重复 {{ importDuplicateCount }} 条将跳过</span>
+          <span v-if="importOtherInvalidCount > 0">，其他异常 {{ importOtherInvalidCount }} 条</span>
         </p>
         <div v-if="importRows.length > 0" class="max-h-56 overflow-y-auto rounded-panel border border-separator-soft">
           <div
-            v-for="(row, index) in importRows.slice(0, 20)"
+            v-for="(row, index) in evaluatedImportRows.slice(0, 20)"
             :key="`${index}-${row.title}`"
             class="flex items-center gap-2 border-b border-separator-soft px-2.5 py-2 last:border-b-0"
           >
@@ -939,15 +1498,21 @@ onMounted(() => void load())
           </div>
         </div>
         <p v-if="importError" class="text-caption text-danger">{{ importError }}</p>
-        <p v-if="importInitiatives.length === 0 && importProjectId" class="text-caption text-warning">
-          当前项目没有已批准的版本立项，请先到“版本”页完成版本立项。
+        <p v-if="!canReview" class="text-caption text-warning">
+          当前账号没有版本规划权限，只能导入到需求池，不能直接关联产品版本。
+        </p>
+        <p
+          v-else-if="importVersionOptions.length === 0 && importProjectId"
+          class="text-caption text-label-tertiary"
+        >
+          当前项目没有可关联的规划中版本；也可以先只导入需求池。
         </p>
       </div>
       <template #footer>
         <Button :disabled="importSaving" @click="importOpen = false">取消</Button>
         <Button
           variant="primary"
-          :disabled="importSaving || importValidCount === 0 || !importInitiativeId"
+          :disabled="importSaving || importValidCount === 0"
           @click="runImport"
         >
           {{ importSaving ? '导入中…' : `导入 ${importValidCount} 条` }}

@@ -41,21 +41,34 @@ class InitiativeCommandServiceTest {
     private static final ProjectId PROJECT = ProjectId.of(7L);
 
     @Test
-    @DisplayName("没有纪要和附件时不能同意立项")
-    void requiresMeetingEvidenceForApproval() {
+    @DisplayName("发起版本立项时必须先提供会议纪要")
+    void requiresMeetingEvidenceBeforeSubmission() {
         Fixture fixture = new Fixture();
-        Initiative initiative = fixture.submittedInitiative();
+        Initiative initiative = fixture.versionDraft(null);
 
-        assertThrows(DomainException.class, () -> fixture.service.approve(
-                initiative.getId(), OWNER, "同意", ""));
-        assertEquals(InitiativeStatus.SUBMITTED, initiative.getStatus());
+        assertThrows(DomainException.class,
+                () -> fixture.service.submit(initiative.getId(), OWNER));
+        assertEquals(InitiativeStatus.DRAFT, initiative.getStatus());
     }
 
     @Test
-    @DisplayName("只上传会议纪要附件也可以同意立项")
-    void approvesWithAttachmentOnly() {
+    @DisplayName("审批只记录意见，不再要求补充会议纪要")
+    void approvalDoesNotRequireNewMeetingEvidence() {
         Fixture fixture = new Fixture();
-        Initiative initiative = fixture.submittedInitiative();
+        Initiative initiative = fixture.versionDraft("线下评审已通过");
+        fixture.service.submit(initiative.getId(), OWNER);
+
+        fixture.service.approve(initiative.getId(), OWNER, "同意");
+
+        assertEquals(InitiativeStatus.APPROVED, initiative.getStatus());
+        assertEquals("线下评审已通过", initiative.getMeetingMinutes());
+    }
+
+    @Test
+    @DisplayName("发起时只上传会议纪要附件即可提交并审批")
+    void submitsWithAttachmentAndApproves() {
+        Fixture fixture = new Fixture();
+        Initiative initiative = fixture.versionDraft(null);
         fixture.attachments.add(new InitiativeAttachment(
                 InitiativeAttachmentId.of(1),
                 initiative.getId(),
@@ -66,7 +79,8 @@ class InitiativeCommandServiceTest {
                 OWNER,
                 Instant.now()));
 
-        fixture.service.approve(initiative.getId(), OWNER, "同意", "");
+        fixture.service.submit(initiative.getId(), OWNER);
+        fixture.service.approve(initiative.getId(), OWNER, "同意");
 
         assertEquals(InitiativeStatus.APPROVED, initiative.getStatus());
     }
@@ -107,15 +121,23 @@ class InitiativeCommandServiceTest {
                     new DirectTransactions());
         }
 
-        private Initiative submittedInitiative() {
-            Initiative initiative = service.create(new SaveInitiativeCommand(
+        private Initiative versionDraft(String meetingMinutes) {
+            Initiative initiative = Initiative.create(
                     PROJECT,
-                    "研发流程立项",
-                    "验证审批材料",
+                    ProductVersionId.of(99L),
+                    OWNER,
+                    "版本立项",
+                    "验证会议纪要提交时点",
                     null,
                     null,
-                    null), OWNER);
-            service.submit(initiative.getId(), OWNER);
+                    null,
+                    null,
+                    null,
+                    null);
+            if (meetingMinutes != null) {
+                initiative.updateMeetingMinutes(meetingMinutes);
+            }
+            initiatives.save(initiative);
             return initiative;
         }
     }

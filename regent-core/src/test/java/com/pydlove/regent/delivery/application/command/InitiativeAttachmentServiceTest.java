@@ -57,7 +57,7 @@ class InitiativeAttachmentServiceTest {
         Fixture fixture = new Fixture();
         Initiative initiative = fixture.initiative();
         initiative.submit();
-        initiative.approve("同意立项");
+        initiative.approve();
         fixture.initiatives.save(initiative);
 
         assertThrows(DomainException.class, () -> fixture.service.attach(

@@ -20,12 +20,12 @@ import {
   type DialogVariantProps,
 } from './dialog.variants'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     title: string
     description?: string
     layout?: DialogVariantProps['layout']
-    /** 弹框宽度：large 用于长表单，wide 只给需要横排查看的日志类弹框 */
+    /** 弹框宽度：large 用于一般长表单，wide 用于复杂录入和日志类弹框 */
     size?: DialogVariantProps['size']
     /** compact 把最大高度收敛到视口的 80% */
     maxHeight?: DialogVariantProps['maxHeight']
@@ -34,6 +34,8 @@ withDefaults(
     fullscreen?: boolean
     icon?: DialogIcon
     iconTone?: DialogIconProps['tone']
+    /** 表单类弹框可关闭“点击遮罩关闭”，避免误触丢失未保存内容。 */
+    closeOnOutsideClick?: boolean
   }>(),
   {
     description: '',
@@ -44,6 +46,7 @@ withDefaults(
     fullscreen: false,
     icon: undefined,
     iconTone: 'default',
+    closeOnOutsideClick: true,
   },
 )
 
@@ -54,6 +57,10 @@ const open = defineModel<boolean>('open', { default: false })
  * 谁在上面由 dialog 组件说了算，不由它在 body 里的插入位置说了算。见 useOverlayLayer。
  */
 const { zIndex } = useOverlayLayer(open)
+
+function handlePointerDownOutside(event: Event) {
+  if (!props.closeOnOutsideClick) event.preventDefault()
+}
 </script>
 
 <template>
@@ -65,7 +72,11 @@ const { zIndex } = useOverlayLayer(open)
       <!-- 遮罩只做轻微压暗：macOS 的模态是「父窗口退后」，不是「盖一层黑布」 -->
       <DialogOverlay class="fixed inset-0 animate-overlay-in bg-black/25" :style="{ zIndex }" />
       <!-- 定位留给 DialogContent，动效留给 DialogPanel —— 两者抢同一个 transform 会打架 -->
-      <DialogContent class="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" :style="{ zIndex }">
+      <DialogContent
+        class="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+        :style="{ zIndex }"
+        @pointer-down-outside="handlePointerDownOutside"
+      >
         <DialogPanel
           :layout="layout"
           :size="size"

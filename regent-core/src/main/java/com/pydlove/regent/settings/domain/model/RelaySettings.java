@@ -27,7 +27,7 @@ public record RelaySettings(
     public static final String DEFAULT_INSTALL_DIRECTORY = "/root/app/regent-relay";
 
     public RelaySettings {
-        serverUrl = serverUrl == null ? "" : serverUrl.trim();
+        serverUrl = normalizeServerUrl(serverUrl);
         serverIp = serverIp == null ? "" : serverIp.trim();
         sshUsername = sshUsername == null || sshUsername.isBlank()
                 ? DEFAULT_SSH_USERNAME
@@ -91,8 +91,16 @@ public record RelaySettings(
         if (uri.getRawQuery() != null || uri.getRawFragment() != null) {
             throw new DomainException("中继服务器地址不能包含查询参数或片段");
         }
-        if (uri.getPath() != null && !uri.getPath().isEmpty() && !"/".equals(uri.getPath())) {
-            throw new DomainException("中继服务器地址必须指向站点根地址");
+        String path = uri.getPath();
+        if (path != null
+                && !path.isEmpty()
+                && (!path.startsWith("/")
+                || !path.matches("/[A-Za-z0-9._~/-]*")
+                || path.contains("//")
+                || path.endsWith("/.")
+                || path.endsWith("/..")
+                || hasUnsafePathSegment(path))) {
+            throw new DomainException("中继服务器地址只能包含安全的站点子路径");
         }
     }
 
@@ -101,11 +109,11 @@ public record RelaySettings(
             return;
         }
         if (value.length() > MAX_SERVER_IP_LENGTH) {
-            throw new DomainException("服务器 IP 不能超过 " + MAX_SERVER_IP_LENGTH + " 个字符");
+            throw new DomainException("服务器域名或 IP 不能超过 " + MAX_SERVER_IP_LENGTH + " 个字符");
         }
         if (value.chars().anyMatch(Character::isWhitespace)
                 || !value.matches("[A-Za-z0-9.-]+")) {
-            throw new DomainException("服务器 IP 格式不正确");
+            throw new DomainException("服务器域名或 IP 格式不正确");
         }
     }
 
@@ -131,5 +139,22 @@ public record RelaySettings(
                 || value.endsWith("/")) {
             throw new DomainException("中继安装目录必须是安全的绝对路径");
         }
+    }
+
+    private static String normalizeServerUrl(String value) {
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.isEmpty()) return "";
+        if (normalized.startsWith("//")) return "https:" + normalized;
+        if (!normalized.matches("^[A-Za-z][A-Za-z0-9+.-]*://.*$")) {
+            return "https://" + normalized;
+        }
+        return normalized;
+    }
+
+    private static boolean hasUnsafePathSegment(String path) {
+        for (String segment : path.split("/")) {
+            if (".".equals(segment) || "..".equals(segment)) return true;
+        }
+        return false;
     }
 }

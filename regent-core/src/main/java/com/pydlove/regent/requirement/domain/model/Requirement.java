@@ -19,8 +19,10 @@ public class Requirement {
     private static final int MAX_TITLE = 256;
 
     private RequirementId id;
+    private Long requirementNo;
     private final ProjectId projectId;
-    private final InitiativeId initiativeId;
+    private final UserId createdBy;
+    private InitiativeId initiativeId;
     private ProductVersionId versionId;
     private String title;
     private String rawText;
@@ -40,7 +42,9 @@ public class Requirement {
     private Instant plannedAt;
 
     private Requirement(RequirementId id,
+                        Long requirementNo,
                         ProjectId projectId,
+                        UserId createdBy,
                         InitiativeId initiativeId,
                         ProductVersionId versionId,
                         String title,
@@ -60,7 +64,9 @@ public class Requirement {
                         Instant updatedAt,
                         Instant plannedAt) {
         this.id = id;
+        this.requirementNo = requirementNo;
         this.projectId = requireNotNull(projectId, "所属项目");
+        this.createdBy = requireNotNull(createdBy, "创建人");
         this.initiativeId = initiativeId;
         this.versionId = versionId;
         this.poolStatus = requireNotNull(poolStatus, "需求池状态");
@@ -76,32 +82,16 @@ public class Requirement {
     }
 
     public static Requirement create(ProjectId projectId,
-                                     String title,
-                                     String rawText,
-                                     String acceptanceText,
-                                     String clarificationText) {
-        return create(projectId, null, title, rawText, acceptanceText, clarificationText);
-    }
-
-    public static Requirement create(ProjectId projectId,
-                                     InitiativeId initiativeId,
-                                     String title,
-                                     String rawText,
-                                     String acceptanceText,
-                                     String clarificationText) {
-        return create(projectId, initiativeId, title, rawText, acceptanceText,
-                clarificationText, RequirementSource.MANUAL);
-    }
-
-    public static Requirement create(ProjectId projectId,
                                      InitiativeId initiativeId,
                                      String title,
                                      String rawText,
                                      String acceptanceText,
                                      String clarificationText,
-                                     RequirementSource source) {
+                                     RequirementSource source,
+                                     UserId createdBy) {
         Instant now = now();
-        return new Requirement(null, projectId, initiativeId, null, title, rawText,
+        return new Requirement(null, null, projectId, createdBy, initiativeId, null,
+                title, rawText,
                 acceptanceText, clarificationText,
                 RequirementStatus.DRAFT, RequirementPoolStatus.POOL,
                 source, null, null, null,
@@ -109,7 +99,9 @@ public class Requirement {
     }
 
     public static Requirement restore(RequirementId id,
+                                      long requirementNo,
                                       ProjectId projectId,
+                                      UserId createdBy,
                                       String title,
                                       String rawText,
                                       String acceptanceText,
@@ -121,14 +113,17 @@ public class Requirement {
                                       Instant createdAt,
                                       Instant updatedAt,
                                       Instant plannedAt) {
-        return restore(id, projectId, null, null, title, rawText, acceptanceText, clarificationText,
+        return restore(id, requirementNo, projectId, createdBy, null, null, title, rawText,
+                acceptanceText, clarificationText,
                 status, RequirementPoolStatus.POOL, RequirementSource.MANUAL,
                 null, null, null, clarificationQuestions, assumptions, taskDrafts,
                 createdAt, updatedAt, plannedAt);
     }
 
     public static Requirement restore(RequirementId id,
+                                      long requirementNo,
                                       ProjectId projectId,
+                                      UserId createdBy,
                                       InitiativeId initiativeId,
                                       String title,
                                       String rawText,
@@ -141,7 +136,9 @@ public class Requirement {
                                       Instant createdAt,
                                       Instant updatedAt,
                                       Instant plannedAt) {
-        return restore(id, projectId, initiativeId, null, title, rawText, acceptanceText,
+        return restore(id, requirementNo, projectId, createdBy, initiativeId, null,
+                title, rawText,
+                acceptanceText,
                 clarificationText, status, RequirementPoolStatus.POOL,
                 RequirementSource.MANUAL, null, null, null,
                 clarificationQuestions, assumptions, taskDrafts,
@@ -149,7 +146,9 @@ public class Requirement {
     }
 
     public static Requirement restore(RequirementId id,
+                                      long requirementNo,
                                       ProjectId projectId,
+                                      UserId createdBy,
                                       InitiativeId initiativeId,
                                       ProductVersionId versionId,
                                       String title,
@@ -168,7 +167,9 @@ public class Requirement {
                                       Instant createdAt,
                                       Instant updatedAt,
                                       Instant plannedAt) {
-        return new Requirement(id, projectId, initiativeId, versionId, title, rawText,
+        return new Requirement(id, requirementNo, projectId, createdBy,
+                initiativeId, versionId,
+                title, rawText,
                 acceptanceText, clarificationText, status, poolStatus, source,
                 reviewComment, reviewedBy, reviewedAt,
                 clarificationQuestions, assumptions, taskDrafts,
@@ -195,11 +196,18 @@ public class Requirement {
     }
 
     public void assignVersion(ProductVersionId versionId) {
+        assignVersion(versionId, initiativeId);
+    }
+
+    public void assignVersion(ProductVersionId versionId, InitiativeId initiativeId) {
         if (poolStatus == RequirementPoolStatus.IN_REVIEW
                 || poolStatus == RequirementPoolStatus.FORMAL) {
             throw new DomainException("需求评审中或已成为正式需求，不能更换产品版本");
         }
         this.versionId = requireNotNull(versionId, "产品版本");
+        if (initiativeId != null) {
+            this.initiativeId = initiativeId;
+        }
         if (poolStatus == RequirementPoolStatus.REJECTED) {
             poolStatus = RequirementPoolStatus.POOL;
         }
@@ -240,6 +248,17 @@ public class Requirement {
         touch();
     }
 
+    public void approveOfflineReview(UserId reviewer, String comment) {
+        if (poolStatus == RequirementPoolStatus.FORMAL) {
+            throw new DomainException("需求已经成为正式需求");
+        }
+        poolStatus = RequirementPoolStatus.FORMAL;
+        reviewComment = blankToNull(comment);
+        reviewedBy = requireNotNull(reviewer, "评审人");
+        reviewedAt = now();
+        touch();
+    }
+
     public void rejectPoolReview(UserId reviewer, String comment) {
         requirePoolReview();
         String reason = requireText(comment, "驳回原因");
@@ -247,6 +266,15 @@ public class Requirement {
         reviewComment = reason;
         reviewedBy = requireNotNull(reviewer, "评审人");
         reviewedAt = now();
+        touch();
+    }
+
+    public void resetReviewAfterRoundFailure() {
+        if (poolStatus != RequirementPoolStatus.IN_REVIEW) return;
+        poolStatus = RequirementPoolStatus.POOL;
+        reviewComment = null;
+        reviewedBy = null;
+        reviewedAt = null;
         touch();
     }
 
@@ -300,8 +328,8 @@ public class Requirement {
     }
 
     /**
-     * 只有尚未进入评审、也没有开始研发的需求可以删除。
-     * 正式需求关联了交付链路，直接删除会让研发记录失去来源。
+     * 普通成员只能删除尚未进入评审、也没有开始研发的需求。
+     * 项目负责人的全状态删除由应用服务显式放行，并仍走回收站软删除。
      */
     public void requireTrashable() {
         if (poolStatus == RequirementPoolStatus.IN_REVIEW
@@ -321,6 +349,16 @@ public class Requirement {
             throw new DomainException("需求已有 ID，不能重复分配");
         }
         this.id = requireNotNull(assigned, "需求 ID");
+    }
+
+    public void assignNumber(long assigned) {
+        if (requirementNo != null) {
+            throw new DomainException("需求已有编号，不能重复分配");
+        }
+        if (assigned <= 0) {
+            throw new DomainException("需求编号必须大于 0");
+        }
+        this.requirementNo = assigned;
     }
 
     private void apply(String title,
@@ -435,8 +473,16 @@ public class Requirement {
         return id;
     }
 
+    public Long getRequirementNo() {
+        return requirementNo;
+    }
+
     public ProjectId getProjectId() {
         return projectId;
+    }
+
+    public UserId getCreatedBy() {
+        return createdBy;
     }
 
     public InitiativeId getInitiativeId() {

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.requirement.infrastructure.persistence.RequirementReviewRecordMapper">
+
+    <sql id="columns">
+        id, version_id, review_no, review_date, participants, conclusion,
+        minutes, status, review_comment, requirements_json, reviewed_by,
+        decided_by, decided_at, created_at, updated_at
+    </sql>
+
+    <select id="selectById"
+            resultType="com.pydlove.regent.requirement.infrastructure.persistence.RequirementReviewRecordData">
+        SELECT <include refid="columns"/>
+        FROM requirement_review_record
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByVersion"
+            resultType="com.pydlove.regent.requirement.infrastructure.persistence.RequirementReviewRecordData">
+        SELECT <include refid="columns"/>
+        FROM requirement_review_record
+        WHERE version_id = #{versionId}
+        ORDER BY review_no DESC
+    </select>
+
+    <select id="selectNextReviewNo" resultType="int">
+        SELECT COALESCE(MAX(review_no), 0) + 1
+        FROM requirement_review_record
+        WHERE version_id = #{versionId}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO requirement_review_record (
+            version_id, review_no, review_date, participants, conclusion, minutes,
+            status, review_comment, requirements_json, reviewed_by, decided_by, decided_at,
+            created_at, updated_at
+        ) VALUES (
+            #{versionId}, #{reviewNo}, #{reviewDate}, #{participants}, #{conclusion},
+            #{minutes}, #{status}, #{reviewComment}, #{requirementsJson}, #{reviewedBy},
+            #{decidedBy}, #{decidedAt}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="update">
+        UPDATE requirement_review_record
+        SET conclusion = #{conclusion},
+            status = #{status},
+            review_comment = #{reviewComment},
+            decided_by = #{decidedBy},
+            decided_at = #{decidedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

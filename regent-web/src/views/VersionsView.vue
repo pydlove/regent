@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Boxes, Pencil, Plus, RefreshCw, Search, X } from '@lucide/vue'
+import { Boxes, Pencil, Plus, RefreshCw, Search, Trash2, X } from '@lucide/vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
@@ -7,11 +7,12 @@ import { listInitiatives } from '@/api/delivery'
 import { ApiError } from '@/api/http'
 import {
   closeProductVersion,
-  confirmProductVersion,
   createProductVersion,
+  deleteProductVersion,
   listProductVersions,
   updateProductVersion,
 } from '@/api/productVersions'
+import { listWorkflowTemplates, type WorkflowTemplate } from '@/api/workflowTemplates'
 import { listProjectMembers } from '@/api/projectMembers'
 import {
   assignRequirementVersion,
@@ -46,6 +47,7 @@ const versions = ref<ProductVersion[]>([])
 const initiatives = ref<Initiative[]>([])
 const requirements = ref<Requirement[]>([])
 const members = ref<ProjectMember[]>([])
+const workflowTemplates = ref<WorkflowTemplate[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const keyword = ref('')
@@ -68,6 +70,10 @@ const closeOpen = ref(false)
 const closing = ref(false)
 const closeError = ref<string | null>(null)
 
+const deleteOpen = ref(false)
+const deleting = ref(false)
+const deleteError = ref<string | null>(null)
+
 const addOpen = ref(false)
 const addSaving = ref(false)
 const addError = ref<string | null>(null)
@@ -78,7 +84,6 @@ const statusMeta: Record<
   { label: string; tone: 'neutral' | 'accent' | 'success' }
 > = {
   PLANNING: { label: '规划中', tone: 'accent' },
-  CONFIRMED: { label: '已确认', tone: 'success' },
   CLOSED: { label: '已关闭', tone: 'neutral' },
 }
 
@@ -87,6 +92,11 @@ const currentProject = computed(
 )
 const selectedVersion = computed(
   () => versions.value.find((version) => version.id === selectedVersionId.value) ?? null,
+)
+const selectedWorkflowTemplate = computed(() =>
+  workflowTemplates.value.find(
+    (template) => template.id === selectedVersion.value?.workflowTemplateId,
+  ) ?? null,
 )
 const filteredVersions = computed(() => {
   const query = keyword.value.trim().toLocaleLowerCase('zh-CN')
@@ -100,6 +110,11 @@ const canManageVersions = computed(() => {
   const roles = members.value.find((member) => member.userId === auth.user?.id)?.roles ?? []
   return roles.includes('OWNER') || canActWithRoles('PRODUCT', roles, members.value.length)
 })
+const canDeleteVersions = computed(() =>
+  members.value
+    .find((member) => member.userId === auth.user?.id)
+    ?.roles.includes('OWNER') ?? false,
+)
 const requirementsInVersion = computed(() =>
   selectedVersion.value
     ? requirements.value.filter((item) => item.versionId === selectedVersion.value?.id)
@@ -114,6 +129,12 @@ const selectedVersionInitiative = computed(() =>
 )
 const selectedVersionReady = computed(
   () => selectedVersionInitiative.value?.status === 'APPROVED',
+)
+const canDeleteSelectedVersion = computed(() =>
+  canDeleteVersions.value
+    && selectedVersion.value !== null
+    && selectedVersionInitiative.value === null
+    && requirementsInVersion.value.length === 0,
 )
 const initiativeForVersion = (version: ProductVersion) =>
   initiatives.value.find((initiative) => initiative.versionId === version.id) ?? null
@@ -150,22 +171,25 @@ async function load() {
     requirements.value = []
     members.value = []
     initiatives.value = []
+    workflowTemplates.value = []
     return
   }
   loading.value = true
   error.value = null
   try {
     const projectId = Number(selectedProjectId.value)
-    const [nextVersions, nextRequirements, nextMembers, nextInitiatives] = await Promise.all([
+    const [nextVersions, nextRequirements, nextMembers, nextInitiatives, templates] = await Promise.all([
       listProductVersions(projectId),
       listRequirements(projectId),
       listProjectMembers(projectId),
       listInitiatives(projectId),
+      listWorkflowTemplates(),
     ])
     versions.value = nextVersions
     requirements.value = nextRequirements
     members.value = nextMembers
     initiatives.value = nextInitiatives
+    workflowTemplates.value = templates
     const requestedVersionId = Number(route.query.versionId)
     if (
       Number.isSafeInteger(requestedVersionId)
@@ -188,6 +212,7 @@ async function load() {
     requirements.value = []
     members.value = []
     initiatives.value = []
+    workflowTemplates.value = []
   } finally {
     loading.value = false
   }
@@ -269,17 +294,6 @@ async function addRequirementsToVersion() {
   }
 }
 
-async function confirmVersion() {
-  if (!selectedVersion.value) return
-  try {
-    await confirmProductVersion(selectedVersion.value.id)
-    await load()
-    toast.success('产品版本已确认', '新增需求范围已锁定，已有需求可继续评审')
-  } catch (value) {
-    toast.warning('确认版本失败', messageOf(value))
-  }
-}
-
 function openCloseVersion() {
   if (!selectedVersion.value) return
   closeError.value = null
@@ -299,6 +313,30 @@ async function closeVersion() {
     closeError.value = messageOf(value)
   } finally {
     closing.value = false
+  }
+}
+
+function openDeleteVersion() {
+  if (!selectedVersion.value || !canDeleteSelectedVersion.value) return
+  deleteError.value = null
+  deleteOpen.value = true
+}
+
+async function deleteVersion() {
+  if (!selectedVersion.value || deleting.value) return
+  const versionNo = selectedVersion.value.versionNo
+  deleting.value = true
+  deleteError.value = null
+  try {
+    await deleteProductVersion(selectedVersion.value.id)
+    deleteOpen.value = false
+    selectedVersionId.value = null
+    await load()
+    toast.success('产品版本已删除', versionNo)
+  } catch (value) {
+    deleteError.value = messageOf(value)
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -443,6 +481,9 @@ onMounted(() => void load())
               : '尚未版本立项' }}
           </Badge>
           <Badge tone="neutral">{{ requirementsInVersion.length }} 条需求</Badge>
+          <Badge v-if="selectedWorkflowTemplate" tone="neutral">
+            {{ selectedWorkflowTemplate.displayName }}
+          </Badge>
         </div>
 
         <p v-if="selectedVersion.description" class="mt-4 whitespace-pre-wrap rounded-panel border border-separator-soft bg-content p-3 text-caption text-label-secondary">
@@ -467,14 +508,6 @@ onMounted(() => void load())
             <Icon :as="Plus" size="inline" />纳入已有需求
           </Button>
           <Button
-            v-if="selectedVersion.status === 'PLANNING'"
-            size="sm"
-            :disabled="requirementsInVersion.length === 0 || !canManageVersions || !selectedVersionReady"
-            @click="confirmVersion"
-          >
-            确认版本
-          </Button>
-          <Button
             v-if="selectedVersion.status !== 'CLOSED' && canManageVersions"
             variant="danger"
             size="sm"
@@ -482,12 +515,27 @@ onMounted(() => void load())
           >
             关闭版本
           </Button>
+          <Button
+            v-if="canDeleteVersions"
+            variant="danger"
+            size="sm"
+            :disabled="!canDeleteSelectedVersion"
+            @click="openDeleteVersion"
+          >
+            <Icon :as="Trash2" size="inline" />删除版本
+          </Button>
         </div>
         <p
           v-if="selectedVersion.status === 'PLANNING' && !selectedVersionReady"
           class="mt-2 text-caption text-warning"
         >
-          完成当前版本的立项审批后，才能向版本纳入需求并确认版本。
+          完成当前版本的立项审批后，才能向版本纳入需求。
+        </p>
+        <p
+          v-if="canDeleteVersions && !canDeleteSelectedVersion"
+          class="mt-2 text-caption text-warning"
+        >
+          版本已有立项、需求或研发记录时不能删除，请使用“关闭版本”。
         </p>
         </div>
 
@@ -557,6 +605,30 @@ onMounted(() => void load())
         <Button :disabled="closing" @click="closeOpen = false">取消</Button>
         <Button variant="danger" :disabled="closing" @click="closeVersion">
           {{ closing ? '关闭中…' : '确认关闭' }}
+        </Button>
+      </template>
+    </Dialog>
+
+    <Dialog
+      v-model:open="deleteOpen"
+      layout="form"
+      title="删除产品版本"
+      description="删除后不可恢复；版本号释放后可以重新创建。已有立项、需求或研发记录的版本不能删除。"
+      :icon="Trash2"
+    >
+      <div class="flex flex-col gap-3">
+        <div class="rounded-control bg-window px-3 py-2 text-caption text-label">
+          {{ selectedVersion?.versionNo }}
+        </div>
+        <p class="text-caption text-label-secondary">
+          当前版本尚未立项，也没有关联需求，可以安全删除。
+        </p>
+        <p v-if="deleteError" class="text-caption text-danger">{{ deleteError }}</p>
+      </div>
+      <template #footer>
+        <Button :disabled="deleting" @click="deleteOpen = false">取消</Button>
+        <Button variant="danger" :disabled="deleting" @click="deleteVersion">
+          {{ deleting ? '删除中…' : '确认删除' }}
         </Button>
       </template>
     </Dialog>

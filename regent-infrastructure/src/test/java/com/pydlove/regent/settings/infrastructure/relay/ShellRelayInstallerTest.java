@@ -28,12 +28,15 @@ class ShellRelayInstallerTest {
                 [ "$REGENT_SERVER_USER" = "deploy" ]
                 [ "$REGENT_SERVER_PASSWORD" = "temporary-secret" ]
                 [ "$REGENT_REMOTE_BASE" = "/opt/regent-relay" ]
+                [ "$REGENT_PUBLIC_URL" = "https://regent.example.com/regent/" ]
+                [ "$REGENT_WEB_BASE_PATH" = "/regent/" ]
                 echo installed
                 """);
         ShellRelayInstaller installer = new ShellRelayInstaller(script, Duration.ofSeconds(5));
 
         RelayInstaller.InstallResult result = installer.install(new RelayInstaller.InstallRequest(
                 "203.0.113.10",
+                "https://regent.example.com/regent/",
                 "deploy",
                 "temporary-secret",
                 "/opt/regent-relay"
@@ -54,6 +57,7 @@ class ShellRelayInstallerTest {
 
         RelayInstaller.InstallResult result = installer.install(new RelayInstaller.InstallRequest(
                 "203.0.113.10",
+                "http://203.0.113.10:18787/",
                 "root",
                 "",
                 "/opt/regent-relay"
@@ -72,6 +76,7 @@ class ShellRelayInstallerTest {
 
         RelayInstaller.InstallResult result = installer.install(new RelayInstaller.InstallRequest(
                 "203.0.113.10",
+                "http://203.0.113.10:18787/",
                 "root",
                 "",
                 "/opt/regent-relay"

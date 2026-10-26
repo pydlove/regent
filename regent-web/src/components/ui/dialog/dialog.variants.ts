@@ -42,7 +42,7 @@ export const dialogPanelVariants = tv({
       log: 'w-[640px]',
     },
     /*
-     * 宽度档位：regular 够放短输入；large 留给长表单；wide 只给需要横排读内容的日志弹框。
+     * 宽度档位：regular 够放短输入；large 留给一般长表单；wide 留给复杂录入和日志弹框。
      *
      * alert 与 form 不允许被 wide 撑开，log 的 large/wide 各自有明确宽度；
      * compoundVariants 负责把这些组合钉回预设，避免调用点凭感觉改宽。
@@ -56,7 +56,7 @@ export const dialogPanelVariants = tv({
   compoundVariants: [
     { layout: 'alert', size: 'large', class: 'w-[340px]' },
     { layout: 'alert', size: 'wide', class: 'w-[340px]' },
-    { layout: 'form', size: 'wide', class: 'w-[640px]' },
+    { layout: 'form', size: 'wide', class: 'w-[760px]' },
     { layout: 'log', size: 'large', class: 'w-[640px]' },
     { layout: 'log', size: 'wide', class: 'w-[760px]' },
   ],

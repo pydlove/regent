@@ -234,15 +234,8 @@ public class Initiative {
     }
 
     public void approve() {
-        approve(null);
-    }
-
-    public void approve(String meetingMinutes) {
         if (status != InitiativeStatus.SUBMITTED) {
             throw new DomainException("只有已提交的立项可以批准");
-        }
-        if (meetingMinutes != null && !meetingMinutes.isBlank()) {
-            this.meetingMinutes = optionalText(meetingMinutes, 60000);
         }
         status = InitiativeStatus.APPROVED;
         approvedAt = now();
@@ -250,15 +243,8 @@ public class Initiative {
     }
 
     public void reject() {
-        reject(null);
-    }
-
-    public void reject(String meetingMinutes) {
         if (status != InitiativeStatus.SUBMITTED) {
             throw new DomainException("只有已提交的立项可以驳回");
-        }
-        if (meetingMinutes != null && !meetingMinutes.isBlank()) {
-            this.meetingMinutes = optionalText(meetingMinutes, 60000);
         }
         status = InitiativeStatus.REJECTED;
         rejectedAt = now();

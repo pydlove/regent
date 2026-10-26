@@ -487,7 +487,9 @@ export type RequirementTask = {
 
 export type Requirement = {
   id: number
+  requirementNo: number
   projectId: number
+  createdBy: number | null
   initiativeId: number | null
   versionId: number | null
   title: string
@@ -692,6 +694,8 @@ export type BugAttachment = ImageAttachment & {
 export type Project = {
   id: number
   organizationId: number | null
+  /** 项目选择的研发流程模板版本 */
+  workflowTemplateId: number | null
   code: string
   name: string
   /** 本机代码目录；研发项目未绑定时为空 */

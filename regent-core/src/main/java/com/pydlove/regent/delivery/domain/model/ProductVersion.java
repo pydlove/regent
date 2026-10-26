@@ -76,12 +76,6 @@ public class ProductVersion {
         touch();
     }
 
-    public void confirm() {
-        requirePlanning("只有规划中的产品版本可以确认");
-        status = ProductVersionStatus.CONFIRMED;
-        touch();
-    }
-
     public void close() {
         if (status == ProductVersionStatus.CLOSED) return;
         status = ProductVersionStatus.CLOSED;

@@ -14,6 +14,7 @@ import java.time.Instant;
 public record ProjectResponse(
         long id,
         Long organizationId,
+        Long workflowTemplateId,
         String code,
         String name,
         String path,
@@ -27,9 +28,14 @@ public record ProjectResponse(
         Instant summaryGeneratedAt) {
 
     public static ProjectResponse from(ProjectProfile profile) {
+        return from(profile, null);
+    }
+
+    public static ProjectResponse from(ProjectProfile profile, Long workflowTemplateId) {
         return new ProjectResponse(
                 profile.id().value(),
                 profile.organizationId() == null ? null : profile.organizationId().value(),
+                workflowTemplateId,
                 profile.code(),
                 profile.name(),
                 profile.path(),

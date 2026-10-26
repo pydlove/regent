@@ -9,7 +9,9 @@ import java.time.LocalDateTime;
 public class RequirementData {
 
     private Long id;
+    private Long requirementNo;
     private Long projectId;
+    private Long createdBy;
     private Long initiativeId;
     private Long versionId;
     private String title;

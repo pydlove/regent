@@ -10,10 +10,15 @@ import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.project.application.query.ProjectMemberAccessService;
 import com.pydlove.regent.requirement.application.command.RequirementCommandService;
 import com.pydlove.regent.requirement.application.command.RequirementIdeaService;
+import com.pydlove.regent.requirement.application.command.RequirementReviewRecordService;
 import com.pydlove.regent.requirement.application.query.RequirementQueryService;
 import com.pydlove.regent.requirement.domain.port.RequirementPlanner;
 import com.pydlove.regent.requirement.domain.port.RequirementIdeaDesigner;
+import com.pydlove.regent.requirement.domain.port.RequirementPurgePort;
 import com.pydlove.regent.requirement.domain.repository.RequirementRepository;
+import com.pydlove.regent.requirement.domain.repository.RequirementReviewAttachmentRepository;
+import com.pydlove.regent.requirement.domain.repository.RequirementReviewRecordRepository;
+import com.pydlove.regent.shared.domain.port.AttachmentStorage;
 import com.pydlove.regent.requirement.domain.repository.TaskDependencyRepository;
 import com.pydlove.regent.requirement.infrastructure.planning.CodexRequirementPlanner;
 import com.pydlove.regent.requirement.infrastructure.planning.CodexRequirementIdeaDesigner;
@@ -70,7 +75,8 @@ public class RequirementConfig {
             InitiativeRepository initiativeRepository,
             ProductVersionRepository productVersionRepository,
             RequirementDeliveryRepository requirementDeliveryRepository,
-            ProjectMemberAccessService memberAccessService) {
+            ProjectMemberAccessService memberAccessService,
+            RequirementPurgePort requirementPurgePort) {
         return new RequirementCommandService(
                 requirementRepository,
                 taskRepository,
@@ -82,7 +88,8 @@ public class RequirementConfig {
                 initiativeRepository,
                 productVersionRepository,
                 requirementDeliveryRepository,
-                memberAccessService);
+                memberAccessService,
+                requirementPurgePort);
     }
 
     @Bean
@@ -92,5 +99,30 @@ public class RequirementConfig {
             TaskDependencyRepository dependencyRepository) {
         return new RequirementQueryService(
                 requirementRepository, taskRepository, dependencyRepository);
+    }
+
+    @Bean
+    public RequirementReviewRecordService requirementReviewRecordService(
+            RequirementRepository requirementRepository,
+            RequirementReviewRecordRepository recordRepository,
+            RequirementReviewAttachmentRepository attachmentRepository,
+            ProductVersionRepository productVersionRepository,
+            ProjectProfileRepository projectProfileRepository,
+            ProjectMemberAccessService memberAccessService,
+            RequirementCommandService requirementCommandService,
+            AttachmentStorage attachmentStorage,
+            TransactionRunner transactionRunner,
+            @Value("${regent.documents.max-bytes}") long maxBytes) {
+        return new RequirementReviewRecordService(
+                requirementRepository,
+                recordRepository,
+                attachmentRepository,
+                productVersionRepository,
+                projectProfileRepository,
+                memberAccessService,
+                requirementCommandService,
+                attachmentStorage,
+                transactionRunner,
+                maxBytes);
     }
 }

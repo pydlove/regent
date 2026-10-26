@@ -8,6 +8,8 @@ import java.util.List;
 /** 需求 SQL 映射。 */
 public interface RequirementMapper {
 
+    int insertNumberSequence(RequirementNumberSequenceData data);
+
     RequirementData selectById(@Param("id") long id);
 
     RequirementData selectByIdOwned(@Param("id") long id, @Param("ownerId") long ownerId);
@@ -24,6 +26,8 @@ public interface RequirementMapper {
 
     List<RequirementData> selectDeletedByProjectOwned(@Param("projectId") long projectId,
                                                        @Param("ownerId") long ownerId);
+
+    int countByVersion(@Param("versionId") long versionId);
 
     int insert(RequirementData data);
 

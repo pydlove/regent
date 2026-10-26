@@ -145,6 +145,12 @@ class RequirementDeliveryCommandServiceTest {
     private static final class Requirements implements RequirementRepository {
         private final Map<Long, Requirement> store = new LinkedHashMap<>();
         private long sequence;
+        private long requirementSequence;
+
+        @Override
+        public long nextRequirementNo() {
+            return ++requirementSequence;
+        }
 
         @Override
         public Optional<Requirement> findById(RequirementId id) {
@@ -172,6 +178,11 @@ class RequirementDeliveryCommandServiceTest {
         public Optional<RequirementTrashItem> findDeletedByIdOwned(RequirementId id,
                                                                    UserId ownerId) {
             return Optional.empty();
+        }
+
+        @Override
+        public boolean existsByVersion(ProductVersionId versionId) {
+            return false;
         }
 
         @Override

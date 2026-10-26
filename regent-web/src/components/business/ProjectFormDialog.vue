@@ -4,10 +4,12 @@ import { useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/http'
 import { createProject, updateProject } from '@/api/projects'
+import { listWorkflowTemplates, type WorkflowTemplate } from '@/api/workflowTemplates'
 import Button from '@/components/ui/button/Button.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import DialogField from '@/components/ui/dialog/DialogField.vue'
 import Input from '@/components/ui/input/Input.vue'
+import Select from '@/components/ui/select/Select.vue'
 import Switch from '@/components/ui/switch/Switch.vue'
 
 import { useToast } from '@/composables/useToast'
@@ -15,6 +17,7 @@ import { useProjectDialog } from '@/composables/useProjectDialog'
 import { useOrganizationStore } from '@/stores/useOrganizationStore'
 import { useTaskStore } from '@/stores/useTaskStore'
 import type { Project } from '@/types/api'
+import { projectMemberRoleLabels } from '@/utils/projectMemberRoles'
 
 /*
  * 注册项目。
@@ -45,12 +48,25 @@ const name = ref('')
 const enabled = ref(true)
 const error = ref<string | null>(null)
 const saving = ref(false)
+const workflowTemplates = ref<WorkflowTemplate[]>([])
+const workflowTemplateId = ref('')
+const templatesLoading = ref(false)
+const templatesError = ref<string | null>(null)
 const editing = computed(() => editingProject.value)
+const selectedWorkflowTemplate = computed(
+  () => workflowTemplates.value.find((item) => String(item.id) === workflowTemplateId.value) ?? null,
+)
+const editingWorkflowTemplate = computed(
+  () => workflowTemplates.value.find((item) => item.id === editingProject.value?.workflowTemplateId) ?? null,
+)
+const approverRoleLabel = (role: string | null) =>
+  role ? (projectMemberRoleLabels as Record<string, string>)[role] ?? role : ''
 
 const canSave = computed(
   () =>
     (editing.value || organizationStore.currentId !== null)
     && (editing.value || organizationStore.canManageProjects)
+    && (editing.value || workflowTemplateId.value !== '')
     && name.value.trim().length > 0,
 )
 
@@ -60,8 +76,33 @@ watch(open, (value) => {
   const project = editingProject.value
   name.value = project?.name ?? ''
   enabled.value = project?.enabled ?? true
+  workflowTemplateId.value = project?.workflowTemplateId
+    ? String(project.workflowTemplateId)
+    : ''
+  workflowTemplates.value = []
+  templatesError.value = null
   error.value = null
+  void loadWorkflowTemplates()
 })
+
+const loadWorkflowTemplates = async () => {
+  templatesLoading.value = true
+  try {
+    const templates = await listWorkflowTemplates()
+    workflowTemplates.value = templates
+    if (editing.value && editingProject.value?.workflowTemplateId) {
+      workflowTemplateId.value = String(editingProject.value.workflowTemplateId)
+    } else if (!workflowTemplateId.value) {
+      workflowTemplateId.value = String(templates[0]?.id ?? '')
+    }
+  } catch (value) {
+    templatesError.value = value instanceof ApiError
+      ? value.message
+      : '研发流程模板读取失败'
+  } finally {
+    templatesLoading.value = false
+  }
+}
 
 const save = async () => {
   if (!canSave.value || saving.value) return
@@ -80,6 +121,7 @@ const save = async () => {
         })
       : await createProject({
           organizationId: organizationStore.currentId!,
+          workflowTemplateId: Number(workflowTemplateId.value),
           code: '',
           name: name.value.trim(),
           path: null,
@@ -105,7 +147,7 @@ const save = async () => {
       await router.replace({ path: '/projects', query: { view: 'members' } })
       toast.success(
         `项目「${saved.name}」已创建`,
-        '第一步请配置项目团队与角色，所有版本共用这套角色',
+        `研发流程：${selectedWorkflowTemplate.value?.displayName ?? '标准瀑布式'}；下一步配置项目团队与角色`,
       )
     }
   } catch (e) {
@@ -140,6 +182,67 @@ const save = async () => {
       <DialogField label="名称">
         <Input v-model="name" :maxlength="128" placeholder="例如：需求执行平台" />
       </DialogField>
+
+      <DialogField
+        v-if="!editing"
+        label="研发流程"
+        required
+        hint="项目创建后，所有产品版本固定使用同一流程模板版本"
+      >
+        <Select
+          v-model="workflowTemplateId"
+          :items="workflowTemplates.map((template) => ({
+            value: String(template.id),
+            label: template.displayName,
+          }))"
+          :placeholder="templatesLoading ? '正在读取流程模板…' : '选择研发流程模板'"
+          class="w-full"
+        />
+      </DialogField>
+      <DialogField v-else label="研发流程">
+        <div class="rounded-control border border-separator-soft bg-window px-3 py-2 text-caption text-label">
+          {{ editingWorkflowTemplate?.displayName
+            ?? (editingProject?.workflowTemplateId ? `模板 #${editingProject.workflowTemplateId}` : '标准瀑布式') }}
+        </div>
+      </DialogField>
+
+      <div
+        v-if="!editing && selectedWorkflowTemplate"
+        class="rounded-panel border border-separator-soft bg-content p-3"
+      >
+        <div class="flex flex-wrap items-center gap-2">
+          <p class="text-caption font-emphasis text-label">
+            {{ selectedWorkflowTemplate.displayName }}
+          </p>
+          <span class="text-[10px] text-label-tertiary">
+            {{ selectedWorkflowTemplate.stages.length }} 个阶段
+          </span>
+        </div>
+        <p
+          v-if="selectedWorkflowTemplate.description"
+          class="mt-1 text-caption text-label-tertiary"
+        >
+          {{ selectedWorkflowTemplate.description }}
+        </p>
+        <ol class="mt-2 max-h-56 space-y-1 overflow-y-auto">
+          <li
+            v-for="stage in selectedWorkflowTemplate.stages"
+            :key="stage.code"
+            class="flex items-center gap-2 rounded-control bg-window px-2 py-1.5 text-caption"
+          >
+            <span class="tnum w-5 shrink-0 text-label-tertiary">{{ stage.order }}</span>
+            <span class="min-w-0 flex-1 truncate text-label">{{ stage.name }}</span>
+            <span
+              v-if="stage.approverRole"
+              class="shrink-0 rounded-badge bg-accent/10 px-1.5 py-px text-[10px] text-accent"
+            >
+              {{ approverRoleLabel(stage.approverRole) }}
+            </span>
+          </li>
+        </ol>
+      </div>
+
+      <p v-if="templatesError" class="text-caption text-danger">{{ templatesError }}</p>
 
       <div
         v-if="!editing"

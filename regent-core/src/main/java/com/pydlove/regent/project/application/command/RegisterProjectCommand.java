@@ -1,6 +1,7 @@
 package com.pydlove.regent.project.application.command;
 
 import com.pydlove.regent.project.domain.model.ProjectVersionSource;
+import com.pydlove.regent.project.domain.model.WorkflowTemplateId;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 
 /**
@@ -23,7 +24,8 @@ public record RegisterProjectCommand(
         String verifyMethod,
         DecisionLevel defaultDecisionLevel,
         ProjectVersionSource versionSource,
-        String fallbackVersion) {
+        String fallbackVersion,
+        WorkflowTemplateId workflowTemplateId) {
 
     public RegisterProjectCommand(String code,
                                   String name,
@@ -32,6 +34,18 @@ public record RegisterProjectCommand(
                                   String verifyMethod,
                                   DecisionLevel defaultDecisionLevel) {
         this(code, name, path, techStack, verifyMethod, defaultDecisionLevel,
-                ProjectVersionSource.GIT_TAG, null);
+                ProjectVersionSource.GIT_TAG, null, null);
+    }
+
+    public RegisterProjectCommand(String code,
+                                  String name,
+                                  String path,
+                                  String techStack,
+                                  String verifyMethod,
+                                  DecisionLevel defaultDecisionLevel,
+                                  ProjectVersionSource versionSource,
+                                  String fallbackVersion) {
+        this(code, name, path, techStack, verifyMethod, defaultDecisionLevel,
+                versionSource, fallbackVersion, null);
     }
 }

@@ -19,4 +19,6 @@ public interface ProductVersionRepository {
     void save(ProductVersion version);
 
     void update(ProductVersion version);
+
+    void delete(ProductVersionId id);
 }

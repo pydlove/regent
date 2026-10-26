@@ -79,6 +79,7 @@ class RequirementPoolTest {
                 "不同组织之间不能看到彼此数据",
                 "A 组织成员无法查询 B 组织项目",
                 null,
-                RequirementSource.MANUAL);
+                RequirementSource.MANUAL,
+                REVIEWER);
     }
 }

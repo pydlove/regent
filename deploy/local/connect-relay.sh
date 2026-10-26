@@ -11,11 +11,15 @@
 export LC_CTYPE=UTF-8
 source "$(dirname "$0")/_common.sh"
 
+REQUESTED_PUBLIC_URL="${REGENT_PUBLIC_URL:-}"
+REQUESTED_WEB_BASE_PATH="${REGENT_WEB_BASE_PATH:-}"
 if [ -f "${HOME}/.regent/regent-public.env" ]; then
     set -a
     source "${HOME}/.regent/regent-public.env"
     set +a
 fi
+REGENT_PUBLIC_URL="${REQUESTED_PUBLIC_URL:-${REGENT_PUBLIC_URL:-}}"
+REGENT_WEB_BASE_PATH="${REQUESTED_WEB_BASE_PATH:-${REGENT_WEB_BASE_PATH:-}}"
 
 SERVER_IP="${REGENT_SERVER_IP:-}"
 SSH_PORT="${REGENT_SSH_PORT:-}"
@@ -57,9 +61,9 @@ if [ -z "$SECRET" ]; then
     if [ -z "$SERVER_IP" ]; then
         require_tty REGENT_SERVER_IP
         while :; do
-            ask "服务器 IP"
+            ask "服务器域名或 IP"
             if [ -n "$REPLY" ]; then SERVER_IP="$REPLY"; break; fi
-            warn "服务器 IP 不能为空"
+            warn "服务器域名或 IP 不能为空"
         done
     fi
 
@@ -78,7 +82,7 @@ if [ -z "$SERVER_IP" ] && [ -z "${REGENT_RELAY_SERVER_URL:-}" ]; then
 fi
 
 if [ "$SERVER_IP" = "127.0.0.1" ]; then
-    fail "服务器 IP 不能是 127.0.0.1，请填公网服务器地址。"
+    fail "服务器域名或 IP 不能是 127.0.0.1，请填公网地址。"
     exit 1
 fi
 

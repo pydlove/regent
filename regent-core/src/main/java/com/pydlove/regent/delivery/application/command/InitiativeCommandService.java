@@ -148,18 +148,12 @@ public class InitiativeCommandService {
 
     public Initiative approve(InitiativeId id,
                               UserId ownerId,
-                              String comment,
-                              String meetingMinutes) {
+                              String comment) {
         return transactionRunner.inTransaction(() -> {
             Initiative initiative = load(id, ownerId);
             var grant = memberAccessService.requireRole(
                     initiative.getProjectId(), ownerId, ProjectMemberRole.OWNER);
-            String evidence = textOrFallback(meetingMinutes, initiative.getMeetingMinutes());
-            if ((evidence == null || evidence.isBlank())
-                    && attachmentRepository.findByInitiative(id).isEmpty()) {
-                throw new DomainException("请填写会议纪要或上传会议纪要附件后再同意立项");
-            }
-            initiative.approve(evidence);
+            initiative.approve();
             initiativeRepository.save(initiative);
             gateRepository.save(DeliveryGate.record(
                     GateScope.INITIATIVE,
@@ -175,8 +169,7 @@ public class InitiativeCommandService {
 
     public Initiative reject(InitiativeId id,
                              UserId ownerId,
-                             String comment,
-                             String meetingMinutes) {
+                             String comment) {
         return transactionRunner.inTransaction(() -> {
             Initiative initiative = load(id, ownerId);
             var grant = memberAccessService.requireRole(
@@ -184,7 +177,7 @@ public class InitiativeCommandService {
             if (comment == null || comment.isBlank()) {
                 throw new DomainException("驳回立项时请填写审批意见");
             }
-            initiative.reject(meetingMinutes);
+            initiative.reject();
             initiativeRepository.save(initiative);
             gateRepository.save(DeliveryGate.record(
                     GateScope.INITIATIVE,

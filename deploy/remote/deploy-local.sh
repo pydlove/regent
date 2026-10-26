@@ -31,11 +31,15 @@ LOCAL_RELAY_ENV="${HOME}/.regent/relay-connector.env"
 LOCAL_PUBLIC_ENV="${HOME}/.regent/regent-public.env"
 
 # 子路径部署由本机中继配置持久化，避免每次从发布中心部署时又退回根路径构建。
+REQUESTED_PUBLIC_URL="${REGENT_PUBLIC_URL:-}"
+REQUESTED_WEB_BASE_PATH="${REGENT_WEB_BASE_PATH:-}"
 if [ -f "$LOCAL_PUBLIC_ENV" ]; then
     set -a
     source "$LOCAL_PUBLIC_ENV"
     set +a
 fi
+REGENT_PUBLIC_URL="${REQUESTED_PUBLIC_URL:-${REGENT_PUBLIC_URL:-}}"
+REGENT_WEB_BASE_PATH="${REQUESTED_WEB_BASE_PATH:-${REGENT_WEB_BASE_PATH:-}}"
 if [ -z "${REGENT_WEB_BASE_PATH:-}" ] && [ -f "$LOCAL_RELAY_ENV" ]; then
     REGENT_WEB_BASE_PATH=$(grep -m1 '^REGENT_WEB_BASE_PATH=' "$LOCAL_RELAY_ENV" 2>/dev/null | cut -d= -f2- || true)
 fi
@@ -183,18 +187,18 @@ fi
 if [ -z "$SERVER_IP" ]; then
     require_tty REGENT_SERVER_IP
     while :; do
-        ask "服务器 IP"
+        ask "服务器域名或 IP"
         if [ -n "$REPLY" ]; then SERVER_IP="$REPLY"; break; fi
-        log_warn "服务器 IP 不能为空"
+        log_warn "服务器域名或 IP 不能为空"
     done
 fi
 
 if [ "$SERVER_IP" = "127.0.0.1" ]; then
-    log_error "服务器 IP 不能是 127.0.0.1，请填公网服务器地址。"
+    log_error "服务器域名或 IP 不能是 127.0.0.1，请填公网地址。"
     exit 1
 fi
 case "$SERVER_IP" in
-    ''|*[!A-Za-z0-9.-]*) log_error "服务器 IP 格式不正确：$SERVER_IP"; exit 1 ;;
+    ''|*[!A-Za-z0-9.-]*) log_error "服务器域名或 IP 格式不正确：$SERVER_IP"; exit 1 ;;
 esac
 
 if [ -z "$SSH_PORT" ]; then

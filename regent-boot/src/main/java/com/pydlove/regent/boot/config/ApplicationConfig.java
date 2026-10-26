@@ -44,6 +44,7 @@ import com.pydlove.regent.project.domain.port.ProjectVersionReader;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.project.domain.repository.ProjectRepository;
 import com.pydlove.regent.project.domain.repository.ProjectMemberRepository;
+import com.pydlove.regent.project.domain.repository.WorkflowTemplateRepository;
 import com.pydlove.regent.project.infrastructure.git.GitProjectGitBranchReader;
 import com.pydlove.regent.project.infrastructure.git.GitProjectVersionReader;
 import com.pydlove.regent.shared.domain.TransactionRunner;
@@ -137,10 +138,11 @@ public class ApplicationConfig {
             ProjectSummaryScheduler projectSummaryScheduler,
             TransactionRunner transactionRunner,
             ProjectMemberRepository projectMemberRepository,
-            OrganizationAccessService organizationAccessService) {
+            OrganizationAccessService organizationAccessService,
+            WorkflowTemplateRepository workflowTemplateRepository) {
         return new ProjectRegistrationService(
                 projectRepository, projectSummaryScheduler, transactionRunner,
-                projectMemberRepository, organizationAccessService);
+                projectMemberRepository, organizationAccessService, workflowTemplateRepository);
     }
 
     @Bean

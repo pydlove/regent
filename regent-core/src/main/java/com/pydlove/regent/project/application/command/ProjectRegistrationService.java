@@ -6,16 +6,20 @@ import com.pydlove.regent.organization.domain.model.OrganizationId;
 import com.pydlove.regent.organization.domain.model.OrganizationRole;
 import com.pydlove.regent.project.domain.model.Project;
 import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.project.domain.model.WorkflowTemplate;
+import com.pydlove.regent.project.domain.model.WorkflowTemplateId;
 import com.pydlove.regent.project.domain.port.ProjectSummaryScheduler;
 import com.pydlove.regent.project.domain.model.ProjectMemberRole;
 import com.pydlove.regent.project.domain.repository.ProjectMemberRepository;
 import com.pydlove.regent.project.domain.repository.ProjectRepository;
+import com.pydlove.regent.project.domain.repository.WorkflowTemplateRepository;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.ForbiddenException;
 import com.pydlove.regent.shared.domain.TransactionRunner;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.Instant;
 
 /**
  * 项目注册用例 —— 平台里所有执行的前提：没有项目，任务就没有工作区可跑。
@@ -30,6 +34,7 @@ public class ProjectRegistrationService {
     private final TransactionRunner transactionRunner;
     private final ProjectMemberRepository projectMemberRepository;
     private final OrganizationAccessService organizationAccessService;
+    private final WorkflowTemplateRepository workflowTemplateRepository;
 
     public ProjectRegistrationService(ProjectRepository projectRepository) {
         this(projectRepository, projectId -> {
@@ -38,13 +43,13 @@ public class ProjectRegistrationService {
             public <T> T inTransaction(java.util.function.Supplier<T> action) {
                 return action.get();
             }
-        }, null, null);
+        }, null, null, null);
     }
 
     public ProjectRegistrationService(ProjectRepository projectRepository,
                                       ProjectSummaryScheduler summaryScheduler,
                                       TransactionRunner transactionRunner) {
-        this(projectRepository, summaryScheduler, transactionRunner, null, null);
+        this(projectRepository, summaryScheduler, transactionRunner, null, null, null);
     }
 
     public ProjectRegistrationService(ProjectRepository projectRepository,
@@ -52,7 +57,7 @@ public class ProjectRegistrationService {
                                       TransactionRunner transactionRunner,
                                       ProjectMemberRepository projectMemberRepository) {
         this(projectRepository, summaryScheduler, transactionRunner,
-                projectMemberRepository, null);
+                projectMemberRepository, null, null);
     }
 
     public ProjectRegistrationService(ProjectRepository projectRepository,
@@ -60,11 +65,22 @@ public class ProjectRegistrationService {
                                       TransactionRunner transactionRunner,
                                       ProjectMemberRepository projectMemberRepository,
                                       OrganizationAccessService organizationAccessService) {
+        this(projectRepository, summaryScheduler, transactionRunner,
+                projectMemberRepository, organizationAccessService, null);
+    }
+
+    public ProjectRegistrationService(ProjectRepository projectRepository,
+                                      ProjectSummaryScheduler summaryScheduler,
+                                      TransactionRunner transactionRunner,
+                                      ProjectMemberRepository projectMemberRepository,
+                                      OrganizationAccessService organizationAccessService,
+                                      WorkflowTemplateRepository workflowTemplateRepository) {
         this.projectRepository = projectRepository;
         this.summaryScheduler = summaryScheduler;
         this.transactionRunner = transactionRunner;
         this.projectMemberRepository = projectMemberRepository;
         this.organizationAccessService = organizationAccessService;
+        this.workflowTemplateRepository = workflowTemplateRepository;
     }
 
     public Project register(RegisterProjectCommand command) {
@@ -101,6 +117,7 @@ public class ProjectRegistrationService {
         }
         projectRepository.save(project);
         ProjectId projectId = project.getId();
+        bindWorkflowTemplate(projectId, command.workflowTemplateId());
         if (projectMemberRepository != null && ownerId != null) {
             projectMemberRepository.ensure(projectId, ownerId, ProjectMemberRole.OWNER);
         }
@@ -111,6 +128,22 @@ public class ProjectRegistrationService {
                     });
         }
         return project;
+    }
+
+    private void bindWorkflowTemplate(ProjectId projectId,
+                                      WorkflowTemplateId requested) {
+        if (workflowTemplateRepository == null) return;
+        WorkflowTemplateId templateId = requested;
+        if (templateId != null) {
+            workflowTemplateRepository.findById(templateId)
+                    .orElseThrow(() -> new DomainException(
+                            "流程模板不存在或未发布：" + requested.value()));
+        } else {
+            templateId = workflowTemplateRepository.findDefault()
+                    .map(WorkflowTemplate::id)
+                    .orElseThrow(() -> new DomainException("没有可用的研发流程模板"));
+        }
+        workflowTemplateRepository.bindProject(projectId, templateId, Instant.now());
     }
 
     private String resolveCode(String requested, OrganizationId organizationId) {

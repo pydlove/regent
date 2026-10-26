@@ -7,5 +7,6 @@ public enum AttachmentScope {
     FILE_LIBRARY,
     BUG,
     INITIATIVE,
+    REQUIREMENT_REVIEW,
     USER_AVATAR
 }

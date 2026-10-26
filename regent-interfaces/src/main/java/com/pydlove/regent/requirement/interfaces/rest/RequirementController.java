@@ -15,10 +15,13 @@ import com.pydlove.regent.requirement.domain.model.RequirementId;
 import com.pydlove.regent.requirement.domain.model.RequirementTaskDraft;
 import com.pydlove.regent.requirement.domain.model.RequirementSource;
 import com.pydlove.regent.requirement.interfaces.dto.RequirementResponse;
+import com.pydlove.regent.requirement.interfaces.dto.RequirementBatchDeleteRequest;
+import com.pydlove.regent.requirement.interfaces.dto.RequirementBatchDeleteResponse;
+import com.pydlove.regent.requirement.interfaces.dto.RequirementPurgeRequest;
+import com.pydlove.regent.requirement.interfaces.dto.RequirementPurgeResponse;
 import com.pydlove.regent.requirement.interfaces.dto.RequirementIdeaGenerateRequest;
 import com.pydlove.regent.requirement.interfaces.dto.RequirementSaveRequest;
 import com.pydlove.regent.requirement.interfaces.dto.RequirementTaskDraftRequest;
-import com.pydlove.regent.requirement.interfaces.dto.RequirementReviewRequest;
 import com.pydlove.regent.requirement.interfaces.dto.RequirementTrashResponse;
 import com.pydlove.regent.requirement.interfaces.dto.RequirementVersionAssignRequest;
 import jakarta.servlet.http.HttpServletRequest;
@@ -120,6 +123,44 @@ public class RequirementController {
         commandService.moveToTrash(RequirementId.of(id), currentUser(request));
     }
 
+    @PostMapping("/batch-delete")
+    public RequirementBatchDeleteResponse batchDelete(
+            @RequestBody RequirementBatchDeleteRequest body,
+            HttpServletRequest request) {
+        if (body == null || body.ids() == null || body.ids().isEmpty()) {
+            throw new IllegalArgumentException("请选择要删除的需求");
+        }
+        List<RequirementId> ids = body.ids().stream()
+                .map(id -> {
+                    if (id == null || id <= 0) {
+                        throw new IllegalArgumentException("需求 ID 不合法");
+                    }
+                    return RequirementId.of(id);
+                })
+                .toList();
+        int deletedCount = commandService.moveManyToTrash(ids, currentUser(request));
+        return new RequirementBatchDeleteResponse(deletedCount);
+    }
+
+    @PostMapping("/trash/purge")
+    public RequirementPurgeResponse purge(
+            @RequestBody RequirementPurgeRequest body,
+            HttpServletRequest request) {
+        if (body == null || body.ids() == null || body.ids().isEmpty()) {
+            throw new IllegalArgumentException("请选择要彻底删除的需求");
+        }
+        List<RequirementId> ids = body.ids().stream()
+                .map(id -> {
+                    if (id == null || id <= 0) {
+                        throw new IllegalArgumentException("需求 ID 不合法");
+                    }
+                    return RequirementId.of(id);
+                })
+                .toList();
+        int deletedCount = commandService.purgeFromTrash(ids, currentUser(request));
+        return new RequirementPurgeResponse(deletedCount);
+    }
+
     @PostMapping("/{id}/restore")
     public RequirementResponse restore(@PathVariable long id, HttpServletRequest request) {
         UserId ownerId = currentUser(request);
@@ -180,23 +221,6 @@ public class RequirementController {
         return RequirementResponse.from(queryService.get(requirement.getId(), ownerId));
     }
 
-    @PostMapping("/{id}/review")
-    public RequirementResponse review(@PathVariable long id,
-                                      @RequestBody RequirementReviewRequest body,
-                                      HttpServletRequest request) {
-        UserId ownerId = currentUser(request);
-        String action = body.action() == null ? "" : body.action().trim().toUpperCase();
-        var requirement = switch (action) {
-            case "SUBMIT" -> commandService.submitPoolReview(RequirementId.of(id), ownerId);
-            case "APPROVE" -> commandService.approvePoolReview(
-                    RequirementId.of(id), ownerId, body.comment());
-            case "REJECT" -> commandService.rejectPoolReview(
-                    RequirementId.of(id), ownerId, body.comment());
-            default -> throw new IllegalArgumentException("不支持的需求评审动作：" + body.action());
-        };
-        return RequirementResponse.from(queryService.get(requirement.getId(), ownerId));
-    }
-
     private static SaveRequirementCommand toCommand(RequirementSaveRequest request,
                                                     ProjectId projectId) {
         return new SaveRequirementCommand(
@@ -206,7 +230,8 @@ public class RequirementController {
                 request.title(),
                 request.rawText(),
                 request.acceptanceText(),
-                request.clarificationText());
+                request.clarificationText(),
+                request.versionId() == null ? null : ProductVersionId.of(request.versionId()));
     }
 
     private static RequirementSource parseSource(String value) {

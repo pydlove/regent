@@ -1,10 +1,11 @@
 export type InitiativeStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'CANCELLED'
 
-export type ProductVersionStatus = 'PLANNING' | 'CONFIRMED' | 'CLOSED'
+export type ProductVersionStatus = 'PLANNING' | 'CLOSED'
 
 export type ProductVersion = {
   id: number
   projectId: number
+  workflowTemplateId: number | null
   versionNo: string
   description: string | null
   status: ProductVersionStatus

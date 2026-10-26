@@ -50,6 +50,11 @@ import type {
   GitCommitSettings,
 } from '@/types/api'
 import { isWindowsClient } from '@/utils/downloadPlatform'
+import {
+  defaultRelayServerUrl,
+  inspectRelayServerUrl,
+  isRelayServerHost,
+} from '@/utils/relayServerUrl'
 import BaselineView from '@/views/BaselineView.vue'
 
 type SettingsSection = 'appearance' | 'baseline' | 'execution' | 'git' | 'relay' | 'account'
@@ -299,61 +304,11 @@ const relayLoaded = ref(false)
 const relayError = ref<string | null>(null)
 const relayInstallResult = ref<RelayInstallResult | null>(null)
 
-const relayPagePaths = new Set([
-  '/dashboard',
-  '/tasks',
-  '/decisions',
-  '/projects',
-  '/environments',
-  '/bugs',
-])
-
-function isRelayPagePath(pathname: string): boolean {
-  const path = pathname.replace(/\/+$/, '') || '/'
-  return relayPagePaths.has(path) || path === '/settings' || path.startsWith('/settings/')
-}
-
-function inspectRelayServerUrl(rawValue: string) {
-  const raw = rawValue.trim()
-  if (!raw) {
-    return {
-      valid: !relayForm.monitoringEnabled,
-      normalized: '',
-      pagePath: '',
-    }
-  }
-  try {
-    const url = new URL(raw)
-    const validBase =
-      (url.protocol === 'http:' || url.protocol === 'https:') &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      !url.hash
-    const rootPath = url.pathname === '/' || url.pathname === ''
-    const pagePath = validBase && !rootPath && isRelayPagePath(url.pathname)
-    return {
-      valid: validBase && (rootPath || pagePath),
-      normalized: validBase && (rootPath || pagePath) ? url.origin : '',
-      pagePath: pagePath ? url.pathname.replace(/\/+$/, '') : '',
-    }
-  } catch {
-    return {
-      valid: false,
-      normalized: '',
-      pagePath: '',
-    }
-  }
-}
-
-const relayUrlState = computed(() => inspectRelayServerUrl(relayForm.serverUrl))
-const relayUrlValid = computed(() => relayUrlState.value.valid)
-const relayServerIpValid = computed(
-  () =>
-    relayForm.serverIp.trim().length > 0 &&
-    !/\s/.test(relayForm.serverIp) &&
-    /^[A-Za-z0-9.-]+$/.test(relayForm.serverIp),
+const relayUrlState = computed(
+  () => inspectRelayServerUrl(relayForm.serverUrl, relayForm.monitoringEnabled),
 )
+const relayUrlValid = computed(() => relayUrlState.value.valid)
+const relayServerHostValid = computed(() => isRelayServerHost(relayForm.serverIp))
 const relayUsernameValid = computed(() => /^[A-Za-z_][A-Za-z0-9_-]{0,31}$/.test(relayForm.sshUsername))
 const relayDirectoryValid = computed(() => {
   const value = relayForm.installDirectory.trim()
@@ -367,7 +322,7 @@ const relayDirectoryValid = computed(() => {
     !value.endsWith('/')
 })
 const relayConnectionValid = computed(
-  () => relayServerIpValid.value && relayUsernameValid.value && relayDirectoryValid.value,
+  () => relayServerHostValid.value && relayUsernameValid.value && relayDirectoryValid.value,
 )
 const relayDirty = computed(
   () =>
@@ -466,7 +421,7 @@ async function installRelay() {
   relayError.value = null
   relayInstallResult.value = null
   if (!relayForm.serverUrl.trim()) {
-    relayForm.serverUrl = `http://${relayForm.serverIp.trim()}:18787`
+    relayForm.serverUrl = defaultRelayServerUrl(relayForm.serverIp)
     relayForm.monitoringEnabled = true
   }
   const password = relayForm.password
@@ -1062,19 +1017,19 @@ onBeforeUnmount(() => {
               <div>
                 <div class="text-body font-emphasis text-label">服务器地址</div>
                 <div class="mt-0.5 text-caption text-label-secondary">
-                  站点根地址，支持 HTTP 与 HTTPS
+                  支持域名、HTTP 与 HTTPS
                 </div>
               </div>
               <div class="min-w-0">
                 <Input
                   v-model="relayForm.serverUrl"
                   size="lg"
-                  placeholder="https://regent.example.com"
+                  placeholder="regent.example.com 或 https://regent.example.com"
                   :disabled="relayLoading || relaySaving || relayInstalling"
                   :invalid="!relayUrlValid"
                 />
                 <p class="mt-1.5 text-caption text-label-tertiary">
-                  连接器共享密钥仍只保存在本机部署配置中，不会发送到浏览器或数据库。
+                  可填写域名或完整地址；子路径会保留，连接器共享密钥不会进入浏览器或数据库。
                 </p>
                 <p
                   v-if="relayUrlState.pagePath"
@@ -1084,7 +1039,7 @@ onBeforeUnmount(() => {
                   {{ relayUrlState.normalized }}。
                 </p>
                 <p v-else-if="!relayUrlValid" class="mt-1.5 text-caption text-danger">
-                  请填写不含路径、参数和登录信息的 HTTP(S) 根地址。
+                  请填写有效的域名或 HTTP(S) 地址，不能包含登录信息、查询参数或片段。
                 </p>
               </div>
             </div>
@@ -1093,37 +1048,37 @@ onBeforeUnmount(() => {
               class="grid grid-cols-[180px_minmax(0,1fr)] items-start gap-6 px-4 py-3 max-sm:grid-cols-1 max-sm:gap-2"
             >
               <div>
-                <div class="text-body font-emphasis text-label">服务器 IP</div>
-                <div class="mt-0.5 text-caption text-label-secondary">安装前必填</div>
+                <div class="text-body font-emphasis text-label">服务器域名或 IP</div>
+                <div class="mt-0.5 text-caption text-label-secondary">SSH 安装地址，必填</div>
               </div>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <Input
                     v-model="relayForm.serverIp"
                     size="lg"
-                    placeholder="203.0.113.10"
+                    placeholder="regent.example.com"
                     :disabled="relayLoading || relaySaving || relayInstalling"
-                    :invalid="relayForm.serverIp.length > 0 && !relayServerIpValid"
+                    :invalid="relayForm.serverIp.length > 0 && !relayServerHostValid"
                     class="min-w-0 flex-1"
                   />
                   <CopyButton
                     :text="relayForm.serverIp.trim()"
-                    label="复制服务器 IP"
-                    success-message="服务器 IP 已复制"
+                    label="复制服务器域名或 IP"
+                    success-message="服务器域名或 IP 已复制"
                     size="lg"
                   />
                 </div>
                 <p
-                  v-if="relayForm.serverIp.length > 0 && !relayServerIpValid"
+                  v-if="relayForm.serverIp.length > 0 && !relayServerHostValid"
                   class="mt-1.5 text-caption text-danger"
                 >
-                  请填写不含空格和路径的服务器 IP 或主机名。
+                  请填写不含协议、端口和路径的域名或 IP。
                 </p>
                 <p
                   v-else-if="relayForm.serverIp.length === 0"
                   class="mt-1.5 text-caption text-label-tertiary"
                 >
-                  填写公网服务器地址后即可自动安装。
+                  填写公网域名或 IP 后即可自动安装。
                 </p>
               </div>
             </div>

@@ -28,6 +28,7 @@ import com.pydlove.regent.requirement.domain.model.RequirementPoolStatus;
 import com.pydlove.regent.requirement.domain.model.RequirementSource;
 import com.pydlove.regent.requirement.domain.model.RequirementTrashItem;
 import com.pydlove.regent.requirement.domain.port.RequirementIdeaDesigner;
+import com.pydlove.regent.requirement.domain.port.RequirementPurgePort;
 import com.pydlove.regent.requirement.domain.repository.RequirementRepository;
 import com.pydlove.regent.requirement.domain.repository.TaskDependencyRepository;
 import com.pydlove.regent.shared.domain.DomainException;
@@ -47,6 +48,7 @@ import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RequirementPoolLifecycleTest {
 
@@ -55,8 +57,8 @@ class RequirementPoolLifecycleTest {
     private static final ProjectId OTHER_PROJECT = ProjectId.of(8L);
 
     @Test
-    @DisplayName("版本确认后仍可完成已纳入需求的评审并自动创建设计交付")
-    void confirmsVersionThenCompletesExistingReview() {
+    @DisplayName("需求纳入版本后完成评审并自动创建设计交付")
+    void completesReviewAndCreatesDelivery() {
         Fixture fixture = new Fixture();
         ProductVersion version = fixture.productVersions.create(PROJECT, "v1.0.0");
         Initiative initiative = fixture.approvedInitiative(version.getId());
@@ -64,7 +66,6 @@ class RequirementPoolLifecycleTest {
 
         fixture.service.assignVersion(requirement.getId(), version.getId(), OWNER);
         fixture.service.submitPoolReview(requirement.getId(), OWNER);
-        fixture.productVersions.confirm(version.getId());
         Requirement approved = fixture.service.approvePoolReview(
                 requirement.getId(), OWNER, "评审通过");
 
@@ -73,6 +74,28 @@ class RequirementPoolLifecycleTest {
                 .orElseThrow();
         assertEquals(DeliveryStage.DESIGN, delivery.getStage());
         assertEquals(initiative.getId(), delivery.getInitiativeId());
+    }
+
+    @Test
+    @DisplayName("导入需求时可以在创建事务内直接纳入规划中的版本")
+    void createsRequirementWithVersionInOneCommand() {
+        Fixture fixture = new Fixture();
+        ProductVersion version = fixture.productVersions.create(PROJECT, "v1.0.0");
+        Initiative initiative = fixture.approvedInitiative(version.getId());
+
+        Requirement requirement = fixture.service.create(new SaveRequirementCommand(
+                PROJECT,
+                initiative.getId(),
+                RequirementSource.IMPORT,
+                "批量导入需求",
+                "导入时直接关联产品版本",
+                "导入后状态为待提交评审",
+                null,
+                version.getId()), OWNER);
+
+        assertEquals(version.getId(), requirement.getVersionId());
+        assertEquals(RequirementPoolStatus.POOL, requirement.getPoolStatus());
+        assertEquals(1, fixture.requirements.findByProject(PROJECT).size());
     }
 
     @Test
@@ -106,6 +129,23 @@ class RequirementPoolLifecycleTest {
                 () -> fixture.service.assignVersion(requirement.getId(), version.getId(), OWNER));
 
         assertEquals("需求与产品版本不属于同一个项目", exception.getMessage());
+    }
+
+    @Test
+    @DisplayName("需求加入版本时自动采用该版本已批准的立项")
+    void adoptsVersionInitiativeWhenAssigningVersion() {
+        Fixture fixture = new Fixture();
+        ProductVersion sourceVersion = fixture.productVersions.create(PROJECT, "v1.0.0");
+        Initiative sourceInitiative = fixture.approvedInitiative(sourceVersion.getId());
+        ProductVersion targetVersion = fixture.productVersions.create(PROJECT, "v1.1.0");
+        Initiative targetInitiative = fixture.approvedInitiative(targetVersion.getId());
+        Requirement requirement = fixture.createRequirement(sourceInitiative.getId());
+
+        fixture.service.assignVersion(requirement.getId(), targetVersion.getId(), OWNER);
+
+        Requirement assigned = fixture.requirements.findById(requirement.getId()).orElseThrow();
+        assertEquals(targetVersion.getId(), assigned.getVersionId());
+        assertEquals(targetInitiative.getId(), assigned.getInitiativeId());
     }
 
     @Test
@@ -145,8 +185,8 @@ class RequirementPoolLifecycleTest {
     }
 
     @Test
-    @DisplayName("正式需求不能删除到回收站")
-    void rejectsDeletingFormalRequirement() {
+    @DisplayName("项目负责人可以删除正式需求并从回收站恢复")
+    void ownerDeletesFormalRequirementAndRestores() {
         Fixture fixture = new Fixture();
         ProductVersion version = fixture.productVersions.create(PROJECT, "v1.0.0");
         Initiative initiative = fixture.approvedInitiative(version.getId());
@@ -155,10 +195,96 @@ class RequirementPoolLifecycleTest {
         fixture.service.submitPoolReview(requirement.getId(), OWNER);
         fixture.service.approvePoolReview(requirement.getId(), OWNER, "通过");
 
-        DomainException exception = assertThrows(DomainException.class,
-                () -> fixture.service.moveToTrash(requirement.getId(), OWNER));
+        fixture.service.moveToTrash(requirement.getId(), OWNER);
 
-        assertEquals("评审中或已正式化的需求不能删除", exception.getMessage());
+        assertEquals(1, fixture.requirements.findDeletedByProject(PROJECT, OWNER).size());
+        fixture.service.restoreFromTrash(requirement.getId(), OWNER);
+        assertEquals(
+                RequirementPoolStatus.FORMAL,
+                fixture.requirements.findById(requirement.getId()).orElseThrow().getPoolStatus());
+    }
+
+    @Test
+    @DisplayName("普通成员不能删除正式需求")
+    void nonOwnerCannotDeleteFormalRequirement() {
+        Fixture fixture = new Fixture();
+        ProductVersion version = fixture.productVersions.create(PROJECT, "v1.0.0");
+        Initiative initiative = fixture.approvedInitiative(version.getId());
+        Requirement requirement = fixture.createRequirement(initiative.getId());
+        fixture.service.assignVersion(requirement.getId(), version.getId(), OWNER);
+        fixture.service.submitPoolReview(requirement.getId(), OWNER);
+        fixture.service.approvePoolReview(requirement.getId(), OWNER, "通过");
+
+        assertThrows(DomainException.class,
+                () -> fixture.service.moveToTrash(requirement.getId(), UserId.of(99L)));
+    }
+
+    @Test
+    @DisplayName("项目负责人可以批量删除不同状态的需求")
+    void ownerBatchDeletesRequirementsInAnyStatus() {
+        Fixture fixture = new Fixture();
+        ProductVersion version = fixture.productVersions.create(PROJECT, "v1.0.0");
+        Initiative initiative = fixture.approvedInitiative(version.getId());
+        Requirement formal = fixture.createRequirement(initiative.getId());
+        Requirement draft = fixture.service.create(new SaveRequirementCommand(
+                PROJECT,
+                initiative.getId(),
+                "批量删除草稿",
+                "验证不同状态可以一起删除",
+                null,
+                null), OWNER);
+        fixture.service.assignVersion(formal.getId(), version.getId(), OWNER);
+        fixture.service.submitPoolReview(formal.getId(), OWNER);
+        fixture.service.approvePoolReview(formal.getId(), OWNER, "通过");
+
+        int deleted = fixture.service.moveManyToTrash(
+                List.of(formal.getId(), draft.getId()), OWNER);
+
+        assertEquals(2, deleted);
+        assertEquals(2, fixture.requirements.findDeletedByProject(PROJECT, OWNER).size());
+    }
+
+    @Test
+    @DisplayName("非项目负责人不能批量删除需求")
+    void nonOwnerCannotBatchDeleteRequirements() {
+        Fixture fixture = new Fixture();
+        ProductVersion version = fixture.productVersions.create(PROJECT, "v1.0.0");
+        Initiative initiative = fixture.approvedInitiative(version.getId());
+        Requirement requirement = fixture.createRequirement(initiative.getId());
+
+        assertThrows(DomainException.class,
+                () -> fixture.service.moveManyToTrash(
+                        List.of(requirement.getId()), UserId.of(99L)));
+    }
+
+    @Test
+    @DisplayName("项目负责人可以永久删除回收站需求")
+    void ownerPurgesTrashRequirement() {
+        Fixture fixture = new Fixture();
+        ProductVersion version = fixture.productVersions.create(PROJECT, "v1.0.0");
+        Initiative initiative = fixture.approvedInitiative(version.getId());
+        Requirement requirement = fixture.createRequirement(initiative.getId());
+        fixture.service.moveToTrash(requirement.getId(), OWNER);
+
+        assertEquals(1, fixture.service.purgeFromTrash(
+                List.of(requirement.getId()), OWNER));
+
+        assertTrue(fixture.requirements.findDeletedByProject(PROJECT, OWNER).isEmpty());
+    }
+
+    @Test
+    @DisplayName("非项目负责人不能永久删除回收站需求")
+    void nonOwnerCannotPurgeTrashRequirement() {
+        Fixture fixture = new Fixture();
+        ProductVersion version = fixture.productVersions.create(PROJECT, "v1.0.0");
+        Initiative initiative = fixture.approvedInitiative(version.getId());
+        Requirement requirement = fixture.createRequirement(initiative.getId());
+        fixture.service.moveToTrash(requirement.getId(), OWNER);
+
+        assertThrows(DomainException.class,
+                () -> fixture.service.purgeFromTrash(
+                        List.of(requirement.getId()), UserId.of(99L)));
+        assertEquals(1, fixture.requirements.findDeletedByProject(PROJECT, OWNER).size());
     }
 
     @Test
@@ -197,6 +323,7 @@ class RequirementPoolLifecycleTest {
         private final Initiatives initiatives = new Initiatives();
         private final ProductVersions productVersions = new ProductVersions();
         private final Deliveries deliveries = new Deliveries();
+        private final Purges purges = new Purges(requirements);
         private final RequirementCommandService service = new RequirementCommandService(
                 requirements,
                 new ExecutionFakes.Tasks(),
@@ -208,14 +335,15 @@ class RequirementPoolLifecycleTest {
                 initiatives,
                 productVersions,
                 deliveries,
-                new ProjectMemberAccessService(new Members()));
+                new ProjectMemberAccessService(new Members()),
+                purges);
 
         private Initiative approvedInitiative(ProductVersionId versionId) {
             Initiative initiative = Initiative.create(
                     PROJECT, versionId, OWNER, "研发流程", "贯通立项到评审",
                     null, null, null, null, null, null);
             initiative.submit();
-            initiative.approve("评审纪要");
+            initiative.approve();
             initiatives.save(initiative);
             return initiative;
         }
@@ -235,6 +363,12 @@ class RequirementPoolLifecycleTest {
         private final Map<Long, Requirement> store = new LinkedHashMap<>();
         private final Map<Long, RequirementTrashItem> trash = new LinkedHashMap<>();
         private long sequence;
+        private long requirementSequence;
+
+        @Override
+        public long nextRequirementNo() {
+            return ++requirementSequence;
+        }
 
         @Override
         public Optional<Requirement> findById(RequirementId id) {
@@ -267,6 +401,12 @@ class RequirementPoolLifecycleTest {
         }
 
         @Override
+        public boolean existsByVersion(ProductVersionId versionId) {
+            return store.values().stream()
+                    .anyMatch(requirement -> versionId.equals(requirement.getVersionId()));
+        }
+
+        @Override
         public void moveToTrash(RequirementId id, UserId deletedBy, Instant deletedAt) {
             Requirement requirement = store.remove(id.value());
             if (requirement == null) {
@@ -284,12 +424,32 @@ class RequirementPoolLifecycleTest {
             store.put(id.value(), item.requirement());
         }
 
+        private boolean purge(RequirementId id) {
+            return trash.remove(id.value()) != null;
+        }
+
         @Override
         public void save(Requirement requirement) {
             if (requirement.getId() == null) {
                 requirement.assignIdentity(RequirementId.of(++sequence));
             }
             store.put(requirement.getId().value(), requirement);
+        }
+    }
+
+    private static final class Purges implements RequirementPurgePort {
+        private final Requirements requirements;
+
+        private Purges(Requirements requirements) {
+            this.requirements = requirements;
+        }
+
+        @Override
+        public int purge(com.pydlove.regent.project.domain.model.ProjectId projectId,
+                         Collection<RequirementId> requirementIds) {
+            return (int) requirementIds.stream()
+                    .filter(requirements::purge)
+                    .count();
         }
     }
 
@@ -336,12 +496,6 @@ class RequirementPoolLifecycleTest {
             return version;
         }
 
-        private void confirm(ProductVersionId id) {
-            ProductVersion version = findById(id).orElseThrow();
-            version.confirm();
-            update(version);
-        }
-
         private void close(ProductVersionId id) {
             ProductVersion version = findById(id).orElseThrow();
             version.close();
@@ -378,6 +532,11 @@ class RequirementPoolLifecycleTest {
         @Override
         public void update(ProductVersion version) {
             store.put(version.getId().value(), version);
+        }
+
+        @Override
+        public void delete(ProductVersionId id) {
+            store.remove(id.value());
         }
     }
 

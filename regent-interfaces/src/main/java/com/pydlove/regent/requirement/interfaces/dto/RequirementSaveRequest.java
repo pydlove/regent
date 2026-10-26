@@ -4,6 +4,7 @@ package com.pydlove.regent.requirement.interfaces.dto;
 public record RequirementSaveRequest(
         Long projectId,
         Long initiativeId,
+        Long versionId,
         String source,
         String title,
         String rawText,

@@ -12,6 +12,7 @@ public interface RelayInstaller {
 
     record InstallRequest(
             String serverIp,
+            String serverUrl,
             String sshUsername,
             String password,
             String installDirectory

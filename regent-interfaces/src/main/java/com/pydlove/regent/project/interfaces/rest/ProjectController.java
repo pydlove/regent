@@ -12,9 +12,11 @@ import com.pydlove.regent.project.application.command.UpdateProjectCommand;
 import com.pydlove.regent.project.application.query.DirectoryListingService;
 import com.pydlove.regent.project.application.query.ProjectGitBranchQueryService;
 import com.pydlove.regent.project.application.query.ProjectVersionService;
+import com.pydlove.regent.project.application.query.WorkflowTemplateQueryService;
 import com.pydlove.regent.project.domain.model.Project;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.model.ProjectVersionSource;
+import com.pydlove.regent.project.domain.model.WorkflowTemplateId;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
 import com.pydlove.regent.project.interfaces.dto.DirectoryListingResponse;
@@ -54,6 +56,7 @@ public class ProjectController {
     private final ProjectGitBranchQueryService projectGitBranchQueryService;
     private final ProjectVersionService projectVersionService;
     private final ProjectSummaryGenerationService projectSummaryGenerationService;
+    private final WorkflowTemplateQueryService workflowTemplateQueryService;
 
     public ProjectController(ProjectProfileRepository projectProfileRepository,
                              ProjectRegistrationService projectRegistrationService,
@@ -61,7 +64,8 @@ public class ProjectController {
                              DirectoryListingService directoryListingService,
                              ProjectGitBranchQueryService projectGitBranchQueryService,
                              ProjectVersionService projectVersionService,
-                             ProjectSummaryGenerationService projectSummaryGenerationService) {
+                             ProjectSummaryGenerationService projectSummaryGenerationService,
+                             WorkflowTemplateQueryService workflowTemplateQueryService) {
         this.projectProfileRepository = projectProfileRepository;
         this.projectRegistrationService = projectRegistrationService;
         this.projectUpdateService = projectUpdateService;
@@ -69,6 +73,7 @@ public class ProjectController {
         this.projectGitBranchQueryService = projectGitBranchQueryService;
         this.projectVersionService = projectVersionService;
         this.projectSummaryGenerationService = projectSummaryGenerationService;
+        this.workflowTemplateQueryService = workflowTemplateQueryService;
     }
 
     /**
@@ -90,7 +95,7 @@ public class ProjectController {
                                       HttpServletRequest request) {
         OrganizationId scope = organizationId == null ? null : OrganizationId.of(organizationId);
         return projectProfileRepository.findAll(currentUser(request), scope).stream()
-                .map(ProjectResponse::from)
+                .map(this::toResponse)
                 .toList();
     }
 
@@ -132,8 +137,13 @@ public class ProjectController {
                         request.defaultDecisionLevel() == null ? "L1" : request.defaultDecisionLevel()),
                 ProjectVersionSource.parse(
                         request.versionSource() == null ? "GIT_TAG" : request.versionSource()),
-                request.fallbackVersion()), ownerId, OrganizationId.of(request.organizationId()));
-        return ProjectResponse.from(projectProfileRepository.findById(project.getId(), ownerId)
+                request.fallbackVersion(),
+                request.workflowTemplateId() == null
+                        ? null
+                        : WorkflowTemplateId.of(request.workflowTemplateId())),
+                ownerId,
+                OrganizationId.of(request.organizationId()));
+        return toResponse(projectProfileRepository.findById(project.getId(), ownerId)
                 .orElseThrow(() -> new EntityNotFoundException("项目刚注册就查不到了：" + project.getId())));
     }
 
@@ -161,7 +171,7 @@ public class ProjectController {
                 versionSource,
                 fallbackVersion,
                 request.enabled()), ownerId);
-        return ProjectResponse.from(projectProfileRepository.findById(project.getId(), ownerId)
+        return toResponse(projectProfileRepository.findById(project.getId(), ownerId)
                 .orElseThrow(() -> new EntityNotFoundException("项目刚更新就查不到了：" + project.getId())));
     }
 
@@ -173,8 +183,17 @@ public class ProjectController {
         projectProfileRepository.findById(projectId, ownerId)
                 .orElseThrow(() -> new EntityNotFoundException("项目不存在：" + id));
         projectSummaryGenerationService.schedule(projectId);
-        return ProjectResponse.from(projectProfileRepository.findById(projectId, ownerId)
+        return toResponse(projectProfileRepository.findById(projectId, ownerId)
                 .orElseThrow(() -> new EntityNotFoundException("项目不存在：" + id)));
+    }
+
+    private ProjectResponse toResponse(ProjectProfile profile) {
+        WorkflowTemplateId templateId = workflowTemplateQueryService == null
+                ? null
+                : workflowTemplateQueryService.projectTemplateId(profile.id());
+        return ProjectResponse.from(
+                profile,
+                templateId == null ? null : templateId.value());
     }
 
     private static UserId currentUser(HttpServletRequest request) {

@@ -2,10 +2,12 @@ package com.pydlove.regent.boot.delivery;
 
 import com.pydlove.regent.delivery.application.command.InitiativeAttachmentService;
 import com.pydlove.regent.delivery.application.command.InitiativeCommandService;
+import com.pydlove.regent.delivery.application.command.ProductVersionCommandService;
 import com.pydlove.regent.delivery.application.command.SaveInitiativeCommand;
 import com.pydlove.regent.delivery.application.command.UploadedInitiativeAttachment;
 import com.pydlove.regent.delivery.domain.model.Initiative;
 import com.pydlove.regent.delivery.domain.model.InitiativeStatus;
+import com.pydlove.regent.delivery.domain.model.ProductVersion;
 import com.pydlove.regent.delivery.domain.repository.InitiativeAttachmentRepository;
 import com.pydlove.regent.delivery.domain.repository.InitiativeRepository;
 import com.pydlove.regent.identity.domain.model.UserId;
@@ -47,6 +49,9 @@ class InitiativeMeetingMinutesIT {
     private InitiativeCommandService initiativeCommandService;
 
     @Autowired
+    private ProductVersionCommandService productVersionCommandService;
+
+    @Autowired
     private InitiativeAttachmentService attachmentService;
 
     @Autowired
@@ -68,8 +73,8 @@ class InitiativeMeetingMinutesIT {
     }
 
     @Test
-    @DisplayName("上传会议纪要附件后可以无正文同意立项，并持久化回读")
-    void approvesWithUploadedMinutes(@TempDir Path workspace) {
+    @DisplayName("发起立项时上传会议纪要，审批只记录意见")
+    void submitsMinutesAndApprovesWithoutNewEvidence(@TempDir Path workspace) {
         Project project = projectRegistrationService.register(new RegisterProjectCommand(
                 "initiative_minutes_it",
                 "立项会议纪要测试",
@@ -77,17 +82,23 @@ class InitiativeMeetingMinutesIT {
                 null,
                 null,
                 DecisionLevel.L1), OWNER);
+        ProductVersion version = productVersionCommandService.create(
+                project.getId(), "v1.0.0", "立项版本", "验证纪要及时点", OWNER);
         Initiative initiative = initiativeCommandService.create(new SaveInitiativeCommand(
                 project.getId(),
+                version.getId(),
                 "审批材料闭环",
                 "验证会议纪要附件",
                 null,
                 null,
+                null,
+                null,
+                null,
+                null,
                 null), OWNER);
-        initiativeCommandService.submit(initiative.getId(), OWNER);
 
-        assertThrows(DomainException.class, () -> initiativeCommandService.approve(
-                initiative.getId(), OWNER, "同意", ""));
+        assertThrows(DomainException.class,
+                () -> initiativeCommandService.submit(initiative.getId(), OWNER));
 
         attachmentService.attach(
                 initiative.getId(),
@@ -97,7 +108,8 @@ class InitiativeMeetingMinutesIT {
                         "application/pdf",
                         "%PDF-1.4\n会议结论：同意立项".getBytes()));
 
-        initiativeCommandService.approve(initiative.getId(), OWNER, "同意", "");
+        initiativeCommandService.submit(initiative.getId(), OWNER);
+        initiativeCommandService.approve(initiative.getId(), OWNER, "同意");
 
         Initiative stored = initiativeRepository.findById(initiative.getId()).orElseThrow();
         assertEquals(InitiativeStatus.APPROVED, stored.getStatus());

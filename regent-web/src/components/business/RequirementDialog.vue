@@ -235,6 +235,7 @@ const confirm = async () => {
     :title="current ? current.title : '录入需求'"
     :description="readOnly ? '查看需求及其关联任务' : '补充目标、范围与验收标准，由 AI 检查信息是否足够并生成任务草稿。'"
     :icon="FileText"
+    :close-on-outside-click="false"
   >
     <div class="flex flex-col gap-3">
       <p v-if="loading" class="text-caption text-label-tertiary">正在读取需求…</p>

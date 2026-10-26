@@ -40,14 +40,15 @@ class InitiativeTest {
     }
 
     @Test
-    @DisplayName("审批立项时保存会议纪要并冻结审批材料")
-    void 审批时保存会议纪要并冻结材料() {
+    @DisplayName("会议纪要在提交前确定，审批不会覆盖")
+    void 审批不覆盖已提交的会议纪要() {
         Initiative initiative = Initiative.create(
                 ProjectId.of(1), UserId.of(9), "研发流程", "缩短交付周期",
                 null, null, null);
+        initiative.updateMeetingMinutes("会议结论：同意立项，按当前范围推进。");
         initiative.submit();
 
-        initiative.approve("会议结论：同意立项，按当前范围推进。");
+        initiative.approve();
 
         assertEquals(InitiativeStatus.APPROVED, initiative.getStatus());
         assertEquals("会议结论：同意立项，按当前范围推进。", initiative.getMeetingMinutes());
@@ -55,14 +56,15 @@ class InitiativeTest {
     }
 
     @Test
-    @DisplayName("驳回时同样保留会议纪要")
-    void 驳回时保留会议纪要() {
+    @DisplayName("驳回不会覆盖已提交的会议纪要")
+    void 驳回不覆盖已提交的会议纪要() {
         Initiative initiative = Initiative.create(
                 ProjectId.of(1), UserId.of(9), "研发流程", "缩短交付周期",
                 null, null, null);
+        initiative.updateMeetingMinutes("会议结论：范围过大，补充目标后重新提交。");
         initiative.submit();
 
-        initiative.reject("会议结论：范围过大，补充目标后重新提交。");
+        initiative.reject();
 
         assertEquals(InitiativeStatus.REJECTED, initiative.getStatus());
         assertEquals("会议结论：范围过大，补充目标后重新提交。", initiative.getMeetingMinutes());

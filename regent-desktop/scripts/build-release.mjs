@@ -292,7 +292,7 @@ iconSet()
 const electronZipDir = prepareElectronZipDirectory()
 const runtimeDirectory = stageRuntime(projectDirectory, path.join(workDirectory, 'runtime'), {
   releaseCode,
-  minShellRelease: shellInfo.shellRelease,
+  minShellRelease: shellInfo.minRuntimeShellRelease || shellInfo.shellRelease,
 })
 const runtime = createRuntimeArchive(
   runtimeDirectory,

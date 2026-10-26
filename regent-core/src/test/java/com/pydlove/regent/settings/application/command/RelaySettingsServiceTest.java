@@ -120,19 +120,19 @@ class RelaySettingsServiceTest {
     }
 
     @Test
-    @DisplayName("保存设置时去掉地址两侧空白并立即返回新状态")
+    @DisplayName("保存设置时支持裸域名和站点子路径并立即返回新状态")
     void updatesAndNormalizesSettings() {
         probe.result = new RelayHealthProbe.ProbeResult(true, true, 0, 18, "正常");
 
         RelaySettingsView view = service.update(
-                "  https://relay.example.com/  ",
+                "  relay.example.com/regent/  ",
                 true,
                 " 203.0.113.10 ",
                 " deploy ",
                 " /opt/regent/relay "
         );
 
-        assertEquals("https://relay.example.com/", repository.settings.serverUrl());
+        assertEquals("https://relay.example.com/regent/", repository.settings.serverUrl());
         assertTrue(repository.settings.monitoringEnabled());
         assertEquals("203.0.113.10", repository.settings.serverIp());
         assertEquals("deploy", repository.settings.sshUsername());
@@ -177,7 +177,7 @@ class RelaySettingsServiceTest {
         repository.settings = new RelaySettings(
                 "https://relay.example.com",
                 true,
-                "203.0.113.10",
+                "relay.example.com",
                 "deploy",
                 "/opt/regent/relay"
         );
@@ -191,14 +191,15 @@ class RelaySettingsServiceTest {
 
         assertTrue(result.success());
         assertEquals("/opt/regent/relay", result.installDirectory());
-        assertEquals("203.0.113.10", installer.request.serverIp());
+        assertEquals("relay.example.com", installer.request.serverIp());
+        assertEquals("https://relay.example.com", installer.request.serverUrl());
         assertEquals("deploy", installer.request.sshUsername());
         assertEquals("temporary-secret", installer.request.password());
         assertEquals("/opt/regent/relay", installer.request.installDirectory());
     }
 
     @Test
-    @DisplayName("没有服务器 IP 时拒绝安装且不调用安装端口")
+    @DisplayName("没有服务器域名或 IP 时拒绝安装且不调用安装端口")
     void rejectsInstallWithoutServerIp() {
         assertThrows(DomainException.class, () -> service.install("password"));
         assertEquals(0, installer.calls);

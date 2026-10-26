@@ -3,6 +3,7 @@ package com.pydlove.regent.settings.infrastructure.relay;
 import com.pydlove.regent.settings.domain.port.RelayInstaller;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -94,11 +95,25 @@ public class ShellRelayInstaller implements RelayInstaller {
         environment.put("REGENT_SERVER_IP", request.serverIp());
         environment.put("REGENT_SERVER_USER", request.sshUsername());
         environment.put("REGENT_REMOTE_BASE", request.installDirectory());
+        String serverUrl = request.serverUrl() == null ? "" : request.serverUrl().trim();
+        if (serverUrl.isEmpty()) {
+            environment.remove("REGENT_PUBLIC_URL");
+            environment.remove("REGENT_WEB_BASE_PATH");
+        } else {
+            environment.put("REGENT_PUBLIC_URL", serverUrl);
+            environment.put("REGENT_WEB_BASE_PATH", webBasePath(serverUrl));
+        }
         if (request.password() != null && !request.password().isEmpty()) {
             environment.put("REGENT_SERVER_PASSWORD", request.password());
         } else {
             environment.remove("REGENT_SERVER_PASSWORD");
         }
+    }
+
+    private static String webBasePath(String serverUrl) {
+        String path = URI.create(serverUrl).getPath();
+        if (path == null || path.isBlank() || "/".equals(path)) return "/";
+        return "/" + path.replaceAll("^/+|/+$", "") + "/";
     }
 
     private static String readOutput(Path outputFile) throws IOException {

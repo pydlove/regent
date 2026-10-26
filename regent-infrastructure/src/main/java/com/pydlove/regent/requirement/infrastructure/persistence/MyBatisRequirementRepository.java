@@ -42,6 +42,15 @@ public class MyBatisRequirementRepository implements RequirementRepository {
     }
 
     @Override
+    public long nextRequirementNo() {
+        RequirementNumberSequenceData sequence = new RequirementNumberSequenceData();
+        if (mapper.insertNumberSequence(sequence) != 1 || sequence.getRequirementNo() == null) {
+            throw new DomainException("需求编号分配失败");
+        }
+        return sequence.getRequirementNo();
+    }
+
+    @Override
     public Optional<Requirement> findById(RequirementId id) {
         return Optional.ofNullable(mapper.selectById(id.value())).map(this::toDomain);
     }
@@ -83,6 +92,11 @@ public class MyBatisRequirementRepository implements RequirementRepository {
     }
 
     @Override
+    public boolean existsByVersion(ProductVersionId versionId) {
+        return mapper.countByVersion(versionId.value()) > 0;
+    }
+
+    @Override
     public void moveToTrash(RequirementId id, UserId deletedBy, Instant deletedAt) {
         if (mapper.moveToTrash(id.value(), deletedBy.value(), db(deletedAt)) != 1) {
             throw new DomainException("需求删除失败或已删除：" + id.value());
@@ -98,6 +112,9 @@ public class MyBatisRequirementRepository implements RequirementRepository {
 
     @Override
     public void save(Requirement requirement) {
+        if (requirement.getId() == null && requirement.getRequirementNo() == null) {
+            throw new DomainException("需求保存前必须分配全局编号");
+        }
         RequirementData data = toData(requirement);
         if (requirement.getId() == null) {
             if (mapper.insert(data) != 1) {
@@ -114,7 +131,11 @@ public class MyBatisRequirementRepository implements RequirementRepository {
     private RequirementData toData(Requirement requirement) {
         RequirementData data = new RequirementData();
         data.setId(requirement.getId() == null ? null : requirement.getId().value());
+        data.setRequirementNo(requirement.getRequirementNo());
         data.setProjectId(requirement.getProjectId().value());
+        data.setCreatedBy(requirement.getCreatedBy() == null
+                ? null
+                : requirement.getCreatedBy().value());
         data.setInitiativeId(requirement.getInitiativeId() == null
                 ? null
                 : requirement.getInitiativeId().value());
@@ -149,7 +170,9 @@ public class MyBatisRequirementRepository implements RequirementRepository {
         try {
             return Requirement.restore(
                     RequirementId.of(data.getId()),
+                    data.getRequirementNo(),
                     ProjectId.of(data.getProjectId()),
+                    data.getCreatedBy() == null ? null : UserId.of(data.getCreatedBy()),
                     data.getInitiativeId() == null
                             ? null
                             : InitiativeId.of(data.getInitiativeId()),

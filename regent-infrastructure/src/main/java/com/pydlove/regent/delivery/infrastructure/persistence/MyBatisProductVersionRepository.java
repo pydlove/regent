@@ -55,6 +55,13 @@ public class MyBatisProductVersionRepository implements ProductVersionRepository
         }
     }
 
+    @Override
+    public void delete(ProductVersionId id) {
+        if (mapper.deleteById(id.value()) != 1) {
+            throw new DomainException("产品版本删除失败或不存在：" + id.value());
+        }
+    }
+
     private ProductVersion toDomain(ProductVersionData data) {
         return ProductVersion.restore(
                 ProductVersionId.of(data.getId()),

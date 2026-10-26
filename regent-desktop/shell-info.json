@@ -1,3 +1,4 @@
 {
-  "shellRelease": "R100B011"
+  "shellRelease": "R100B011",
+  "minRuntimeShellRelease": "R100B010"
 }

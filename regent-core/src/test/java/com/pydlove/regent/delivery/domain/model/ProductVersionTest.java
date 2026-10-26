@@ -34,28 +34,27 @@ class ProductVersionTest {
     }
 
     @Test
-    @DisplayName("只有规划中的版本可以修改和确认")
+    @DisplayName("规划中的版本可以修改，关闭后不可再修改")
     void onlyPlanningVersionCanChange() {
         ProductVersion version = ProductVersion.create(
                 PROJECT, "v1.0.0", "首个版本", null, CREATOR);
 
         version.update("首个正式版本", "补充范围");
-        version.confirm();
+        version.close();
 
-        assertEquals(ProductVersionStatus.CONFIRMED, version.getStatus());
+        assertEquals(ProductVersionStatus.CLOSED, version.getStatus());
         assertThrows(DomainException.class,
                 () -> version.update("再次修改", null));
-        assertThrows(DomainException.class, version::confirm);
     }
 
     @Test
-    @DisplayName("版本关闭后不能重新确认")
+    @DisplayName("版本关闭是终态")
     void closedVersionIsTerminal() {
         ProductVersion version = ProductVersion.create(
                 PROJECT, "v1.0.0", "首个版本", null, CREATOR);
         version.close();
+        version.close();
 
         assertEquals(ProductVersionStatus.CLOSED, version.getStatus());
-        assertThrows(DomainException.class, version::confirm);
     }
 }

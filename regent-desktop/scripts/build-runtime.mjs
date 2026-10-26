@@ -25,7 +25,7 @@ const runtimeArchive = path.join(
 fs.mkdirSync(outputDirectory, { recursive: true })
 stageRuntime(projectDirectory, runtimeDirectory, {
   releaseCode,
-  minShellRelease: shellInfo.shellRelease,
+  minShellRelease: shellInfo.minRuntimeShellRelease || shellInfo.shellRelease,
 })
 createRuntimeArchive(runtimeDirectory, runtimeArchive)
 
