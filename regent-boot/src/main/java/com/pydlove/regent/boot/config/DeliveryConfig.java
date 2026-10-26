@@ -17,6 +17,7 @@ import com.pydlove.regent.delivery.domain.repository.ReleaseRepository;
 import com.pydlove.regent.delivery.domain.repository.RequirementDeliveryRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.project.domain.repository.WorkflowTemplateRepository;
+import com.pydlove.regent.project.application.command.WorkflowTemplateCommandService;
 import com.pydlove.regent.project.application.query.WorkflowTemplateQueryService;
 import com.pydlove.regent.project.application.query.ProjectMemberAccessService;
 import com.pydlove.regent.requirement.domain.repository.RequirementRepository;
@@ -26,6 +27,8 @@ import com.pydlove.regent.shared.domain.port.AttachmentStorage;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.time.Clock;
 
 /** 研发交付流程的应用服务装配。 */
 @Configuration
@@ -48,6 +51,14 @@ public class DeliveryConfig {
     public WorkflowTemplateQueryService workflowTemplateQueryService(
             WorkflowTemplateRepository workflowTemplateRepository) {
         return new WorkflowTemplateQueryService(workflowTemplateRepository);
+    }
+
+    @Bean
+    public WorkflowTemplateCommandService workflowTemplateCommandService(
+            WorkflowTemplateRepository workflowTemplateRepository,
+            TransactionRunner transactionRunner) {
+        return new WorkflowTemplateCommandService(
+                workflowTemplateRepository, transactionRunner, Clock.systemUTC());
     }
 
     @Bean

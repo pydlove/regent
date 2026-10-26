@@ -10,6 +10,7 @@ import {
   Palette,
   RadioTower,
   RefreshCw,
+  Workflow,
 } from '@lucide/vue'
 import type { Component } from 'vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
@@ -42,6 +43,7 @@ import { useTheme, type ThemePreference } from '@/composables/useTheme'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/useAuthStore'
 import { useExecutionRuntimeStore } from '@/stores/useExecutionRuntimeStore'
+import { useOrganizationStore } from '@/stores/useOrganizationStore'
 import type {
   RelayInstallResult,
   RelaySettings,
@@ -56,8 +58,16 @@ import {
   isRelayServerHost,
 } from '@/utils/relayServerUrl'
 import BaselineView from '@/views/BaselineView.vue'
+import WorkflowTemplatesSettings from '@/views/WorkflowTemplatesSettings.vue'
 
-type SettingsSection = 'appearance' | 'baseline' | 'execution' | 'git' | 'relay' | 'account'
+type SettingsSection =
+  | 'appearance'
+  | 'baseline'
+  | 'workflow'
+  | 'execution'
+  | 'git'
+  | 'relay'
+  | 'account'
 type SectionItem = {
   id: SettingsSection
   label: string
@@ -65,9 +75,10 @@ type SectionItem = {
   tone: string
 }
 
-const sections: SectionItem[] = [
+const allSections: SectionItem[] = [
   { id: 'appearance', label: '外观', icon: Palette, tone: 'bg-accent' },
   { id: 'baseline', label: '样式基准', icon: LayoutPanelLeft, tone: 'bg-accent' },
+  { id: 'workflow', label: '研发流程', icon: Workflow, tone: 'bg-accent' },
   { id: 'execution', label: '执行', icon: Gauge, tone: 'bg-warning' },
   { id: 'git', label: 'Git 提交', icon: GitBranch, tone: 'bg-danger' },
   { id: 'relay', label: '中继', icon: RadioTower, tone: 'bg-success' },
@@ -79,6 +90,7 @@ const router = useRouter()
 const toast = useToast()
 const auth = useAuthStore()
 const executionRuntime = useExecutionRuntimeStore()
+const organizationStore = useOrganizationStore()
 const { openDialog: openCodexInstallDialog } = useCodexInstallDialog()
 const { preference, setTheme } = useTheme()
 
@@ -86,8 +98,13 @@ const sectionParam = computed(() => {
   const value = route.params.section
   return Array.isArray(value) ? value[0] : value
 })
+const sections = computed(() =>
+  allSections.filter(
+    (section) => section.id !== 'workflow' || organizationStore.canManageOrganization,
+  ),
+)
 const activeSection = computed<SettingsSection>(() => {
-  const match = sections.find((section) => section.id === sectionParam.value)
+  const match = sections.value.find((section) => section.id === sectionParam.value)
   return match?.id ?? 'appearance'
 })
 
@@ -614,6 +631,7 @@ onBeforeUnmount(() => {
 
     <section class="scroll-area min-w-0 flex-1 overflow-y-auto">
       <BaselineView v-if="activeSection === 'baseline'" />
+      <WorkflowTemplatesSettings v-else-if="activeSection === 'workflow'" />
       <div v-else class="mx-auto w-full max-w-[720px] px-8 py-7 max-sm:px-5 max-sm:py-6">
         <template v-if="activeSection === 'appearance'">
           <header class="mb-6">

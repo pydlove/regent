@@ -16,6 +16,8 @@ import com.pydlove.regent.requirement.interfaces.dto.RequirementReviewRecordResp
 import com.pydlove.regent.shared.domain.DomainException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.CacheControl;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
@@ -98,12 +101,21 @@ public class RequirementReviewRecordController {
     @GetMapping("/requirement-review-attachments/{id}/content")
     public ResponseEntity<byte[]> content(
             @PathVariable long id,
+            @RequestParam(defaultValue = "false") boolean download,
             HttpServletRequest request) {
         RequirementReviewAttachment attachment = service.loadAttachment(
                 RequirementReviewAttachmentId.of(id), currentUser(request));
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(attachment.contentType()))
                 .cacheControl(CONTENT_CACHE)
+                .header(
+                        HttpHeaders.CONTENT_DISPOSITION,
+                        (download
+                                ? ContentDisposition.attachment()
+                                : ContentDisposition.inline())
+                                .filename(attachment.filename(), StandardCharsets.UTF_8)
+                                .build()
+                                .toString())
                 .body(service.content(attachment));
     }
 

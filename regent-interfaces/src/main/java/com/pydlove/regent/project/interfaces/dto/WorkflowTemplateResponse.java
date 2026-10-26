@@ -13,6 +13,7 @@ public record WorkflowTemplateResponse(
         int versionNo,
         String displayName,
         String description,
+        String status,
         List<StageResponse> stages) {
 
     public static WorkflowTemplateResponse from(WorkflowTemplate template) {
@@ -23,6 +24,7 @@ public record WorkflowTemplateResponse(
                 template.versionNo(),
                 template.displayName(),
                 template.description(),
+                template.status().name(),
                 template.stages().stream().map(StageResponse::from).toList());
     }
 

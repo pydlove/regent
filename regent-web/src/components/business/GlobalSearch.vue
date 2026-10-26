@@ -18,9 +18,11 @@ import Icon from '@/components/ui/icon/Icon.vue'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
 import Input from '@/components/ui/input/Input.vue'
 import Popover from '@/components/ui/popover/Popover.vue'
+import { useOrganizationStore } from '@/stores/useOrganizationStore'
 import { useTaskStore } from '@/stores/useTaskStore'
 
 const store = useTaskStore()
+const organizationStore = useOrganizationStore()
 const router = useRouter()
 const open = ref(false)
 const query = ref('')
@@ -29,21 +31,24 @@ const searching = ref(false)
 let timer: number | undefined
 let sequence = 0
 
-const pages = [
+const pages = computed(() => [
   { title: '工作台', description: '执行控制塔与待办', to: '/dashboard', icon: LayoutDashboard },
   { title: '任务', description: '全部任务', to: '/tasks', icon: ListChecks },
   { title: '需求', description: '需求澄清与任务拆解', to: '/tasks?view=requirements', icon: FileText },
   { title: '计划', description: '批量计划', to: '/tasks?view=plans', icon: Workflow },
   { title: '交付', description: '部署与测试', to: '/delivery', icon: ServerCog },
   { title: '项目', description: '项目与执行资源', to: '/projects', icon: FolderKanban },
+  ...(organizationStore.canManageOrganization
+    ? [{ title: '研发流程', description: '全局流程模板与阶段配置', to: '/settings/workflow', icon: Workflow }]
+    : []),
   { title: '设置', description: '账户、执行设备与系统设置', to: '/settings', icon: Settings },
   { title: '使用说明', description: '功能说明与排障', to: '/help', icon: CircleHelp },
-]
+])
 
 const pageResults = computed(() => {
   const value = query.value.trim().toLocaleLowerCase('zh-CN')
-  if (!value) return pages.slice(0, 5)
-  return pages.filter((page) =>
+  if (!value) return pages.value.slice(0, 5)
+  return pages.value.filter((page) =>
     `${page.title} ${page.description}`.toLocaleLowerCase('zh-CN').includes(value),
   )
 })

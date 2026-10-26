@@ -8,6 +8,7 @@ import com.pydlove.regent.project.domain.model.Project;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.model.WorkflowTemplate;
 import com.pydlove.regent.project.domain.model.WorkflowTemplateId;
+import com.pydlove.regent.project.domain.model.WorkflowTemplateStatus;
 import com.pydlove.regent.project.domain.port.ProjectSummaryScheduler;
 import com.pydlove.regent.project.domain.model.ProjectMemberRole;
 import com.pydlove.regent.project.domain.repository.ProjectMemberRepository;
@@ -135,9 +136,12 @@ public class ProjectRegistrationService {
         if (workflowTemplateRepository == null) return;
         WorkflowTemplateId templateId = requested;
         if (templateId != null) {
-            workflowTemplateRepository.findById(templateId)
+            WorkflowTemplate template = workflowTemplateRepository.findById(templateId)
                     .orElseThrow(() -> new DomainException(
-                            "流程模板不存在或未发布：" + requested.value()));
+                            "流程模板不存在：" + requested.value()));
+            if (template.status() != WorkflowTemplateStatus.PUBLISHED) {
+                throw new DomainException("流程模板已停用或被新版本替代，请重新选择");
+            }
         } else {
             templateId = workflowTemplateRepository.findDefault()
                     .map(WorkflowTemplate::id)

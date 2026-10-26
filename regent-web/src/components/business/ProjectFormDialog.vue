@@ -56,6 +56,9 @@ const editing = computed(() => editingProject.value)
 const selectedWorkflowTemplate = computed(
   () => workflowTemplates.value.find((item) => String(item.id) === workflowTemplateId.value) ?? null,
 )
+const availableWorkflowTemplates = computed(
+  () => workflowTemplates.value.filter((item) => item.status === 'PUBLISHED'),
+)
 const editingWorkflowTemplate = computed(
   () => workflowTemplates.value.find((item) => item.id === editingProject.value?.workflowTemplateId) ?? null,
 )
@@ -93,7 +96,11 @@ const loadWorkflowTemplates = async () => {
     if (editing.value && editingProject.value?.workflowTemplateId) {
       workflowTemplateId.value = String(editingProject.value.workflowTemplateId)
     } else if (!workflowTemplateId.value) {
-      workflowTemplateId.value = String(templates[0]?.id ?? '')
+      workflowTemplateId.value = String(availableWorkflowTemplates.value[0]?.id ?? '')
+    } else if (!availableWorkflowTemplates.value.some(
+      (template) => String(template.id) === workflowTemplateId.value,
+    )) {
+      workflowTemplateId.value = String(availableWorkflowTemplates.value[0]?.id ?? '')
     }
   } catch (value) {
     templatesError.value = value instanceof ApiError
@@ -191,7 +198,7 @@ const save = async () => {
       >
         <Select
           v-model="workflowTemplateId"
-          :items="workflowTemplates.map((template) => ({
+          :items="availableWorkflowTemplates.map((template) => ({
             value: String(template.id),
             label: template.displayName,
           }))"
@@ -243,6 +250,12 @@ const save = async () => {
       </div>
 
       <p v-if="templatesError" class="text-caption text-danger">{{ templatesError }}</p>
+      <p
+        v-else-if="!editing && !templatesLoading && workflowTemplates.length > 0 && availableWorkflowTemplates.length === 0"
+        class="text-caption text-danger"
+      >
+        当前没有可用的研发流程模板，请让组织管理员到“设置 → 研发流程”发布模板。
+      </p>
 
       <div
         v-if="!editing"

@@ -18,7 +18,7 @@ public class WorkflowTemplateQueryService {
     }
 
     public List<WorkflowTemplate> list() {
-        return repository.findPublished();
+        return repository.findAll();
     }
 
     public WorkflowTemplateId projectTemplateId(ProjectId projectId) {

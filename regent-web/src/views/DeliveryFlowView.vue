@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import {
   ChevronLeft,
+  Download,
+  Eye,
   FileText,
   GitBranch,
   Paperclip,
@@ -123,6 +125,13 @@ const reviewDecisionRecord = ref<RequirementReviewRecord | null>(null)
 const reviewDecisionComment = ref('')
 const reviewDecisionSaving = ref(false)
 const reviewDecisionError = ref<string | null>(null)
+const reviewDecisionQuickPhrases = [
+  { text: '通过', tone: 'approve' },
+  { text: '材料完整，同意通过', tone: 'approve' },
+  { text: '请补充评审材料', tone: 'reject' },
+  { text: '需求范围不清晰，请补充', tone: 'reject' },
+  { text: '验收标准不完整，请完善', tone: 'reject' },
+] as const
 const canSubmitReviewRecord = computed(() =>
   Boolean(reviewDate.value)
   && (
@@ -1254,6 +1263,15 @@ function openReviewDecision(record: RequirementReviewRecord) {
   reviewDecisionComment.value = ''
   reviewDecisionError.value = null
   reviewDecisionOpen.value = true
+}
+
+function applyReviewDecisionPhrase(text: string) {
+  reviewDecisionComment.value = text
+  reviewDecisionError.value = null
+}
+
+function reviewAttachmentDownloadUrl(contentUrl: string) {
+  return `${contentUrl}${contentUrl.includes('?') ? '&' : '?'}download=1`
 }
 
 async function decideReview(decision: 'APPROVE' | 'REJECT') {
@@ -2758,20 +2776,37 @@ watch(selectedVersionId, () => {
         >
           {{ reviewDecisionRecord.minutes }}
         </p>
-        <div
-          v-if="reviewDecisionRecord.attachments.length > 0"
-          class="mt-2 flex flex-wrap gap-2"
-        >
-          <a
+        <div v-if="reviewDecisionRecord.attachments.length > 0" class="mt-2 space-y-2">
+          <div
             v-for="attachment in reviewDecisionRecord.attachments"
             :key="attachment.id"
-            :href="attachment.contentUrl"
-            target="_blank"
-            rel="noreferrer"
-            class="inline-flex items-center gap-1 rounded-control border border-separator-soft bg-window px-2 py-1 text-caption text-accent hover:underline"
+            class="flex min-w-0 flex-wrap items-center gap-2 rounded-control border border-separator-soft bg-window px-2.5 py-2"
           >
-            <Icon :as="Paperclip" size="inline" />{{ attachment.filename }}
-          </a>
+            <Icon :as="Paperclip" size="inline" class="shrink-0 text-label-tertiary" />
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-caption font-emphasis text-label">
+                {{ attachment.filename }}
+              </p>
+              <p class="mt-0.5 text-[10px] text-label-tertiary">
+                {{ formatBytes(attachment.sizeBytes) }}
+              </p>
+            </div>
+            <a
+              :href="attachment.contentUrl"
+              target="_blank"
+              rel="noreferrer"
+              class="inline-flex items-center gap-1 rounded-control px-2 py-1 text-caption text-accent hover:bg-accent/5"
+            >
+              <Icon :as="Eye" size="inline" />查看
+            </a>
+            <a
+              :href="reviewAttachmentDownloadUrl(attachment.contentUrl)"
+              :download="attachment.filename"
+              class="inline-flex items-center gap-1 rounded-control px-2 py-1 text-caption text-accent hover:bg-accent/5"
+            >
+              <Icon :as="Download" size="inline" />下载
+            </a>
+          </div>
         </div>
         <p
           v-if="!reviewDecisionRecord.minutes && reviewDecisionRecord.attachments.length === 0"
@@ -2779,18 +2814,42 @@ watch(selectedVersionId, () => {
         >
           本次评审没有提交会议纪要或附件。
         </p>
+        <p
+          v-else-if="reviewDecisionRecord.attachments.length === 0"
+          class="mt-2 text-caption text-label-tertiary"
+        >
+          本次未提交附件，仅包含会议纪要正文。
+        </p>
       </div>
 
       <DialogField
         label="审核意见"
         :required="false"
         hint="驳回时必须填写；通过时可选填"
+        stacked
       >
         <Textarea
           v-model="reviewDecisionComment"
           :rows="4"
           placeholder="填写对评审材料、需求范围或验收标准的审核意见"
         />
+        <div class="mt-2 flex flex-wrap items-center gap-1.5">
+          <span class="mr-0.5 text-caption text-label-tertiary">快捷意见</span>
+          <button
+            v-for="phrase in reviewDecisionQuickPhrases"
+            :key="phrase.text"
+            type="button"
+            class="rounded-control border px-2 py-1 text-caption transition-colors"
+            :class="
+              phrase.tone === 'approve'
+                ? 'border-success/25 bg-success/5 text-success hover:bg-success/10'
+                : 'border-danger/20 bg-danger/5 text-danger hover:bg-danger/10'
+            "
+            @click="applyReviewDecisionPhrase(phrase.text)"
+          >
+            {{ phrase.text }}
+          </button>
+        </div>
       </DialogField>
 
       <p v-if="reviewDecisionError" class="text-caption text-danger">

@@ -3,6 +3,7 @@ package com.pydlove.regent.project.domain.repository;
 import com.pydlove.regent.delivery.domain.model.ProductVersionId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.model.WorkflowTemplate;
+import com.pydlove.regent.project.domain.model.WorkflowTemplateDraft;
 import com.pydlove.regent.project.domain.model.WorkflowTemplateId;
 
 import java.time.Instant;
@@ -12,11 +13,23 @@ import java.util.Optional;
 /** 流程模板目录与项目/版本绑定。 */
 public interface WorkflowTemplateRepository {
 
+    List<WorkflowTemplate> findAll();
+
     List<WorkflowTemplate> findPublished();
 
     Optional<WorkflowTemplate> findById(WorkflowTemplateId id);
 
     Optional<WorkflowTemplate> findDefault();
+
+    WorkflowTemplate create(WorkflowTemplateDraft draft, Instant createdAt);
+
+    void supersedePublished(String code, Instant updatedAt);
+
+    int nextVersionNo(String code);
+
+    int countBindings(WorkflowTemplateId templateId);
+
+    void updateStatus(WorkflowTemplate template, Instant updatedAt);
 
     Optional<WorkflowTemplateId> findProjectTemplate(ProjectId projectId);
 

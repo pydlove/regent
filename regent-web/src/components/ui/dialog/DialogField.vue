@@ -18,14 +18,21 @@ withDefaults(
     required?: boolean
     /** 标签列宽；默认 80px，长中文标签的专用弹框可以显式加宽。 */
     labelWidth?: string
+    /** 长文本字段可以让标签、说明和控件改为上下排列。 */
+    stacked?: boolean
   }>(),
-  { labelWidth: 'w-20' },
+  { labelWidth: 'w-20', stacked: false },
 )
 </script>
 
 <template>
-  <div class="flex gap-3">
-    <span :class="[labelWidth, 'shrink-0 whitespace-nowrap pt-1 text-right text-body text-label']">
+  <div class="flex" :class="stacked ? 'flex-col gap-1.5' : 'gap-3'">
+    <span
+      :class="[
+        stacked ? 'w-auto text-left pt-0' : `${labelWidth} shrink-0 pt-1 text-right`,
+        'whitespace-nowrap text-body text-label',
+      ]"
+    >
       {{ label }}<span v-if="required" class="ml-0.5 text-danger" aria-hidden="true">*</span>
     </span>
     <div class="min-w-0 flex-1">
