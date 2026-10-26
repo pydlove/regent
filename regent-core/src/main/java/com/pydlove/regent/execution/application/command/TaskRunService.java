@@ -6,6 +6,7 @@ import com.pydlove.regent.execution.domain.model.RunEvent;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskAttachment;
+import com.pydlove.regent.execution.domain.model.TaskDocument;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskRunId;
@@ -15,6 +16,7 @@ import com.pydlove.regent.execution.domain.port.BranchManager;
 import com.pydlove.regent.execution.domain.port.RunEventListener;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
 import com.pydlove.regent.execution.domain.repository.TaskAttachmentRepository;
+import com.pydlove.regent.execution.domain.repository.TaskDocumentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
 import com.pydlove.regent.governance.application.command.RaisedDecision;
@@ -74,9 +76,11 @@ public class TaskRunService {
     private final TaskRunRepository taskRunRepository;
     private final RunEventRepository runEventRepository;
     private final TaskAttachmentRepository attachmentRepository;
+    private final TaskDocumentRepository documentRepository;
     private final ProjectProfileRepository projectProfileRepository;
     private final EnvironmentEntryRepository environmentEntryRepository;
     private final TaskPluginRepository taskPluginRepository;
+    private final TaskCodeStandardService taskCodeStandardService;
     private final RunSettlementService settlement;
     private final AgentExecutor agentExecutor;
     private final BranchManager branchManager;
@@ -86,9 +90,28 @@ public class TaskRunService {
                           TaskRunRepository taskRunRepository,
                           RunEventRepository runEventRepository,
                           TaskAttachmentRepository attachmentRepository,
+                          TaskDocumentRepository documentRepository,
                           ProjectProfileRepository projectProfileRepository,
                           EnvironmentEntryRepository environmentEntryRepository,
                           TaskPluginRepository taskPluginRepository,
+                          RunSettlementService settlement,
+                          AgentExecutor agentExecutor,
+                          BranchManager branchManager,
+                          Duration timeout) {
+        this(taskRepository, taskRunRepository, runEventRepository, attachmentRepository,
+                documentRepository, projectProfileRepository, environmentEntryRepository,
+                taskPluginRepository, null, settlement, agentExecutor, branchManager, timeout);
+    }
+
+    public TaskRunService(TaskRepository taskRepository,
+                          TaskRunRepository taskRunRepository,
+                          RunEventRepository runEventRepository,
+                          TaskAttachmentRepository attachmentRepository,
+                          TaskDocumentRepository documentRepository,
+                          ProjectProfileRepository projectProfileRepository,
+                          EnvironmentEntryRepository environmentEntryRepository,
+                          TaskPluginRepository taskPluginRepository,
+                          TaskCodeStandardService taskCodeStandardService,
                           RunSettlementService settlement,
                           AgentExecutor agentExecutor,
                           BranchManager branchManager,
@@ -97,9 +120,11 @@ public class TaskRunService {
         this.taskRunRepository = taskRunRepository;
         this.runEventRepository = runEventRepository;
         this.attachmentRepository = attachmentRepository;
+        this.documentRepository = documentRepository;
         this.projectProfileRepository = projectProfileRepository;
         this.environmentEntryRepository = environmentEntryRepository;
         this.taskPluginRepository = taskPluginRepository;
+        this.taskCodeStandardService = taskCodeStandardService;
         this.settlement = settlement;
         this.agentExecutor = agentExecutor;
         this.branchManager = branchManager;
@@ -126,25 +151,34 @@ public class TaskRunService {
         ProjectProfile project = projectProfileRepository.findById(task.getProjectId())
                 .orElseThrow(() -> new EntityNotFoundException("任务所属项目不存在：" + task.getProjectId()));
         String branch = task.getBranchName().orElse(null);
+        TaskCodeStandardService.CodeStandardContext standards = taskCodeStandardService == null
+                ? TaskCodeStandardService.CodeStandardContext.empty()
+                : taskCodeStandardService.context(taskId);
 
         TaskRun previous = taskRunRepository.findLatestByTask(taskId).orElse(null);
 
-        TaskRun run = TaskRun.start(taskId, task.getAttemptCount(), branch);
+        String baseRef = branchManager.currentCommit(project.path()).orElse(null);
+        TaskRun run = TaskRun.start(taskId, task.getAttemptCount(), branch, baseRef);
         taskRunRepository.save(run);
         EventRecorder recorder = new EventRecorder(runEventRepository, run.getId());
         PluginContext plugins = PluginContext.from(taskPluginRepository.findByTask(taskId));
         if (!plugins.isEmpty()) {
             recorder.record("platform.plugins", plugins.auditPayload());
         }
+        if (!standards.isEmpty()) {
+            recorder.record("platform.code-standards", standards.auditPayload());
+        }
 
         String threadId = task.getCodexThreadId().orElse(null);
         String prompt = settlement.instructionFor(task, previous);
+        prompt += TaskDocumentPrompt.section(documentRepository.findByTask(taskId));
         List<String> images = attachmentRepository.findByTask(taskId).stream()
                 .map(TaskAttachment::storagePath)
                 .toList();
         EnvironmentContext environment = EnvironmentContext.resolve(
                 environmentEntryRepository.findApplicableTo(project.ownerId(), project.id()));
-        return new Execution(task, project, run, recorder, threadId, prompt, images, plugins, environment);
+        return new Execution(task, project, run, recorder, threadId, prompt,
+                standards.promptSection(), images, plugins, environment);
     }
 
     private TaskRun executeRounds(Execution execution) {
@@ -165,6 +199,7 @@ public class TaskRunService {
             execution.recorder.record("platform.adjustment", adjustmentPayload(adjustment));
         }
         String prompt = execution.prompt
+                + execution.codeStandardsPrompt
                 + (adjustment == null ? "" : "\n\n---\n\n" + adjustment.prompt());
         ExecResult result = agentExecutor.execute(
                 new ExecRequest(
@@ -308,6 +343,7 @@ public class TaskRunService {
         private final EventRecorder recorder;
         /** 任务附件。每次尝试开局读一次就固定下来：跑的过程中没人能再往这个任务上贴图。 */
         private final List<String> images;
+        private final String codeStandardsPrompt;
         private final PluginContext plugins;
         private final EnvironmentContext environment;
         private String threadId;
@@ -319,6 +355,7 @@ public class TaskRunService {
                           EventRecorder recorder,
                           String threadId,
                           String prompt,
+                          String codeStandardsPrompt,
                           List<String> images,
                           PluginContext plugins,
                           EnvironmentContext environment) {
@@ -328,6 +365,7 @@ public class TaskRunService {
             this.recorder = recorder;
             this.threadId = threadId;
             this.prompt = prompt;
+            this.codeStandardsPrompt = codeStandardsPrompt;
             this.images = images;
             this.plugins = plugins;
             this.environment = environment;

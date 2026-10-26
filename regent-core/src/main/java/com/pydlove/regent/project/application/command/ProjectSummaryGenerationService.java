@@ -36,15 +36,18 @@ public class ProjectSummaryGenerationService implements ProjectSummaryScheduler 
 
     @Override
     public void schedule(ProjectId projectId) {
+        Project project = projectRepository.findById(projectId).orElse(null);
+        if (project == null) {
+            return;
+        }
+        if (!project.hasWorkspace()) {
+            throw new com.pydlove.regent.shared.domain.DomainException(
+                    "项目尚未绑定本机代码目录，不能生成项目资料");
+        }
         if (!activeProjects.add(projectId.value())) {
             return;
         }
         try {
-            Project project = projectRepository.findById(projectId).orElse(null);
-            if (project == null) {
-                activeProjects.remove(projectId.value());
-                return;
-            }
             project.startSummaryGeneration();
             projectRepository.update(project);
             workers.execute(() -> generate(projectId));

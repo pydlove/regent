@@ -102,6 +102,79 @@ test('后续任务说明可按同一会话与继续创建检索', () => {
   )
 })
 
+test('排队恢复说明可按重启、等待设备和执行位检索', () => {
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '重启').some((topic) => topic.id === 'queue-recovery'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '等待设备').some((topic) => topic.id === 'queue-recovery'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '执行位').some((topic) => topic.id === 'queue-recovery'),
+  )
+})
+
+test('客户端更新说明可按 Runtime、回滚和发布码检索', () => {
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, 'Runtime').some((topic) => topic.id === 'runtime-update'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '回滚').some((topic) => topic.id === 'runtime-update'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, 'R100B014').some((topic) => topic.id === 'runtime-update'),
+  )
+})
+
+test('部署失败说明可按健康检查和阶段检索', () => {
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '健康检查').some((topic) => topic.id === 'deployment-failure'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '部署失败').some((topic) => topic.id === 'deployment-failure'),
+  )
+})
+
+test('逐 Diff 审阅说明可按状态和单项操作检索', () => {
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '通过本项').some((topic) => topic.id === 'review-per-diff'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '待决策').some((topic) => topic.id === 'review-per-diff'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '本项要求修改').some((topic) => topic.id === 'review-per-diff'),
+  )
+})
+
+test('Git 提交规范和记录说明可分别检索', () => {
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '102008').some((topic) => topic.id === 'git-commit-flow'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '提交规范').some((topic) => topic.id === 'git-commit-flow'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, 'Commit SHA').some(
+      (topic) => topic.id === 'git-commit-records',
+    ),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '提交失败').some(
+      (topic) => topic.id === 'git-commit-records',
+    ),
+  )
+})
+
+test('打开项目代码说明可按编辑器和定位行号检索', () => {
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, 'Cursor').some((topic) => topic.id === 'open-project-code'),
+  )
+  assert.ok(
+    filterHelpTopics(HELP_TOPICS, '定位行号').some((topic) => topic.id === 'open-project-code'),
+  )
+})
+
 test('空搜索返回当前分类的全部条目', () => {
   const result = filterHelpTopics(HELP_TOPICS, '', 'tasks')
   const expected = HELP_TOPICS.filter((topic) => topic.category === 'tasks')

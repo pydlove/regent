@@ -29,7 +29,7 @@ public final class RelayMain {
             intEnv("REGENT_RELAY_PORT", 8788),
             requiredEnv("REGENT_RELAY_SHARED_SECRET"),
             Duration.ofSeconds(intEnv("REGENT_RELAY_POLL_SECONDS", 25)),
-            Duration.ofSeconds(intEnv("REGENT_RELAY_REQUEST_TIMEOUT_SECONDS", 40)),
+            Duration.ofSeconds(intEnv("REGENT_RELAY_REQUEST_TIMEOUT_SECONDS", 240)),
             Duration.ofSeconds(intEnv("REGENT_RELAY_OFFLINE_SECONDS", 45)),
             intEnv("REGENT_RELAY_QUEUE_CAPACITY", 64),
             intEnv("REGENT_RELAY_MAX_BODY_BYTES", 32 * 1024 * 1024)
@@ -48,7 +48,7 @@ public final class RelayMain {
             requiredEnv("REGENT_RELAY_SHARED_SECRET"),
             intEnv("REGENT_RELAY_CONNECTIONS", 4),
             Duration.ofSeconds(intEnv("REGENT_RELAY_POLL_SECONDS", 25)),
-            Duration.ofSeconds(intEnv("REGENT_RELAY_REQUEST_TIMEOUT_SECONDS", 40))
+            Duration.ofSeconds(intEnv("REGENT_RELAY_REQUEST_TIMEOUT_SECONDS", 240))
         );
         RelayConnector connector = new RelayConnector(config);
         Runtime.getRuntime().addShutdownHook(new Thread(connector::close, "regent-relay-connector-shutdown"));

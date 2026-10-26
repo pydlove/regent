@@ -5,6 +5,7 @@ import com.pydlove.regent.shared.domain.DomainException;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Optional;
 
 /**
  * 一次部署执行记录。配置在入队时快照，编辑部署不会改写历史。
@@ -17,6 +18,9 @@ public class DeploymentRun {
     private DeploymentRunId id;
     private final DeploymentId deploymentId;
     private final ProjectId projectId;
+    private final DeploymentReviewReference reviewReference;
+    private final String projectVersion;
+    private final String versionSource;
     private final String deploymentName;
     private final String host;
     private final int port;
@@ -38,6 +42,9 @@ public class DeploymentRun {
 
     private DeploymentRun(DeploymentId deploymentId,
                           ProjectId projectId,
+                          DeploymentReviewReference reviewReference,
+                          String projectVersion,
+                          String versionSource,
                           String deploymentName,
                           String host,
                           int port,
@@ -58,6 +65,9 @@ public class DeploymentRun {
                           Instant createdAt) {
         this.deploymentId = requireNotNull(deploymentId, "部署 ID");
         this.projectId = requireNotNull(projectId, "归属项目");
+        this.reviewReference = reviewReference;
+        this.projectVersion = blankToNull(projectVersion);
+        this.versionSource = blankToNull(versionSource);
         this.deploymentName = requireText(deploymentName, "部署名称");
         this.host = requireText(host, "服务器地址");
         if (port < 1 || port > 65535) {
@@ -85,13 +95,30 @@ public class DeploymentRun {
 
     public static DeploymentRun queue(DeploymentSnapshot snapshot,
                                       DeploymentServerSnapshot server) {
-        if (!snapshot.projectId().equals(server.projectId())) {
-            throw new DomainException("部署与服务器不属于同一项目");
+        return queue(snapshot, server, null);
+    }
+
+    public static DeploymentRun queue(DeploymentSnapshot snapshot,
+                                      DeploymentServerSnapshot server,
+                                      DeploymentReviewReference reviewReference) {
+        return queue(snapshot, server, reviewReference, null, null);
+    }
+
+    public static DeploymentRun queue(DeploymentSnapshot snapshot,
+                                      DeploymentServerSnapshot server,
+                                      DeploymentReviewReference reviewReference,
+                                      String projectVersion,
+                                      String versionSource) {
+        if (!server.serverId().equals(snapshot.serverId())) {
+            throw new DomainException("部署快照引用的服务器不一致");
         }
         Instant now = now();
         return new DeploymentRun(
                 snapshot.deploymentId(),
                 snapshot.projectId(),
+                reviewReference,
+                projectVersion,
+                versionSource,
                 snapshot.name(),
                 server.host(),
                 server.port(),
@@ -115,6 +142,9 @@ public class DeploymentRun {
     public static DeploymentRun restore(DeploymentRunId id,
                                         DeploymentId deploymentId,
                                         ProjectId projectId,
+                                        DeploymentReviewReference reviewReference,
+                                        String projectVersion,
+                                        String versionSource,
                                         String deploymentName,
                                         String host,
                                         int port,
@@ -133,12 +163,43 @@ public class DeploymentRun {
                                         Instant startedAt,
                                         Instant finishedAt,
                                         Instant createdAt) {
-        DeploymentRun run = new DeploymentRun(deploymentId, projectId, deploymentName, host, port,
+        DeploymentRun run = new DeploymentRun(deploymentId, projectId, reviewReference,
+                projectVersion, versionSource,
+                deploymentName, host, port,
                 username, authType, remoteDirectory, scriptFilename, scriptContent, scriptHash,
                 executionMode, projectScriptPath, status, exitCode, summary,
                 queuedAt, startedAt, finishedAt, createdAt);
         run.id = requireNotNull(id, "执行记录 ID");
         return run;
+    }
+
+    /** 兼容尚未记录项目版本的历史代码。 */
+    public static DeploymentRun restore(DeploymentRunId id,
+                                        DeploymentId deploymentId,
+                                        ProjectId projectId,
+                                        DeploymentReviewReference reviewReference,
+                                        String deploymentName,
+                                        String host,
+                                        int port,
+                                        String username,
+                                        DeploymentAuthType authType,
+                                        String remoteDirectory,
+                                        String scriptFilename,
+                                        String scriptContent,
+                                        String scriptHash,
+                                        DeploymentExecutionMode executionMode,
+                                        String projectScriptPath,
+                                        DeploymentRunStatus status,
+                                        Integer exitCode,
+                                        String summary,
+                                        Instant queuedAt,
+                                        Instant startedAt,
+                                        Instant finishedAt,
+                                        Instant createdAt) {
+        return restore(id, deploymentId, projectId, reviewReference, null, null,
+                deploymentName, host, port, username, authType, remoteDirectory,
+                scriptFilename, scriptContent, scriptHash, executionMode, projectScriptPath,
+                status, exitCode, summary, queuedAt, startedAt, finishedAt, createdAt);
     }
 
     public void begin() {
@@ -188,6 +249,10 @@ public class DeploymentRun {
         return normalized.substring(0, MAX_SUMMARY_LENGTH) + "…";
     }
 
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.strip();
+    }
+
     private static Instant now() {
         return Instant.now().truncatedTo(ChronoUnit.MILLIS);
     }
@@ -216,6 +281,18 @@ public class DeploymentRun {
 
     public ProjectId getProjectId() {
         return projectId;
+    }
+
+    public String getProjectVersion() {
+        return projectVersion;
+    }
+
+    public String getVersionSource() {
+        return versionSource;
+    }
+
+    public Optional<DeploymentReviewReference> getReviewReference() {
+        return Optional.ofNullable(reviewReference);
     }
 
     public String getDeploymentName() {

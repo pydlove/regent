@@ -2,7 +2,7 @@ import { deleteRequest, get, postJson, putJson } from '@/api/http'
 import type { DeploymentAuthType, DeploymentServer } from '@/types/api'
 
 export type SaveDeploymentServerInput = {
-  projectId: number
+  projectIds: number[]
   name: string
   host: string
   port: number

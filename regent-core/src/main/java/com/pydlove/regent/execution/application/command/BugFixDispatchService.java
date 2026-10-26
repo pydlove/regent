@@ -7,6 +7,7 @@ import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.domain.TransactionRunner;
+import com.pydlove.regent.shared.domain.port.TaskStandardBinder;
 
 /**
  * 缺陷派生修复任务的应用编排。
@@ -21,15 +22,25 @@ public class BugFixDispatchService {
     private final TaskRepository taskRepository;
     private final TaskDispatchService taskDispatchService;
     private final TransactionRunner transactionRunner;
+    private final TaskStandardBinder taskStandardBinder;
 
     public BugFixDispatchService(BugRepository bugRepository,
                                  TaskRepository taskRepository,
                                  TaskDispatchService taskDispatchService,
                                  TransactionRunner transactionRunner) {
+        this(bugRepository, taskRepository, taskDispatchService, transactionRunner, null);
+    }
+
+    public BugFixDispatchService(BugRepository bugRepository,
+                                 TaskRepository taskRepository,
+                                 TaskDispatchService taskDispatchService,
+                                 TransactionRunner transactionRunner,
+                                 TaskStandardBinder taskStandardBinder) {
         this.bugRepository = bugRepository;
         this.taskRepository = taskRepository;
         this.taskDispatchService = taskDispatchService;
         this.transactionRunner = transactionRunner;
+        this.taskStandardBinder = taskStandardBinder;
     }
 
     public Task dispatchFix(BugId bugId) {
@@ -44,6 +55,9 @@ public class BugFixDispatchService {
                     0);
 
             taskRepository.save(task);
+            if (taskStandardBinder != null) {
+                taskStandardBinder.bindDefaults(task.getId().value(), task.getProjectId().value());
+            }
             bug.requestFix(task.getId());
             bugRepository.save(bug);
             return taskDispatchService.dispatchAfterCommit(task.getId());

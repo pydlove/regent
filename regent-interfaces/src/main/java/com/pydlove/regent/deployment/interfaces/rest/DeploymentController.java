@@ -12,9 +12,11 @@ import com.pydlove.regent.deployment.domain.model.DeploymentId;
 import com.pydlove.regent.deployment.domain.model.DeploymentExecutionMode;
 import com.pydlove.regent.deployment.domain.model.DeploymentRun;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunId;
+import com.pydlove.regent.deployment.domain.model.DeploymentReviewReference;
 import com.pydlove.regent.deployment.domain.model.DeploymentServerId;
 import com.pydlove.regent.deployment.interfaces.dto.DeploymentDetailResponse;
 import com.pydlove.regent.deployment.interfaces.dto.DeploymentRunDetailResponse;
+import com.pydlove.regent.deployment.interfaces.dto.DeploymentRunRequest;
 import com.pydlove.regent.deployment.interfaces.dto.DeploymentRunSummaryResponse;
 import com.pydlove.regent.deployment.interfaces.dto.DeploymentSaveRequest;
 import com.pydlove.regent.deployment.interfaces.dto.DeploymentScriptIssueResponse;
@@ -28,6 +30,9 @@ import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.identity.interfaces.rest.AuthSessionInterceptor;
 import com.pydlove.regent.project.application.query.ProjectAccessService;
 import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.execution.domain.model.TaskId;
+import com.pydlove.regent.review.application.command.ReviewGateApproval;
+import com.pydlove.regent.review.application.command.ReviewGateService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -54,6 +59,7 @@ public class DeploymentController {
     private final DeploymentRunQueryService runQueryService;
     private final DeploymentServerQueryService serverQueryService;
     private final ProjectAccessService projectAccessService;
+    private final ReviewGateService reviewGateService;
 
     public DeploymentController(DeploymentCommandService commandService,
                                 DeploymentExecutionService executionService,
@@ -61,7 +67,8 @@ public class DeploymentController {
                                 DeploymentQueryService queryService,
                                 DeploymentRunQueryService runQueryService,
                                 DeploymentServerQueryService serverQueryService,
-                                ProjectAccessService projectAccessService) {
+                                ProjectAccessService projectAccessService,
+                                ReviewGateService reviewGateService) {
         this.commandService = commandService;
         this.executionService = executionService;
         this.scriptGenerationService = scriptGenerationService;
@@ -69,6 +76,7 @@ public class DeploymentController {
         this.runQueryService = runQueryService;
         this.serverQueryService = serverQueryService;
         this.projectAccessService = projectAccessService;
+        this.reviewGateService = reviewGateService;
     }
 
     @GetMapping("/deployments")
@@ -149,9 +157,35 @@ public class DeploymentController {
     }
 
     @PostMapping("/deployments/{id}/run")
-    public DeploymentRunSummaryResponse run(@PathVariable long id, HttpServletRequest request) {
+    public DeploymentRunSummaryResponse run(@PathVariable long id,
+                                            @RequestBody(required = false) DeploymentRunRequest body,
+                                            HttpServletRequest request) {
+        UserId ownerId = currentUser(request);
+        queryService.get(DeploymentId.of(id), ownerId);
+        ProjectId projectId = body == null || body.projectId() == null ? null : ProjectId.of(body.projectId());
+        DeploymentReviewReference reviewReference = null;
+        if (body != null && body.taskId() != null) {
+            ReviewGateApproval approval = reviewGateService.requireApproved(
+                    TaskId.of(body.taskId()), ownerId);
+            ProjectId taskProjectId = ProjectId.of(approval.projectId());
+            if (projectId != null && !projectId.equals(taskProjectId)) {
+                throw new IllegalArgumentException("部署项目与任务所属项目不一致");
+            }
+            projectId = taskProjectId;
+            reviewReference = new DeploymentReviewReference(
+                    approval.taskId(), approval.snapshotId(), approval.decisionId());
+        }
+        if (projectId != null) {
+            projectAccessService.require(projectId, ownerId);
+        }
+        DeploymentRun run = executionService.start(DeploymentId.of(id), projectId, reviewReference);
+        return DeploymentRunSummaryResponse.from(run);
+    }
+
+    @PostMapping("/deployments/{id}/stop")
+    public DeploymentRunSummaryResponse stop(@PathVariable long id, HttpServletRequest request) {
         queryService.get(DeploymentId.of(id), currentUser(request));
-        DeploymentRun run = executionService.start(DeploymentId.of(id));
+        DeploymentRun run = executionService.stopActive(DeploymentId.of(id));
         return DeploymentRunSummaryResponse.from(run);
     }
 
@@ -174,13 +208,21 @@ public class DeploymentController {
     }
 
     private void requireProjectAndServer(DeploymentSaveRequest request, UserId ownerId) {
-        if (request.projectId() == null) {
-            throw new IllegalArgumentException("缺少 projectId");
+        java.util.List<Long> projectIds = request.projectIds() == null || request.projectIds().isEmpty()
+                ? (request.projectId() == null ? java.util.List.of() : java.util.List.of(request.projectId()))
+                : request.projectIds();
+        if (projectIds.isEmpty()) {
+            throw new IllegalArgumentException("缺少 projectIds");
         }
         if (request.serverId() == null) {
             throw new IllegalArgumentException("缺少 serverId");
         }
-        projectAccessService.require(ProjectId.of(request.projectId()), ownerId);
+        for (Long projectId : projectIds) {
+            if (projectId == null) {
+                throw new IllegalArgumentException("projectIds 不能包含空值");
+            }
+            projectAccessService.require(ProjectId.of(projectId), ownerId);
+        }
         requireServerOwned(request.serverId(), ownerId);
     }
 
@@ -198,14 +240,15 @@ public class DeploymentController {
     }
 
     private static SaveDeploymentCommand toCommand(DeploymentSaveRequest request) {
-        if (request.projectId() == null) {
-            throw new IllegalArgumentException("缺少 projectId");
-        }
+        java.util.List<Long> rawProjectIds = request.projectIds() == null || request.projectIds().isEmpty()
+                ? (request.projectId() == null ? java.util.List.of() : java.util.List.of(request.projectId()))
+                : request.projectIds();
+        if (rawProjectIds.isEmpty()) throw new IllegalArgumentException("缺少 projectIds");
         if (request.serverId() == null) {
             throw new IllegalArgumentException("缺少 serverId");
         }
         return new SaveDeploymentCommand(
-                ProjectId.of(request.projectId()),
+                rawProjectIds.stream().map(ProjectId::of).toList(),
                 DeploymentServerId.of(request.serverId()),
                 request.name(),
                 request.remoteDirectory(),

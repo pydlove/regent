@@ -1,10 +1,10 @@
-export const VERSION_PATTERN = /^feature_V(\d+(?:\.\d+){2})_(R\d+B\d+)$/
+export const VERSION_PATTERN = /^Regent_V(\d+(?:\.\d+){2})_(R\d+B\d+)$/
 
 export function parseVersion(version) {
   const value = typeof version === 'string' ? version.trim() : ''
   const match = value.match(VERSION_PATTERN)
   if (!match) {
-    throw new Error('版本号格式应为 feature_V1.0.2_R100B004')
+    throw new Error('版本号格式应为 Regent_V1.0.3_R100B001')
   }
   return {
     version: value,
@@ -63,20 +63,90 @@ export function normalizeDraft(value) {
   return {
     ...parsed,
     ...content,
+    webOnly: value.webOnly === true,
     deploy: value.deploy !== false,
   }
 }
 
-export function publishArguments({ version, releaseInfoFile, deploy }) {
+export function publishArguments({ version, releaseInfoFile, deploy, webOnly = false }) {
   const args = [
     '--version',
     version,
     '--release-info-file',
     releaseInfoFile,
-    '--no-tag',
   ]
+  if (webOnly === true) args.push('--web-only')
   if (deploy === true) args.push('--deploy')
   return args
+}
+
+export function assertReleasePreflight({ dirty, tagExists, versionExists }) {
+  if (versionExists) {
+    throw new Error('该版本已存在，请递增构建号')
+  }
+  if (dirty) {
+    throw new Error('工作区有未提交改动，正式发布前必须先提交代码')
+  }
+  if (tagExists) {
+    throw new Error('该版本的 Git 标签已存在，不能重复创建正式发布')
+  }
+  return true
+}
+
+export function artifactSetFromManifest(manifest) {
+  if (!manifest || typeof manifest !== 'object') {
+    throw new Error('发布清单为空')
+  }
+  const artifacts = []
+  for (const [platform, asset] of Object.entries(manifest.downloads || {})) {
+    artifacts.push(normalizeArtifact(platform, asset))
+  }
+  if (manifest.runtime) {
+    artifacts.push(normalizeArtifact('runtime', manifest.runtime))
+  }
+  if (artifacts.length === 0) {
+    throw new Error('发布清单没有任何可追溯产物')
+  }
+  return artifacts
+}
+
+export function releaseEvidence({
+  version,
+  jobId,
+  sourceCommit,
+  commitSha,
+  tagName,
+  manifest,
+  manifestPath,
+  manifestSha256,
+  createdAt,
+}) {
+  if (!version || !jobId || !commitSha) {
+    throw new Error('发布凭证缺少版本、任务或提交信息')
+  }
+  return {
+    version,
+    jobId,
+    releaseCode: manifest?.releaseCode || manifest?.clientReleaseCode || null,
+    channel: manifest?.webOnly === true ? 'web-only' : 'desktop',
+    sourceCommit: sourceCommit || null,
+    commitSha,
+    tagName: tagName || null,
+    manifestPath: manifestPath || null,
+    manifestSha256: manifestSha256 || null,
+    artifacts: artifactSetFromManifest(manifest),
+    createdAt: createdAt || new Date().toISOString(),
+  }
+}
+
+function normalizeArtifact(kind, asset) {
+  const file = typeof asset?.file === 'string' ? asset.file.trim() : ''
+  const sha256 = typeof asset?.sha256 === 'string' ? asset.sha256.trim().toLowerCase() : ''
+  const sizeBytes = Number(asset?.sizeBytes)
+  if (!file || !/^[a-f0-9]{64}$/.test(sha256) || !Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+    throw new Error(`发布清单中的 ${kind} 产物缺少有效文件、大小或摘要`)
+  }
+  return { kind, file, sizeBytes, sha256 }
 }
 
 export function codexPrompt({ version, previousVersion, instruction }) {

@@ -109,12 +109,12 @@ public class BugController {
         return BugResponse.from(bugQueryService.get(id, currentUser(request)));
     }
 
-    /** 带理由判定不修复，缺陷进入终态。 */
+    /** 判定不修复，缺陷进入终态；理由可选。 */
     @PostMapping("/{id}/wont-fix")
     public BugResponse wontFix(@PathVariable long id, @RequestBody BugWontFixRequest request,
                                HttpServletRequest servletRequest) {
         if (request == null) {
-            throw new IllegalArgumentException("缺少不修复理由");
+            throw new IllegalArgumentException("缺少请求体");
         }
         bugQueryService.get(id, currentUser(servletRequest));
         bugCommandService.wontFix(BugId.of(id), request.reason());

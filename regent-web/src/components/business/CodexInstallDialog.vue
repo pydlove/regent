@@ -60,7 +60,7 @@ async function recheck() {
     layout="form"
     size="large"
     title="安装或更新 Codex"
-    description="Regent 本身不内置模型，任务执行和项目资料生成都依赖本机 Codex CLI。"
+    description="Regent 本身不内置模型，任务执行和项目摘要生成都依赖本机 Codex CLI。"
     :icon="Terminal"
   >
     <div class="space-y-3">
@@ -69,7 +69,7 @@ async function recheck() {
         <div class="min-w-0">
           <p class="text-body font-emphasis text-label">必须先安装 Codex，才能在平台上干活</p>
           <p class="mt-1 text-caption leading-5 text-label-secondary">
-            未安装时可以注册、创建项目和录入任务，但任务不能派发，项目资料也不能生成。
+            未安装时可以注册、创建项目和录入任务，但任务不能派发，项目摘要也不能生成。
           </p>
         </div>
       </div>

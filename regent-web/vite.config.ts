@@ -5,10 +5,12 @@ import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
 
 const apiTarget = process.env.REGENT_API_TARGET ?? 'http://127.0.0.1:8787'
+const requestedBase = process.env.REGENT_WEB_BASE_PATH ?? '/'
+const webBase = `/${requestedBase.replace(/^\/+|\/+$/g, '')}/`.replace(/^\/\/$/, '/')
 
 export default defineConfig({
   // 生产包由 Nginx 挂在站点根目录。显式固定为 '/'，避免构建环境把资源路径推断成本机 file:// 地址。
-  base: '/',
+  base: webBase,
   plugins: [vue(), tailwindcss()],
   build: {
     // 桌面端会打包给 Windows 用户，不能假设对方是最新 Chromium。

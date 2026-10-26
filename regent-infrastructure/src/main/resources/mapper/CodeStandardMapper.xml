@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.execution.infrastructure.persistence.CodeStandardMapper">
+    <sql id="columns">
+        id, project_id, name, description, scope, enabled, default_apply, sort_order, archived,
+        source_project_id, source_standard_id, source_version_id, source_version_no,
+        created_at, updated_at
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO code_standard
+            (project_id, name, description, scope, enabled, default_apply, sort_order, archived,
+             source_project_id, source_standard_id, source_version_id, source_version_no,
+             created_at, updated_at)
+        VALUES
+            (#{projectId}, #{name}, #{description}, #{scope}, #{enabled}, #{defaultApply},
+             #{sortOrder}, #{archived}, #{sourceProjectId}, #{sourceStandardId},
+             #{sourceVersionId}, #{sourceVersionNo}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <update id="update">
+        UPDATE code_standard
+        SET name = #{name},
+            description = #{description},
+            scope = #{scope},
+            enabled = #{enabled},
+            default_apply = #{defaultApply},
+            sort_order = #{sortOrder},
+            archived = #{archived},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+          AND archived = 0
+    </update>
+
+    <select id="selectById" resultType="com.pydlove.regent.execution.infrastructure.persistence.CodeStandardData">
+        SELECT <include refid="columns"/>
+        FROM code_standard
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByIdOwned" resultType="com.pydlove.regent.execution.infrastructure.persistence.CodeStandardData">
+        SELECT s.id, s.project_id, s.name, s.description, s.scope, s.enabled, s.default_apply,
+               s.sort_order, s.archived, s.source_project_id, s.source_standard_id,
+               s.source_version_id, s.source_version_no, s.created_at, s.updated_at
+        FROM code_standard s
+        JOIN project p ON p.id = s.project_id
+        WHERE s.id = #{id}
+          AND (
+              p.owner_id = #{ownerId}
+              OR EXISTS (
+                  SELECT 1 FROM project_member pm
+                  WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+              )
+          )
+          AND p.deleted = 0
+    </select>
+
+    <select id="selectByProject" resultType="com.pydlove.regent.execution.infrastructure.persistence.CodeStandardData">
+        SELECT <include refid="columns"/>
+        FROM code_standard
+        WHERE project_id = #{projectId}
+        ORDER BY archived, sort_order, id
+    </select>
+
+    <select id="selectByProjectAndName" resultType="com.pydlove.regent.execution.infrastructure.persistence.CodeStandardData">
+        SELECT <include refid="columns"/>
+        FROM code_standard
+        WHERE project_id = #{projectId}
+          AND archived = 0
+          AND name = #{name}
+        ORDER BY id
+        LIMIT 1
+    </select>
+</mapper>

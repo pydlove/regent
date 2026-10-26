@@ -27,7 +27,13 @@
         JOIN project p ON p.id = tc.project_id
         WHERE tc.id = #{id}
           AND tc.deleted = 0
-          AND p.owner_id = #{ownerId}
+          AND (
+            p.owner_id = #{ownerId}
+            OR EXISTS (
+              SELECT 1 FROM project_member pm
+              WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+            )
+          )
     </select>
 
     <select id="selectByIdForUpdate"
@@ -52,7 +58,13 @@
         FROM test_case tc
         JOIN project p ON p.id = tc.project_id
         WHERE tc.deleted = 0
-          AND p.owner_id = #{ownerId}
+          AND (
+            p.owner_id = #{ownerId}
+            OR EXISTS (
+              SELECT 1 FROM project_member pm
+              WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+            )
+          )
         ORDER BY tc.enabled DESC, tc.updated_at DESC, tc.id DESC
     </select>
 

@@ -1,0 +1,32 @@
+// 国内网络下 Gradle 官方仓库可能被代理证书拦截；统一走阿里云镜像。
+def mirrorUrls = [
+    'https://maven.aliyun.com/repository/google',
+    'https://maven.aliyun.com/repository/gradle-plugin',
+    'https://maven.aliyun.com/repository/public',
+]
+
+settingsEvaluated { settings ->
+    settings.pluginManagement.repositories {
+        clear()
+        mirrorUrls.each { repositoryUrl ->
+            maven { url repositoryUrl }
+        }
+    }
+}
+
+gradle.projectsLoaded {
+    gradle.rootProject.allprojects { project ->
+        project.buildscript.repositories {
+            clear()
+            mirrorUrls.each { repositoryUrl ->
+                maven { url repositoryUrl }
+            }
+        }
+        project.repositories {
+            clear()
+            mirrorUrls.each { repositoryUrl ->
+                maven { url repositoryUrl }
+            }
+        }
+    }
+}

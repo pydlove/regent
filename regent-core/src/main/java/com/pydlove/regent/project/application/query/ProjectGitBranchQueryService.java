@@ -32,6 +32,7 @@ public class ProjectGitBranchQueryService {
                 : projectProfileRepository.findById(projectId, ownerId))
                 .orElseThrow(() -> new EntityNotFoundException("项目不存在：" + projectId.value()))
                 .path();
+        if (projectPath == null) return Optional.empty();
         return projectGitBranchReader.currentBranch(projectPath);
     }
 }

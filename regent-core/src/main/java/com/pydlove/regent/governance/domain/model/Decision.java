@@ -126,6 +126,11 @@ public class Decision {
         resolve(DecisionStatus.REJECTED, DecisionOutcome.byHuman(choice, note));
     }
 
+    /** 任务被人工终止后关闭残留待批决策。终止本身就是人的决定，不保留为待办。 */
+    public void closeByTaskCancellation() {
+        reject(null, "任务已终止，决策自动关闭");
+    }
+
     /**
      * AI 自主决断并留痕。
      *

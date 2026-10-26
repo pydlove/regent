@@ -7,7 +7,8 @@ public record AuthUserResponse(
         String username,
         String displayName,
         String email,
-        String avatarUrl) {
+        String avatarUrl,
+        boolean mustChangePassword) {
 
     public static AuthUserResponse from(AuthenticatedUser user) {
         String avatarUrl = user.avatarVersion() == null
@@ -18,6 +19,7 @@ public record AuthUserResponse(
                 user.username(),
                 user.displayName(),
                 user.email(),
-                avatarUrl);
+                avatarUrl,
+                user.mustChangePassword());
     }
 }

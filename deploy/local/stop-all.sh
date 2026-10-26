@@ -9,6 +9,17 @@ if relay_agent_loaded; then
 else
     stop_by_pidfile "公网中继连接器" "$RELAY_PID_FILE"
 fi
+if device_agent_loaded; then
+    warn "设备代理由 launchd 托管，未停止（要停：deploy/local/device-agent.sh uninstall）"
+else
+    pid=$(listen_pid "$DEVICE_AGENT_PORT")
+    if [ -n "$pid" ]; then
+        warn "手动设备代理仍在端口 $DEVICE_AGENT_PORT 上监听 (PID: $pid)，一并结束"
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+        kill -9 "$pid" 2>/dev/null || true
+    fi
+fi
 
 # pid 文件可能丢（比如手动起过），兜底按端口清理
 for pair in "前端:$FRONTEND_PORT" "后端:$BACKEND_PORT"; do

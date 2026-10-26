@@ -8,6 +8,8 @@ echo
 echo
 "$SCRIPT_DIR/start-relay.sh"
 echo
+"$SCRIPT_DIR/device-agent.sh" ensure
+echo
 echo "========================================"
 echo "  前端  http://127.0.0.1:$FRONTEND_PORT/"
 echo "  后端  http://127.0.0.1:$BACKEND_PORT/actuator/health"

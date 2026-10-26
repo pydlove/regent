@@ -42,7 +42,13 @@
                  OR t.title LIKE CONCAT('%', #{keyword}, '%'))
         </if>
         <if test="ownerId != null">
-            AND p.owner_id = #{ownerId}
+            AND (
+                p.owner_id = #{ownerId}
+                OR EXISTS (
+                    SELECT 1 FROM project_member pm
+                    WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+                )
+            )
         </if>
     </sql>
 
@@ -72,7 +78,13 @@
         SELECT <include refid="columns"/>
         <include refid="joins"/>
         WHERE d.id = #{id}
-          AND p.owner_id = #{ownerId}
+          AND (
+              p.owner_id = #{ownerId}
+              OR EXISTS (
+                  SELECT 1 FROM project_member pm
+                  WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+              )
+          )
     </select>
 
 </mapper>

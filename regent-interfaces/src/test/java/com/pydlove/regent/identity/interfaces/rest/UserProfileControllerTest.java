@@ -93,6 +93,20 @@ class UserProfileControllerTest {
                 .andExpect(header().string("Cache-Control", containsString("private")));
     }
 
+    @Test
+    @DisplayName("登录用户可以按用户 ID 读取组织成员头像")
+    void servesMemberAvatar() throws Exception {
+        profileService.avatar = new UserAvatarContent("image/png", new byte[]{4, 5, 6});
+
+        mockMvc.perform(get("/api/profile/avatar/42")
+                        .requestAttr(AuthSessionInterceptor.CURRENT_USER_ATTRIBUTE, currentUser()))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("image/png"))
+                .andExpect(content().bytes(new byte[]{4, 5, 6}));
+
+        org.junit.jupiter.api.Assertions.assertEquals(42L, profileService.lastAvatarUserId.value());
+    }
+
     private static AuthenticatedUser currentUser() {
         return new AuthenticatedUser(7, "alice", "Alice", "alice@example.com", 1234L);
     }
@@ -102,6 +116,7 @@ class UserProfileControllerTest {
         private AuthenticatedUser updatedUser;
         private UploadedUserAvatar lastUpload;
         private UserAvatarContent avatar;
+        private UserId lastAvatarUserId;
 
         private StubProfileService() {
             super(
@@ -124,6 +139,7 @@ class UserProfileControllerTest {
 
         @Override
         public UserAvatarContent loadAvatar(UserId userId) {
+            lastAvatarUserId = userId;
             return avatar;
         }
     }

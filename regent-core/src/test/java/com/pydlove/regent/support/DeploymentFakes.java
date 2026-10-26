@@ -20,6 +20,7 @@ import com.pydlove.regent.deployment.domain.repository.DeploymentServerRepositor
 import com.pydlove.regent.project.domain.model.ProjectId;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,14 +59,23 @@ public final class DeploymentFakes {
         public List<Deployment> findAll(ProjectId projectId) {
             return store.values().stream()
                     .filter(deployment -> projectId == null
-                            || deployment.getProjectId().equals(projectId))
+                            || deployment.belongsTo(projectId))
+                    .sorted((left, right) -> {
+                        int created = right.getCreatedAt().compareTo(left.getCreatedAt());
+                        return created != 0
+                                ? created
+                                : Long.compare(right.getId().value(), left.getId().value());
+                    })
                     .toList();
         }
 
         @Override
-        public boolean existsByName(ProjectId projectId, String name, DeploymentId excludingId) {
+        public boolean existsByName(Collection<ProjectId> projectIds,
+                                    String name,
+                                    DeploymentId excludingId) {
             return store.values().stream()
-                    .anyMatch(deployment -> deployment.getProjectId().equals(projectId)
+                    .anyMatch(deployment -> deployment.getProjectIds().stream()
+                            .anyMatch(projectIds::contains)
                             && deployment.getName().equals(name)
                             && (excludingId == null || !deployment.getId().equals(excludingId)));
         }
@@ -178,16 +188,16 @@ public final class DeploymentFakes {
         @Override
         public List<DeploymentServer> findAll(ProjectId projectId) {
             return store.values().stream()
-                    .filter(server -> projectId == null || server.getProjectId().equals(projectId))
+                    .filter(server -> projectId == null || server.belongsTo(projectId))
                     .toList();
         }
 
         @Override
-        public boolean existsByName(ProjectId projectId,
+        public boolean existsByName(Collection<ProjectId> projectIds,
                                     String name,
                                     DeploymentServerId excludingId) {
             return store.values().stream()
-                    .anyMatch(server -> server.getProjectId().equals(projectId)
+                    .anyMatch(server -> server.getProjectIds().stream().anyMatch(projectIds::contains)
                             && server.getName().equals(name)
                             && (excludingId == null || !server.getId().equals(excludingId)));
         }
@@ -268,6 +278,7 @@ public final class DeploymentFakes {
     public static final class ScriptedExecutor implements DeploymentExecutor {
 
         private final List<DeploymentExecutionRequest> requests = new ArrayList<>();
+        private final List<Long> cancelledRunIds = new ArrayList<>();
         private DeploymentExecutionResult result = new DeploymentExecutionResult(
                 DeploymentRunStatus.SUCCESS, 0, "部署完成");
 
@@ -279,12 +290,22 @@ public final class DeploymentFakes {
             return List.copyOf(requests);
         }
 
+        public List<Long> cancelledRunIds() {
+            return List.copyOf(cancelledRunIds);
+        }
+
         @Override
         public DeploymentExecutionResult execute(DeploymentExecutionRequest request,
                                                  DeploymentLogSink sink) {
             requests.add(request);
             sink.append("fake output\n");
             return result;
+        }
+
+        @Override
+        public boolean cancel(DeploymentRunId runId) {
+            cancelledRunIds.add(runId.value());
+            return true;
         }
     }
 }

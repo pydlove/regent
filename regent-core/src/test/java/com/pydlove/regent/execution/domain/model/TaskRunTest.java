@@ -163,8 +163,9 @@ class TaskRunTest {
     @Test
     void 重建后字段一致() {
         TaskRunSnapshot snapshot = new TaskRunSnapshot(TaskRunId.of(3L), TASK, 2, "codex/task-7",
+                "abc123",
                 RunStatus.BLOCKED, 0, TokenUsage.of(5, 1, 2), "等人工", "原文", true,
-                List.of("x.txt"), TaskRun.EXECUTOR_INTERNAL, null, null,
+                List.of("x.txt"), TaskRun.EXECUTOR_INTERNAL, null, null, null, null, null,
                 Instant.parse("2026-10-16T02:00:00Z"),
                 Instant.parse("2026-10-16T02:05:00Z"), Instant.parse("2026-10-16T02:00:00Z"));
 
@@ -172,9 +173,28 @@ class TaskRunTest {
 
         assertEquals(TaskRunId.of(3L), run.getId());
         assertEquals(2, run.getAttemptNo());
+        assertEquals("abc123", run.getBaseRef());
         assertEquals(RunStatus.BLOCKED, run.getStatus());
         assertEquals(TokenUsage.of(5, 1, 2), run.getTokens());
         assertEquals(List.of("x.txt"), run.getChangedFiles());
         assertEquals(Instant.parse("2026-10-16T02:05:00Z"), run.getFinishedAt());
+    }
+
+    @Test
+    void 设备租约只接受同一设备续租() {
+        TaskRun run = running();
+        Instant firstExpiry = Instant.parse("2026-10-21T01:15:00Z");
+        run.claimBy("device@test", "device-1", firstExpiry);
+
+        assertTrue(run.isLeaseHolder("device@test", "device-1"));
+        assertFalse(run.isLeaseHolder("device@test", "device-2"));
+        assertThrows(DomainException.class,
+                () -> run.renewLease("device@test", "device-2",
+                        firstExpiry.plusSeconds(60), firstExpiry));
+
+        Instant renewed = firstExpiry.plusSeconds(60);
+        run.renewLease("device@test", "device-1", renewed, firstExpiry);
+        assertEquals(renewed, run.getLeaseExpiresAt());
+        assertEquals(firstExpiry, run.getLastHeartbeatAt());
     }
 }

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>发现新版本</title>
+    <link rel="stylesheet" href="./update-prompt.css" />
+  </head>
+  <body>
+    <main>
+      <div class="heading">
+        <span class="icon" aria-hidden="true">R</span>
+        <div>
+          <p class="eyebrow">发现新版本</p>
+          <h1 id="version">Regent 新版本已发布</h1>
+        </div>
+      </div>
+      <p id="notes" class="notes"></p>
+      <p id="meta" class="meta"></p>
+      <div class="actions">
+        <button id="skip" type="button">跳过此版本</button>
+        <button id="deferred" type="button">退出应用后升级</button>
+        <button id="install" class="primary" type="button">现在升级</button>
+      </div>
+    </main>
+    <script src="./update-prompt.js"></script>
+  </body>
+</html>

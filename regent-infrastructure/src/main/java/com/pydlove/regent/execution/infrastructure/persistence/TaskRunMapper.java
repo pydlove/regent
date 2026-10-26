@@ -28,13 +28,17 @@ public interface TaskRunMapper {
     List<TaskRunData> selectActiveLeases(@Param("executor") String executor,
                                          @Param("now") LocalDateTime now);
 
-    int countActiveLeasesByProject(@Param("projectId") long projectId,
-                                   @Param("executor") String executor,
-                                   @Param("now") LocalDateTime now);
+    List<TaskRunData> selectRunningByDevice(@Param("deviceId") String deviceId);
 
     int insert(TaskRunData data);
 
     int update(TaskRunData data);
 
-    int updateLease(@Param("id") long id, @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);
+    int updateLease(@Param("id") long id,
+                    @Param("deviceId") String deviceId,
+                    @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt,
+                    @Param("lastHeartbeatAt") LocalDateTime lastHeartbeatAt);
+
+    int updateLastEvent(@Param("id") long id,
+                        @Param("lastEventAt") LocalDateTime lastEventAt);
 }

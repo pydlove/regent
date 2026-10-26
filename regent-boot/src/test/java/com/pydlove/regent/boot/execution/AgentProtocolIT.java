@@ -10,6 +10,7 @@ import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskRunId;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
+import com.pydlove.regent.execution.domain.service.ExecutionConcurrencyGate;
 import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
 import com.pydlove.regent.governance.application.command.DecisionApprovalService;
 import com.pydlove.regent.governance.application.command.ReviewCommand;
@@ -98,10 +99,14 @@ class AgentProtocolIT {
     @Autowired
     private TaskPluginService taskPluginService;
 
+    @Autowired
+    private ExecutionConcurrencyGate concurrencyGate;
+
     private Path workspace;
 
     @BeforeEach
     void 准备临时仓库() throws IOException {
+        concurrencyGate.updateLimit(64);
         workspace = Files.createTempDirectory("regent-it-agent-");
         git("init", "--quiet");
         git("config", "user.email", "it@regent.local");
@@ -111,9 +116,18 @@ class AgentProtocolIT {
         git("commit", "--quiet", "-m", "初始提交");
 
         jdbcTemplate.update("""
-                INSERT INTO project (id, code, name, path, default_decision_level, enabled, deleted, created_at, updated_at)
-                VALUES (?, ?, 'IT 协议项目', ?, 'L1', 1, 0, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
-                ON DUPLICATE KEY UPDATE path = VALUES(path), default_decision_level = 'L1', enabled = 1, deleted = 0
+                INSERT INTO app_user (id, username, display_name, password_hash, email, created_at)
+                VALUES (1, 'agent_protocol_it', 'Agent 协议测试', 'x',
+                        'agent-protocol-it@example.com', UTC_TIMESTAMP(3))
+                ON DUPLICATE KEY UPDATE display_name = VALUES(display_name)
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO project (id, owner_id, code, name, path, default_decision_level,
+                                     enabled, deleted, created_at, updated_at)
+                VALUES (?, 1, ?, 'IT 协议项目', ?, 'L1',
+                        1, 0, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
+                ON DUPLICATE KEY UPDATE owner_id = VALUES(owner_id), path = VALUES(path),
+                                        default_decision_level = 'L1', enabled = 1, deleted = 0
                 """, PROJECT_ID, PROJECT_CODE, workspace.toString());
     }
 
@@ -157,13 +171,6 @@ class AgentProtocolIT {
                 "工作包里要带原始需求");
         assertTrue(claimed.get("instruction").asText().contains("上报约定"), "指令末尾要带上报约定");
         assertEquals(TaskStatus.RUNNING, reload(task.getId()).getStatus());
-
-        // 工作区被占：同一个项目上第二个执行者要拿到一句人话，而不是「没活」
-        mockMvc.perform(post("/api/agent/tasks/claim").contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"executor":"another@it","sessionId":"sess-2","projectCode":"it_agent"}"""))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("工作区")));
 
         // 阈值 L1 内的决策：平台当场放行，同一次尝试接着干
         mockMvc.perform(post("/api/agent/runs/{id}/report", runId).contentType(MediaType.APPLICATION_JSON)

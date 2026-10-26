@@ -35,6 +35,9 @@ regent:
     email-code:
       # 邮箱里的“打开 Regent”链接。公网部署时改成用户实际访问的地址。
       home-url: http://127.0.0.1:12580
+  organization:
+    # 组织邀请邮件里的接受链接；公网部署时使用 REGENT_PUBLIC_URL 或直接改成正式地址。
+    invitation-url: http://127.0.0.1:12580
   execution:
     # 本地默认关掉派发心跳：一旦灌了演示数据（项目路径就是真实仓库），
     # 心跳一开就会真的把演示任务跑起来（烧 token、切分支、改文件）。

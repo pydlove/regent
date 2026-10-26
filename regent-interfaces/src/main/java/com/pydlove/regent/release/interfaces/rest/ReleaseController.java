@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pydlove.regent.release.interfaces.dto.ReleaseAssetResponse;
 import com.pydlove.regent.release.interfaces.dto.ReleaseManifestResponse;
+import com.pydlove.regent.release.interfaces.dto.ReleaseRuntimeResponse;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.InputStreamResource;
@@ -36,7 +37,7 @@ import java.util.Map;
 public class ReleaseController {
 
     private static final String MANIFEST_FILE = "latest.json";
-    private static final String[] PLATFORMS = {"macos", "windows"};
+    private static final String[] PLATFORMS = {"macos", "windows", "android"};
 
     private final ObjectMapper objectMapper;
     private final Path downloadsDirectory;
@@ -52,7 +53,8 @@ public class ReleaseController {
         response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
         JsonNode manifest = readManifest();
         if (manifest == null) {
-            return new ReleaseManifestResponse(null, null, null, null, null, Map.of());
+            return new ReleaseManifestResponse(
+                    null, null, null, false, null, null, null, null, Map.of());
         }
         Map<String, ReleaseAssetResponse> downloads = new LinkedHashMap<>();
         for (String platform : PLATFORMS) {
@@ -67,13 +69,34 @@ public class ReleaseController {
                     asset.path("sizeBytes").asLong(0),
                     text(asset, "sha256")));
         }
+        ReleaseRuntimeResponse runtime = runtime(manifest);
         return new ReleaseManifestResponse(
                 text(manifest, "version"),
                 text(manifest, "releaseCode"),
+                text(manifest, "clientReleaseCode"),
+                manifest.path("webOnly").asBoolean(false),
                 text(manifest, "releasedAt"),
                 text(manifest, "minShellVersion"),
                 text(manifest, "notes"),
+                runtime,
                 downloads);
+    }
+
+    private ReleaseRuntimeResponse runtime(JsonNode manifest) {
+        JsonNode asset = manifest.path("runtime");
+        String filename = safeFilename(text(asset, "file"));
+        if (filename == null || !Files.isRegularFile(downloadFile(filename))) {
+            return null;
+        }
+        return new ReleaseRuntimeResponse(
+                text(manifest, "version"),
+                text(manifest, "releaseCode"),
+                text(asset, "minShellRelease"),
+                filename,
+                "/downloads/" + UriUtils.encodePathSegment(filename, StandardCharsets.UTF_8),
+                asset.path("sizeBytes").asLong(0),
+                text(asset, "sha256"),
+                text(asset, "signature"));
     }
 
     @GetMapping("/api/release/download/{platform}")

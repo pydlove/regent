@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.execution.infrastructure.persistence.CodeStandardVersionMapper">
+    <sql id="joinedColumns">
+        v.id, v.standard_id, v.project_id, v.version_no, v.library_document_id,
+        v.content_hash, d.filename, d.content_type, d.size_bytes, d.storage_path, v.created_at
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO code_standard_version
+            (standard_id, project_id, version_no, library_document_id, content_hash, created_at)
+        VALUES
+            (#{standardId}, #{projectId}, #{versionNo}, #{libraryDocumentId}, #{contentHash}, #{createdAt})
+    </insert>
+
+    <select id="selectById" resultType="com.pydlove.regent.execution.infrastructure.persistence.CodeStandardVersionData">
+        SELECT <include refid="joinedColumns"/>
+        FROM code_standard_version v
+        JOIN file_library_document d ON d.id = v.library_document_id
+        WHERE v.id = #{id}
+    </select>
+
+    <select id="selectByIdOwned" resultType="com.pydlove.regent.execution.infrastructure.persistence.CodeStandardVersionData">
+        SELECT <include refid="joinedColumns"/>
+        FROM code_standard_version v
+        JOIN file_library_document d ON d.id = v.library_document_id
+        JOIN project p ON p.id = v.project_id
+        WHERE v.id = #{id}
+          AND (
+              p.owner_id = #{ownerId}
+              OR EXISTS (
+                  SELECT 1 FROM project_member pm
+                  WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+              )
+          )
+          AND p.deleted = 0
+    </select>
+
+    <select id="selectCurrent" resultType="com.pydlove.regent.execution.infrastructure.persistence.CodeStandardVersionData">
+        SELECT <include refid="joinedColumns"/>
+        FROM code_standard_version v
+        JOIN file_library_document d ON d.id = v.library_document_id
+        WHERE v.standard_id = #{standardId}
+        ORDER BY v.version_no DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectByStandard" resultType="com.pydlove.regent.execution.infrastructure.persistence.CodeStandardVersionData">
+        SELECT <include refid="joinedColumns"/>
+        FROM code_standard_version v
+        JOIN file_library_document d ON d.id = v.library_document_id
+        WHERE v.standard_id = #{standardId}
+        ORDER BY v.version_no DESC
+    </select>
+
+    <select id="selectMaxVersionNo" resultType="int">
+        SELECT COALESCE(MAX(version_no), 0)
+        FROM code_standard_version
+        WHERE standard_id = #{standardId}
+    </select>
+</mapper>

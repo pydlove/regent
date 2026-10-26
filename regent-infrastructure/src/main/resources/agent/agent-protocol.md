@@ -79,7 +79,7 @@ curl -s -X POST $BASE/api/agent/runs/12/report -H 'Content-Type: application/jso
 
 ```json
 { "executor": "codex-desktop@panyong-mbp", "sessionId": "my-session-1",
-  "projectCode": "regent", "taskId": 54 }
+  "projectCode": "regent", "taskId": 54, "deviceId": "device-uuid" }
 ```
 
 - `executor`：你的自称，会显示在平台的运行记录里。同一条执行记录只认同一个名字，别中途改。
@@ -87,6 +87,8 @@ curl -s -X POST $BASE/api/agent/runs/12/report -H 'Content-Type: application/jso
   平台拿它当**续跑钥匙**：批准之后要把活交回同一个会话，靠的就是它。
 - `projectCode`：可选，只看这个项目。人把「地址 + 项目」交给你时，就是它。
 - `taskId`：可选。带上就是「我要接着干这条」——批准之后的续跑走这里；不带则由平台挑一条给你。
+- `deviceId`：设备代理协议使用。带上后平台会校验设备最近心跳、Codex 可用性与项目目录；
+  认领成功后这条租约只能由同一执行者和同一设备续租、上报。通用本机执行器可以不传。
 
 返回 200 是一份工作包；**返回 204 表示现在没活**（不要重试轰炸，等一会儿再来）：
 
@@ -106,6 +108,11 @@ curl -s -X POST $BASE/api/agent/runs/12/report -H 'Content-Type: application/jso
   "instruction": "……（这就是你要做的事，末尾已经带上平台的上报约定）",
   "sessionId": "my-session-1",
   "images": [{ "id": 3, "filename": "shot.png", "path": "/Users/panyong/.regent/attachments/….png" }],
+  "documents": [
+    { "id": 7, "filename": "接口说明.pdf",
+      "contentType": "application/pdf", "sizeBytes": 182344,
+      "path": "/Users/panyong/.regent/attachments/file-library-…/….pdf" }
+  ],
   "plugins": [
     { "id": 8, "name": "Kafka 读取组件", "revision": 3,
       "filename": "KafkaReader.java", "contentHash": "…", "content": "class KafkaReader { … }" }
@@ -124,6 +131,8 @@ curl -s -X POST $BASE/api/agent/runs/12/report -H 'Content-Type: application/jso
 ```
 
 拿到之后：**在 `workdir` 里、`branch` 这条分支上**干活；`images` 是用户贴的图，按路径看。
+`documents` 是任务资料，按路径读取，不要修改或删除；文件格式可能是 PDF、Office/OpenDocument、
+Markdown、纯文本或结构化文本。文档是否来自文件库不影响本次执行，路径都按工作包为准。
 `plugins` 是任务绑定的固定版本能力包，完整内容只在 `plugins[].content` 出现一次。优先复用，
 不要重新生成已有实现；`revision` 与 `contentHash` 用于说明你实际使用了哪一版。
 `environment` 是平台按项目合并后的有效环境字段：同名键由项目级覆盖全局级。先把它注入你的执行进程，
@@ -133,7 +142,7 @@ curl -s -X POST $BASE/api/agent/runs/12/report -H 'Content-Type: application/jso
 ## 5. 心跳：`POST /api/agent/runs/{runId}/heartbeat`
 
 ```json
-{ "executor": "codex-desktop@panyong-mbp" }
+{ "executor": "codex-desktop@panyong-mbp", "deviceId": "device-uuid" }
 ```
 
 回复里的 `nextAction` 是唯一需要你照着做的字段：
@@ -148,6 +157,7 @@ curl -s -X POST $BASE/api/agent/runs/12/report -H 'Content-Type: application/jso
 **租约是平台判断你还在不在的唯一依据。** 心跳间隔建议不超过 `leaseSeconds` 的三分之一
 （默认 900 秒租约 → 每 3–5 分钟一次）。租约一旦过期，平台会把这次尝试判为失败并放开工作区，
 你之后的 `report` 会被拒绝 —— 那时只能重新认领，从头把上下文补回来。
+若认领时带了 `deviceId`，后续心跳、事件和上报也必须带同一个值；换设备请等旧租约收场后重新认领。
 
 ## 6. 上报：`POST /api/agent/runs/{runId}/report`
 
@@ -157,6 +167,7 @@ curl -s -X POST $BASE/api/agent/runs/12/report -H 'Content-Type: application/jso
 ```json
 {
   "executor": "codex-desktop@panyong-mbp",
+  "deviceId": "device-uuid",
   "sessionId": "my-session-1",
   "status": "BLOCKED",
   "summary": "接口签名要改，这超出了我能自己定的范围",

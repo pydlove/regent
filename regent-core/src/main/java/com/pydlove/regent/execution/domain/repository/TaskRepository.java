@@ -4,6 +4,7 @@ import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.requirement.domain.model.RequirementId;
 
 import java.util.List;
 import java.util.Optional;
@@ -31,6 +32,8 @@ public interface TaskRepository {
      * 把任务改成 RUNNING。锁住同一行后，绑定与派发只能有一个先完成，后到者读到确定的新状态。
      */
     Optional<Task> findByIdForUpdate(TaskId id);
+
+    List<Task> findByRequirement(RequirementId requirementId);
 
     /**
      * 当前所有执行中的任务。平台启动时用它核对是否留下没人接管的执行：
@@ -82,6 +85,11 @@ public interface TaskRepository {
      * 只能拉 QUEUED，不能绕过 {@code dispatch.enabled} 把 PENDING 也顺手启动。
      */
     List<Task> findQueued(int limit);
+
+    /** 当前账号下仍可领取的排队任务，用于设备心跳恢复后端重启前的内存队列。 */
+    default List<Task> findQueued(UserId ownerId, int limit) {
+        return List.of();
+    }
 
     /**
      * 同上，但只看某个项目下的候选。

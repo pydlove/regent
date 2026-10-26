@@ -1,23 +1,19 @@
 <script setup lang="ts">
 import {
-  Blocks,
-  CalendarClock,
+  Building2,
   CircleHelp,
   ChevronLeft,
   ChevronRight,
   FolderKanban,
-  FlaskConical,
-  KeyRound,
   LayoutDashboard,
   ListChecks,
   PanelLeftOpen,
   Plus,
   RefreshCw,
   ServerCog,
-  Server,
   Settings,
+  Smartphone,
   TriangleAlert,
-  Workflow,
 } from '@lucide/vue'
 import { TooltipProvider } from 'reka-ui'
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
@@ -26,6 +22,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import AppFooter from '@/components/business/AppFooter.vue'
 import CodexInstallDialog from '@/components/business/CodexInstallDialog.vue'
 import FailedTaskNotifications from '@/components/business/FailedTaskNotifications.vue'
+import GlobalSearch from '@/components/business/GlobalSearch.vue'
 import ProjectFormDialog from '@/components/business/ProjectFormDialog.vue'
 import UserProfileCard from '@/components/business/UserProfileCard.vue'
 import UserProfileDialog from '@/components/business/UserProfileDialog.vue'
@@ -45,6 +42,7 @@ import { useTheme, type ThemePreference } from '@/composables/useTheme'
 import { useAuthStore } from '@/stores/useAuthStore'
 import { useDecisionStore } from '@/stores/useDecisionStore'
 import { useExecutionRuntimeStore } from '@/stores/useExecutionRuntimeStore'
+import { useOrganizationStore } from '@/stores/useOrganizationStore'
 import { useTaskStore } from '@/stores/useTaskStore'
 import { useWebUpdate } from '@/composables/useWebUpdate'
 
@@ -79,6 +77,7 @@ const themeOptions = [
  * Combobox 的值必须是字符串，所以转换只在这一层做一次。
  */
 const store = useTaskStore()
+const organizationStore = useOrganizationStore()
 const decisionStore = useDecisionStore()
 const auth = useAuthStore()
 const {
@@ -89,40 +88,97 @@ const {
 const reloadPage = () => window.location.reload()
 const executionRuntime = useExecutionRuntimeStore()
 const { openDialog: openCodexInstallDialog } = useCodexInstallDialog()
+const projectContext = computed(() => route.path === '/projects')
+const organizationProjects = computed(() => {
+  const organizationId = organizationStore.currentId
+  return store.projects.filter(
+    (item) => organizationId !== null && item.organizationId === organizationId,
+  )
+})
 
 const project = computed({
-  get: () => (store.projectId === null ? 'all' : String(store.projectId)),
+  get: () => {
+    if (store.projectId !== null) return String(store.projectId)
+    return projectContext.value ? '' : 'all'
+  },
   set: (value: string | undefined) => {
     // 项目列表尚未加载时，下拉没有匹配项会瞬时发出空值；此时保留持久化选择，
     // 等 loadProjects 拿到列表后再校验并恢复。
     if (store.projects.length === 0) return
     // 万一拿到空值或非数字，一律退回「全部项目」：把 NaN 塞进查询串会变成一个 400，
     // 而用户看到的是「列表怎么报错了」，跟他的操作对不上
+    if (value === 'all') {
+      if (!projectContext.value) store.projectId = null
+      return
+    }
     const parsed = Number(value)
-    store.projectId = value && value !== 'all' && Number.isFinite(parsed) ? parsed : null
+    store.projectId = value && Number.isFinite(parsed) ? parsed : null
   },
 })
 
-const projects = computed(() => [
-  { value: 'all', label: '全部项目' },
-  ...store.projects.map((item) => ({
+const projects = computed(() => {
+  return [
+    ...(projectContext.value
+      ? []
+      : [{ value: 'all', label: '本组织全部项目' }]),
+    ...organizationProjects.value
+      .map((item) => ({
+        value: String(item.id),
+        // 暂停的项目留在列表里但标出来：它还在、只是不派发新任务，藏起来反而让人以为项目不见了
+        label: item.enabled ? item.name : `${item.name}（已暂停）`,
+      })),
+  ]
+})
+
+watch(
+  [
+    projectContext,
+    () => organizationProjects.value.map((project) => project.id).join(','),
+  ],
+  () => {
+    if (!projectContext.value || organizationProjects.value.length === 0) return
+    if (organizationProjects.value.some((item) => item.id === store.projectId)) return
+    store.projectId = organizationProjects.value[0]!.id
+  },
+  { immediate: true },
+)
+
+const organization = computed({
+  get: () => (organizationStore.currentId === null
+    ? 'none'
+    : String(organizationStore.currentId)),
+  set: (value: string | undefined) => {
+    const parsed = Number(value)
+    if (value && value !== 'none' && Number.isFinite(parsed)) {
+      organizationStore.select(parsed)
+    }
+  },
+})
+
+const organizationOptions = computed(() => [
+  ...organizationStore.organizations.map((item) => ({
     value: String(item.id),
-    // 暂停的项目留在列表里但标出来：它还在、只是不派发新任务，藏起来反而让人以为项目不见了
-    label: item.enabled ? item.name : `${item.name}（已暂停）`,
+    label: item.name,
   })),
+  ...(organizationStore.organizations.length === 0
+    ? [{
+        value: 'none',
+        label: organizationStore.loading
+          ? '正在加载组织…'
+          : organizationStore.error
+            ? '组织加载失败'
+            : '尚未创建组织',
+      }]
+    : []),
 ])
 
-// 分组按「概览 → 执行与交付 → 平台配置」排：工作台看全局，任务与决策是每天最先处理的；
-// 计划、部署、测试用例属于执行链路；项目、环境、插件是低频配置，放在最后。
-// 角标只挂「需要人管」的数：待批决策的数字和决策页是同一个源，不会两处对不上。
+// 一级导航按用户工作流组织，而不是按系统实体展开：
+// 工作台看状态与待办，任务承载需求/计划，交付承载测试/部署，项目承载资源。
 const navGroups = computed(() => [
   {
-    label: '概览',
-    items: [{ label: '工作台', to: '/dashboard', icon: LayoutDashboard }],
-  },
-  {
-    label: '执行与交付',
+    label: '工作区',
     items: [
+      { label: '工作台', to: '/dashboard', icon: LayoutDashboard },
       {
         label: '任务',
         to: '/tasks',
@@ -130,26 +186,12 @@ const navGroups = computed(() => [
         badge: store.taskTotal,
         badgeLabel: `共 ${store.taskTotal} 个任务`,
       },
-      {
-        label: '决策',
-        to: '/decisions',
-        icon: Workflow,
-        badge: decisionStore.pendingTotal,
-        badgeLabel: `共 ${decisionStore.pendingTotal} 条待批决策`,
-      },
-      { label: '计划', to: '/plans', icon: CalendarClock },
-  { label: '部署', to: '/deployments', icon: ServerCog },
-  { label: '服务器', to: '/servers', icon: Server },
-      { label: '测试用例', to: '/test-cases', icon: FlaskConical },
-    ],
-  },
-  {
-    label: '平台配置',
-    items: [
-      // 项目不放角标：它是配置，不是「等你处理」的事 —— 角标一旦不表示待办，就没人再看它了
+      { label: '交付', to: '/delivery', icon: ServerCog },
       { label: '项目', to: '/projects', icon: FolderKanban },
-      { label: '环境', to: '/environments', icon: KeyRound },
-      { label: '插件', to: '/plugins', icon: Blocks },
+      ...((organizationStore.organizations.length === 0
+        || organizationStore.canAccessManagement)
+        ? [{ label: '组织', to: '/organizations', icon: Building2 }]
+        : []),
     ],
   },
 ])
@@ -163,14 +205,43 @@ watch(
     if (!authenticated) {
       executionRuntime.clear()
       store.clearProjectScope()
+      organizationStore.clear()
       return
     }
     void store.loadStats()
-    void store.loadProjects().catch(() => undefined)
+    void organizationStore.load()
+      .then(() => store.setOrganizationScope(organizationStore.currentId))
+      .catch(() => {
+        // 中继或后端短暂不可用时保留上一次的项目范围，不能把“加载失败”表现成“没有项目”。
+        if (organizationStore.organizations.length === 0) store.clearProjectScope()
+      })
     void decisionStore.loadPendingCount()
     executionRuntime.startMonitoring()
   },
   { immediate: true },
+)
+
+watch(
+  () => organizationStore.currentId,
+  (organizationId) => {
+    if (!auth.isAuthenticated) return
+    if (store.organizationId === organizationId) return
+    void store.setOrganizationScope(organizationId)
+  },
+)
+
+watch(
+  () => auth.user?.mustChangePassword,
+  (mustChange, previous) => {
+    if (previous === true && mustChange === false && auth.isAuthenticated) {
+      void organizationStore.load()
+        .then(() => store.setOrganizationScope(organizationStore.currentId))
+        .catch(() => {
+          if (organizationStore.organizations.length === 0) store.clearProjectScope()
+        })
+      void decisionStore.loadPendingCount()
+    }
+  },
 )
 
 /*
@@ -200,6 +271,44 @@ const handleUnauthorized = () => {
   void router.push({ name: 'login', query: { redirect: route.fullPath } })
 }
 
+let lastUserSyncAt = 0
+const syncCurrentUser = () => {
+  if (!auth.isAuthenticated || document.visibilityState === 'hidden') return
+  if (organizationStore.error) retryOrganizationLoad()
+  const now = Date.now()
+  if (now - lastUserSyncAt < 15_000) return
+  lastUserSyncAt = now
+  void auth.refreshCurrentUser().then((active) => {
+    if (!active && !authPage.value) handleUnauthorized()
+  })
+}
+const syncCurrentUserWhenVisible = () => {
+  if (document.visibilityState === 'visible') syncCurrentUser()
+}
+let userSyncTimer: number | null = null
+
+/**
+ * 组织列表是项目、团队和研发流程的入口。
+ *
+ * 公网中继在服务重启时会短暂超时，失败后必须允许用户原地重试；
+ * 不能要求用户关闭客户端或刷新整个页面，更不能把失败清空成“尚未创建组织”。
+ */
+function retryOrganizationLoad() {
+  if (!auth.isAuthenticated || organizationStore.loading) return
+  void organizationStore.load()
+    .then(() => {
+      if (
+        store.organizationId !== organizationStore.currentId
+        || store.projects.length === 0
+      ) {
+        return store.setOrganizationScope(organizationStore.currentId)
+      }
+    })
+    .catch(() => {
+      if (organizationStore.organizations.length === 0) store.clearProjectScope()
+    })
+}
+
 const compactViewport = ref(window.matchMedia('(max-width: 1023px)').matches)
 const sidebarCollapsed = ref(compactViewport.value)
 const sidebarToggleLabel = computed(() =>
@@ -216,24 +325,33 @@ const syncViewport = () => {
 
 onMounted(() => {
   window.addEventListener('resize', syncViewport)
+  window.addEventListener('focus', syncCurrentUser)
+  window.addEventListener('online', retryOrganizationLoad)
   window.addEventListener('regent:unauthorized', handleUnauthorized)
+  document.addEventListener('visibilitychange', syncCurrentUserWhenVisible)
+  userSyncTimer = window.setInterval(syncCurrentUser, 60_000)
 })
 onUnmounted(() => {
   window.removeEventListener('resize', syncViewport)
+  window.removeEventListener('focus', syncCurrentUser)
+  window.removeEventListener('online', retryOrganizationLoad)
   window.removeEventListener('regent:unauthorized', handleUnauthorized)
+  document.removeEventListener('visibilitychange', syncCurrentUserWhenVisible)
+  if (userSyncTimer !== null) window.clearInterval(userSyncTimer)
   executionRuntime.stopMonitoring()
 })
 
 // 手机端点导航后自动收起抽屉：否则点了「决策」还要再点一次遮罩才能看到内容
 watch(
-  () => route.path,
+  () => route.fullPath,
   () => {
+    if (scroller.value) scroller.value.scrollLeft = 0
     if (compactViewport.value) sidebarCollapsed.value = true
   },
 )
 
 /*
- * 注册项目的入口在工具栏（项目下拉旁边）。弹框挂在 App 上而不是某个页面里：
+ * 新建项目的入口在工具栏（项目下拉旁边）。弹框挂在 App 上而不是某个页面里：
  * 工具栏、项目页、以及「新建任务」里一个项目都没有时的提示都要能打开它，
  * 挂在页面上就会出现互相看不见的三份开关。
  */
@@ -278,6 +396,16 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
           </span>
           <div class="hidden sm:block">
             <SearchableSelect
+              v-model="organization"
+              :items="organizationOptions"
+              aria-label="搜索或选择组织"
+              empty-text="没有匹配的组织"
+              size="lg"
+              class="w-44"
+            />
+          </div>
+          <div class="hidden sm:block">
+            <SearchableSelect
               v-model="project"
               :items="projects"
               aria-label="搜索或选择项目"
@@ -286,9 +414,9 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
               class="w-44"
             />
           </div>
-          <div class="hidden sm:block">
-            <Tooltip content="注册项目">
-              <IconButton label="注册项目" size="lg" @click="openProjectDialog()">
+          <div v-if="organizationStore.canManageProjects" class="hidden sm:block">
+            <Tooltip content="新建项目">
+              <IconButton label="新建项目" size="lg" @click="openProjectDialog()">
                 <Icon :as="Plus" size="large" />
               </IconButton>
             </Tooltip>
@@ -301,7 +429,20 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
           <div class="hidden lg:block">
             <SegmentedControl v-model="themeModel" :items="themeOptions" size="lg" />
           </div>
+          <GlobalSearch />
           <FailedTaskNotifications />
+          <div class="hidden lg:block">
+            <Tooltip content="下载手机 App">
+              <RouterLink
+                to="/download/app"
+                aria-label="下载手机 App"
+                title="下载手机 App"
+                :class="[buttonVariants({ variant: 'ghost', size: 'lg' }), 'w-control-lg px-0']"
+              >
+                <Icon :as="Smartphone" size="large" />
+              </RouterLink>
+            </Tooltip>
+          </div>
           <Tooltip content="使用说明">
             <RouterLink
               to="/help"
@@ -317,7 +458,11 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
               to="/settings"
               aria-label="设置"
               title="设置"
-              :class="[buttonVariants({ variant: 'ghost', size: 'lg' }), 'w-control-lg px-0']"
+              :class="[
+                buttonVariants({ variant: 'ghost', size: 'lg' }),
+                'w-control-lg px-0',
+                route.path.startsWith('/settings') ? 'bg-accent/10 text-accent' : '',
+              ]"
             >
               <Icon :as="Settings" size="large" />
             </RouterLink>
@@ -352,13 +497,37 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
       </div>
 
       <div
+        v-if="auth.isAuthenticated && organizationStore.error"
+        role="alert"
+        class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-danger/20 bg-danger/6 px-4 py-2 text-caption text-danger"
+      >
+        <Icon :as="TriangleAlert" size="inline" class="shrink-0" />
+        <span class="min-w-0 flex-1">
+          {{
+            organizationStore.organizations.length === 0
+              ? '组织与项目加载失败，当前无法进入团队和研发流程。'
+              : '组织列表刷新失败，当前显示上一次成功加载的数据。'
+          }}
+          <span class="text-label-secondary">（{{ organizationStore.error }}）</span>
+        </span>
+        <button
+          type="button"
+          class="font-emphasis underline underline-offset-2 disabled:opacity-50"
+          :disabled="organizationStore.loading"
+          @click="retryOrganizationLoad"
+        >
+          {{ organizationStore.loading ? '重试中…' : '重试' }}
+        </button>
+      </div>
+
+      <div
         v-if="executionRuntime.unavailable"
         role="status"
         class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-warning/25 bg-warning/10 px-4 py-2 text-caption text-warning"
       >
         <Icon :as="TriangleAlert" size="inline" class="shrink-0" />
         <span class="min-w-0 flex-1">
-          Codex 未就绪。可以继续录入和浏览，但任务派发与项目资料生成需要先安装 Codex。
+          Codex 未就绪。可以继续录入和浏览，但任务派发与项目摘要生成需要先安装 Codex。
         </span>
         <button
           type="button"
@@ -390,9 +559,8 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
             :groups="navGroups"
             :collapsed="sidebarCollapsed"
           >
-            <div class="mt-auto">
+            <div v-if="auth.user" class="mt-auto">
               <UserProfileCard
-                v-if="auth.user"
                 :user="auth.user"
                 @edit="profileDialogOpen = true"
               />
@@ -421,7 +589,7 @@ const { open: projectDialogOpen, openDialog: openProjectDialog } = useProjectDia
           </div>
         </div>
 
-        <main ref="scroller" class="scroll-area min-w-0 flex-1 overflow-y-auto bg-content">
+        <main ref="scroller" class="scroll-area min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-content">
           <RouterView />
         </main>
       </div>

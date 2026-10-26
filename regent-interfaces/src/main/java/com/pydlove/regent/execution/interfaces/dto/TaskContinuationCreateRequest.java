@@ -1,5 +1,7 @@
 package com.pydlove.regent.execution.interfaces.dto;
 
+import java.util.List;
+
 /**
  * 基于已有任务创建后续任务的请求体。
  *
@@ -8,5 +10,10 @@ package com.pydlove.regent.execution.interfaces.dto;
  */
 public record TaskContinuationCreateRequest(
         String prompt,
-        Integer priority) {
+        Integer priority,
+        List<Long> codeStandardIds) {
+
+    public TaskContinuationCreateRequest(String prompt, Integer priority) {
+        this(prompt, priority, null);
+    }
 }

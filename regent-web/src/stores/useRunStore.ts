@@ -31,6 +31,7 @@ export const useRunStore = defineStore('runs', () => {
 
   const detail = ref<TaskRunDetail | null>(null)
   const detailLoading = ref(false)
+  const detailRefreshing = ref(false)
   const detailError = ref<string | null>(null)
 
   /** 有任何一个在跑，就值得继续刷新。 */
@@ -44,7 +45,7 @@ export const useRunStore = defineStore('runs', () => {
       runs.value = await listTaskRuns(id)
       // 打开着的那次运行如果也在刷新，详情跟着更新，否则弹框里会停在一份过期的日志上
       if (detail.value && detail.value.run.taskId === id) {
-        await refreshDetail(detail.value.run.id)
+        await refreshDetailQuietly(detail.value.run.id)
       }
     } catch (e) {
       error.value = messageOf(e)
@@ -61,7 +62,7 @@ export const useRunStore = defineStore('runs', () => {
     try {
       runs.value = await listTaskRuns(id)
       if (detail.value && detail.value.run.taskId === id) {
-        await refreshDetail(detail.value.run.id)
+        await refreshDetailQuietly(detail.value.run.id)
       }
     } catch {
       // 自动刷新失败就等下一次节拍，界面保持上一次的样子
@@ -82,11 +83,26 @@ export const useRunStore = defineStore('runs', () => {
   }
 
   const refreshDetail = async (runId: number) => {
+    if (detailRefreshing.value) return
+    detailRefreshing.value = true
+    detailError.value = null
+    try {
+      detail.value = await getRun(runId)
+      detailError.value = null
+    } catch (e) {
+      // 手动刷新失败保留旧内容，让人仍能查看已有事实，同时给出失败原因
+      detailError.value = messageOf(e)
+    } finally {
+      detailRefreshing.value = false
+    }
+  }
+
+  const refreshDetailQuietly = async (runId: number) => {
     try {
       detail.value = await getRun(runId)
       detailError.value = null
     } catch {
-      // 详情刷新失败保留旧内容，弹框里已有的事实比一句报错有用
+      // 自动刷新失败就等下一次节拍，界面保持上一次的样子
     }
   }
 
@@ -109,10 +125,12 @@ export const useRunStore = defineStore('runs', () => {
     error,
     detail,
     detailLoading,
+    detailRefreshing,
     detailError,
     hasRunning,
     load,
     refreshQuietly,
+    refreshDetail,
     openRun,
     closeRun,
     reset,

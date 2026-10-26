@@ -124,6 +124,19 @@ class DecisionTest {
         }
 
         @Test
+        void 任务终止关闭待批决策并保留原因() {
+            Decision decision = pending();
+
+            decision.closeByTaskCancellation();
+
+            assertEquals(DecisionStatus.REJECTED, decision.getStatus());
+            assertEquals(ResolvedBy.HUMAN, decision.getResolvedBy().orElseThrow());
+            assertEquals("任务已终止，决策自动关闭",
+                    decision.getResolutionNote().orElseThrow());
+            assertNotNull(decision.getResolvedAt());
+        }
+
+        @Test
         void 选项超长被拒() {
             Decision decision = pending();
 

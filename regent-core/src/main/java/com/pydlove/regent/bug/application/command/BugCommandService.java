@@ -47,7 +47,7 @@ public class BugCommandService {
         return bug;
     }
 
-    /** 带理由判定不修复。理由由领域层统一校验，不能只靠前端。 */
+    /** 判定不修复，理由可选。 */
     public Bug wontFix(BugId id, String reason) {
         Bug bug = load(id);
         bug.wontFix(reason);

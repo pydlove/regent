@@ -1,20 +1,24 @@
 import { get, post, postJson, putJson } from '@/api/http'
-import type { DirectoryListing, Project, ProjectGitBranch } from '@/types/api'
+import type { DirectoryListing, Project, ProjectGitBranch, ProjectVersion } from '@/types/api'
 import type { DecisionLevel } from '@/types/task'
 
 export type CreateProjectInput = {
+  organizationId: number
   code: string
   name: string
-  path: string
+  path: string | null
   defaultDecisionLevel: DecisionLevel
+  versionSource: 'GIT_TAG' | 'MANUAL'
+  fallbackVersion: string | null
 }
 
-export type UpdateProjectInput = Omit<CreateProjectInput, 'code'> & {
+export type UpdateProjectInput = Omit<CreateProjectInput, 'code' | 'organizationId'> & {
   enabled: boolean
 }
 
 /** 全量项目列表。后端刻意不分页 —— 项目是平台里数量最少的东西。 */
-export const listProjects = () => get<Project[]>('/projects')
+export const listProjects = (organizationId?: number | null) =>
+  get<Project[]>('/projects', { organizationId })
 
 /**
  * 注册项目。
@@ -35,6 +39,10 @@ export const regenerateProjectSummary = (id: number) =>
 /** 当前分支是工作区运行时状态，只在详情选中项目时查询。 */
 export const getProjectGitBranch = (id: number) =>
   get<ProjectGitBranch>(`/projects/${id}/git-branch`)
+
+/** 解析当前项目提交对应的版本；无 Tag 时会回退到项目备用版本。 */
+export const getProjectVersion = (id: number) =>
+  get<ProjectVersion>(`/projects/${id}/version`)
 
 /**
  * 列子目录，给注册表单的路径字段当选择器。

@@ -4,6 +4,7 @@ import type {
   CodexInstallMethod,
   CodexInstallResult,
   ExecutionSettings,
+  GitCommitSettings,
   RelayInstallResult,
   RelaySettings,
 } from '@/types/api'
@@ -41,3 +42,9 @@ export const updateRelaySettings = (
 
 export const installRelay = (password: string) =>
   postJson<RelayInstallResult>('/settings/relay/install', { password })
+
+export const getGitCommitSettings = () =>
+  get<GitCommitSettings>('/settings/git-commit')
+
+export const updateGitCommitSettings = (settings: GitCommitSettings) =>
+  putJson<GitCommitSettings>('/settings/git-commit', settings)

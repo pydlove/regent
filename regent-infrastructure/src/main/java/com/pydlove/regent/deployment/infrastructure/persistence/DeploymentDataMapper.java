@@ -8,11 +8,13 @@ import com.pydlove.regent.deployment.domain.model.DeploymentServerId;
 import com.pydlove.regent.deployment.domain.model.DeploymentRun;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunId;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunStatus;
+import com.pydlove.regent.deployment.domain.model.DeploymentReviewReference;
 import com.pydlove.regent.project.domain.model.ProjectId;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 
 /** 部署领域对象与 MyBatis 数据对象转换。 */
 public final class DeploymentDataMapper {
@@ -38,9 +40,13 @@ public final class DeploymentDataMapper {
     }
 
     public static Deployment toDomain(DeploymentRow row) {
+        return toDomain(row, List.of(row.getProjectId()));
+    }
+
+    public static Deployment toDomain(DeploymentRow row, List<Long> projectIds) {
         return Deployment.restore(
                 DeploymentId.of(row.getId()),
-                ProjectId.of(row.getProjectId()),
+                projectIds.stream().map(ProjectId::of).toList(),
                 DeploymentServerId.of(row.getServerId()),
                 row.getName(),
                 row.getRemoteDirectory(),
@@ -58,6 +64,13 @@ public final class DeploymentDataMapper {
         data.setId(run.getId() == null ? null : run.getId().value());
         data.setDeploymentId(run.getDeploymentId().value());
         data.setProjectId(run.getProjectId().value());
+        run.getReviewReference().ifPresent(reference -> {
+            data.setTaskId(reference.taskId());
+            data.setReviewSnapshotId(reference.snapshotId());
+            data.setReviewDecisionId(reference.decisionId());
+        });
+        data.setProjectVersion(run.getProjectVersion());
+        data.setVersionSource(run.getVersionSource());
         data.setDeploymentName(run.getDeploymentName());
         data.setHost(run.getHost());
         data.setPort(run.getPort());
@@ -84,6 +97,10 @@ public final class DeploymentDataMapper {
                 DeploymentRunId.of(row.getId()),
                 DeploymentId.of(row.getDeploymentId()),
                 ProjectId.of(row.getProjectId()),
+                row.getTaskId() == null ? null : new DeploymentReviewReference(
+                        row.getTaskId(), row.getReviewSnapshotId(), row.getReviewDecisionId()),
+                row.getProjectVersion(),
+                row.getVersionSource(),
                 row.getDeploymentName(),
                 row.getHost(),
                 row.getPort(),

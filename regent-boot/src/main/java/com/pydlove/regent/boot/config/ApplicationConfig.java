@@ -9,16 +9,19 @@ import com.pydlove.regent.bug.domain.repository.BugRepository;
 import com.pydlove.regent.execution.application.command.BugFixDispatchService;
 import com.pydlove.regent.execution.application.command.TaskAdjustmentService;
 import com.pydlove.regent.execution.application.command.TaskCommandService;
+import com.pydlove.regent.execution.application.command.TaskCodeStandardService;
 import com.pydlove.regent.execution.application.command.TaskDispatchService;
 import com.pydlove.regent.execution.application.command.TaskDraftService;
 import com.pydlove.regent.execution.application.query.TaskQueryService;
 import com.pydlove.regent.execution.application.query.TaskRunQueryService;
+import com.pydlove.regent.execution.application.query.ExecutionControlTowerService;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
 import com.pydlove.regent.execution.domain.repository.TaskAdjustmentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskDraftRepository;
 import com.pydlove.regent.execution.domain.repository.TaskQueryRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
+import com.pydlove.regent.execution.domain.repository.ExecutionControlTowerRepository;
 import com.pydlove.regent.governance.application.command.DecisionApprovalService;
 import com.pydlove.regent.governance.application.command.DecisionRaiseService;
 import com.pydlove.regent.governance.application.query.DecisionQueryService;
@@ -27,24 +30,31 @@ import com.pydlove.regent.governance.domain.repository.DecisionQueryRepository;
 import com.pydlove.regent.governance.domain.repository.DecisionRepository;
 import com.pydlove.regent.governance.domain.repository.DecisionRuleRepository;
 import com.pydlove.regent.project.application.command.ProjectRegistrationService;
+import com.pydlove.regent.organization.application.query.OrganizationAccessService;
 import com.pydlove.regent.project.application.command.ProjectUpdateService;
 import com.pydlove.regent.project.application.command.EnvironmentEntryService;
 import com.pydlove.regent.project.application.query.DirectoryListingService;
 import com.pydlove.regent.project.application.query.ProjectAccessService;
 import com.pydlove.regent.project.application.query.ProjectGitBranchQueryService;
+import com.pydlove.regent.project.application.query.ProjectVersionService;
 import com.pydlove.regent.project.domain.port.ProjectSummaryScheduler;
 import com.pydlove.regent.project.domain.repository.EnvironmentEntryRepository;
 import com.pydlove.regent.project.domain.port.ProjectGitBranchReader;
+import com.pydlove.regent.project.domain.port.ProjectVersionReader;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.project.domain.repository.ProjectRepository;
+import com.pydlove.regent.project.domain.repository.ProjectMemberRepository;
 import com.pydlove.regent.project.infrastructure.git.GitProjectGitBranchReader;
+import com.pydlove.regent.project.infrastructure.git.GitProjectVersionReader;
 import com.pydlove.regent.shared.domain.TransactionRunner;
 import com.pydlove.regent.shared.domain.port.AttachmentStorage;
+import com.pydlove.regent.shared.domain.port.TaskStandardBinder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.time.ZoneId;
+import java.time.Clock;
 
 /**
  * 应用服务的显式装配。
@@ -66,9 +76,11 @@ public class ApplicationConfig {
     public BugFixDispatchService bugFixDispatchService(BugRepository bugRepository,
                                                        TaskRepository taskRepository,
                                                        TaskDispatchService taskDispatchService,
-                                                       TransactionRunner transactionRunner) {
+                                                       TransactionRunner transactionRunner,
+                                                       TaskStandardBinder taskStandardBinder) {
         return new BugFixDispatchService(
-                bugRepository, taskRepository, taskDispatchService, transactionRunner);
+                bugRepository, taskRepository, taskDispatchService, transactionRunner,
+                taskStandardBinder);
     }
 
     @Bean
@@ -96,8 +108,13 @@ public class ApplicationConfig {
      */
     @Bean
     public TaskCommandService taskCommandService(TaskRepository taskRepository,
-                                                 ProjectProfileRepository projectProfileRepository) {
-        return new TaskCommandService(taskRepository, projectProfileRepository);
+                                                 ProjectProfileRepository projectProfileRepository,
+                                                 DecisionRepository decisionRepository,
+                                                 TransactionRunner transactionRunner,
+                                                 TaskCodeStandardService taskCodeStandardService) {
+        return new TaskCommandService(
+                taskRepository, projectProfileRepository, decisionRepository, transactionRunner,
+                taskCodeStandardService);
     }
 
     @Bean
@@ -118,9 +135,12 @@ public class ApplicationConfig {
     public ProjectRegistrationService projectRegistrationService(
             ProjectRepository projectRepository,
             ProjectSummaryScheduler projectSummaryScheduler,
-            TransactionRunner transactionRunner) {
+            TransactionRunner transactionRunner,
+            ProjectMemberRepository projectMemberRepository,
+            OrganizationAccessService organizationAccessService) {
         return new ProjectRegistrationService(
-                projectRepository, projectSummaryScheduler, transactionRunner);
+                projectRepository, projectSummaryScheduler, transactionRunner,
+                projectMemberRepository, organizationAccessService);
     }
 
     @Bean
@@ -162,9 +182,27 @@ public class ApplicationConfig {
     }
 
     @Bean
+    public ProjectVersionReader projectVersionReader() {
+        return new GitProjectVersionReader();
+    }
+
+    @Bean
+    public ProjectVersionService projectVersionService(
+            ProjectProfileRepository projectProfileRepository,
+            ProjectVersionReader projectVersionReader) {
+        return new ProjectVersionService(projectProfileRepository, projectVersionReader);
+    }
+
+    @Bean
     public TaskRunQueryService taskRunQueryService(TaskRunRepository taskRunRepository,
                                                    RunEventRepository runEventRepository) {
         return new TaskRunQueryService(taskRunRepository, runEventRepository);
+    }
+
+    @Bean
+    public ExecutionControlTowerService executionControlTowerService(
+            ExecutionControlTowerRepository repository) {
+        return new ExecutionControlTowerService(repository, Clock.systemUTC());
     }
 
     /**
@@ -183,8 +221,8 @@ public class ApplicationConfig {
     }
 
     /**
-     * 审批用例是全项目唯一同时改两个聚合的地方，所以它显式依赖一个事务边界（{@link TransactionRunner}）——
-     * 事务端口由基础设施层实现，这里只负责把它递进去。
+     * 审批与任务终止都会同时改决策和任务两个聚合，所以它们显式依赖事务边界
+     * （{@link TransactionRunner}）——事务端口由基础设施层实现，这里只负责把它递进去。
      */
     @Bean
     public DecisionApprovalService decisionApprovalService(DecisionRepository decisionRepository,

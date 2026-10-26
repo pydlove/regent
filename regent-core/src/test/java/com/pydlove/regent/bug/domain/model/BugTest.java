@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** 缺陷来源与必填字段的领域守卫。 */
@@ -109,15 +110,24 @@ class BugTest {
     }
 
     @Test
-    @DisplayName("不修复必须留下足够具体的理由")
-    void 不修复理由必填() {
+    @DisplayName("不修复理由可以留空")
+    void 不修复理由可选() {
         Bug bug = Bug.reportManually(PROJECT, "导出乱码", BugSeverity.MINOR,
                 null, null, null);
 
-        assertThrows(DomainException.class, () -> bug.wontFix("不修"));
-        assertEquals(BugStatus.OPEN, bug.getStatus());
+        bug.wontFix("  ");
 
-        bug.wontFix("上游接口决定保留该行为");
+        assertEquals(BugStatus.WONTFIX, bug.getStatus());
+        assertNull(bug.getWontFixReason().orElse(null));
+    }
+
+    @Test
+    @DisplayName("填写的不修复理由会去掉首尾空白")
+    void 不修复理由可选填写() {
+        Bug bug = Bug.reportManually(PROJECT, "导出乱码", BugSeverity.MINOR,
+                null, null, null);
+
+        bug.wontFix("  上游接口决定保留该行为  ");
         assertEquals(BugStatus.WONTFIX, bug.getStatus());
         assertEquals("上游接口决定保留该行为", bug.getWontFixReason().orElseThrow());
     }

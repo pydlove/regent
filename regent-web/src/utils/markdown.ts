@@ -54,7 +54,7 @@ const isBlockStart = (lines: string[], index: number) => {
 }
 
 /**
- * 将 Codex 生成的项目资料解析成可安全交给 Vue 渲染的结构。
+ * 将 Codex 生成的项目摘要解析成可安全交给 Vue 渲染的结构。
  *
  * 这里不生成 HTML。原始 HTML 会按普通文本保留，既不执行也不注入 DOM。
  */

@@ -19,7 +19,6 @@ public class Bug {
 
     private static final int TITLE_MAX = 256;
     private static final int FILE_PATH_MAX = 512;
-    private static final int WONT_FIX_REASON_MIN = 6;
 
     private BugId id;
     private final ProjectId projectId;
@@ -153,12 +152,12 @@ public class Bug {
         touch();
     }
 
-    /** 尚未解决的缺陷都可以判定不修复；终态不能再改，避免覆盖已经留下的结论。 */
+    /** 尚未解决的缺陷都可以判定不修复；终态不能再改，理由可以选择留空。 */
     public void wontFix(String reason) {
         if (status.isResolved()) {
             throw new DomainException("缺陷已处于终态，不能标记为不修复：" + status);
         }
-        this.wontFixReason = requireWontFixReason(reason);
+        this.wontFixReason = blankToNull(reason);
         this.status = BugStatus.WONTFIX;
         touch();
     }
@@ -175,14 +174,6 @@ public class Bug {
         String value = blankToNull(filePath);
         if (value != null && value.length() > FILE_PATH_MAX) {
             throw new DomainException("缺陷文件路径超长（上限 " + FILE_PATH_MAX + " 字符）：" + value.length());
-        }
-        return value;
-    }
-
-    private static String requireWontFixReason(String reason) {
-        String value = requireText(reason, "不修复理由");
-        if (value.length() < WONT_FIX_REASON_MIN) {
-            throw new DomainException("不修复理由至少需要 " + WONT_FIX_REASON_MIN + " 个字符");
         }
         return value;
     }

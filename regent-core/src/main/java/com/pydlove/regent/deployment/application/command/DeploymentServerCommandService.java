@@ -42,17 +42,17 @@ public class DeploymentServerCommandService {
 
     public DeploymentServer create(SaveDeploymentServerCommand command) {
         return transactionRunner.inTransaction(() -> {
-            ProjectId projectId = requireProject(command.projectId());
-            requireProjectExists(projectId);
+            List<ProjectId> projectIds = requireProjects(command.projectIds());
+            projectIds.forEach(this::requireProjectExists);
             DeploymentServer server = DeploymentServer.create(
-                    projectId,
+                    projectIds,
                     command.name(),
                     command.host(),
                     command.port(),
                     command.username(),
                     command.authType(),
                     command.defaultRemoteDirectory());
-            requireNameAvailable(projectId, server.getName(), null);
+            requireNameAvailable(projectIds, server.getName(), null);
             serverRepository.save(server);
             if (server.getAuthType() == DeploymentAuthType.PASSWORD) {
                 requirePassword(command.password());
@@ -66,13 +66,12 @@ public class DeploymentServerCommandService {
         return transactionRunner.inTransaction(() -> {
             DeploymentServer server = serverRepository.findByIdForUpdate(id)
                     .orElseThrow(() -> new EntityNotFoundException("部署服务器不存在：" + id.value()));
-            if (!server.getProjectId().equals(requireProject(command.projectId()))) {
-                throw new DomainException("服务器归属项目创建后不能修改");
-            }
+            List<ProjectId> projectIds = requireProjects(command.projectIds());
+            projectIds.forEach(this::requireProjectExists);
             String nextName = command.name() == null ? server.getName() : command.name().trim();
-            requireNameAvailable(server.getProjectId(), nextName, id);
-            server.update(nextName, command.host(), command.port(), command.username(),
-                    command.authType(), command.defaultRemoteDirectory());
+            requireNameAvailable(projectIds, nextName, id);
+            server.update(projectIds, nextName, command.host(), command.port(),
+                    command.username(), command.authType(), command.defaultRemoteDirectory());
             serverRepository.save(server);
             updateCredential(server, command.password());
             return server;
@@ -100,11 +99,11 @@ public class DeploymentServerCommandService {
         }
     }
 
-    private void requireNameAvailable(ProjectId projectId,
+    private void requireNameAvailable(List<ProjectId> projectIds,
                                       String name,
                                       DeploymentServerId excludingId) {
-        if (serverRepository.existsByName(projectId, name, excludingId)) {
-            throw new DomainException("该项目已存在同名服务器：" + name);
+        if (serverRepository.existsByName(projectIds, name, excludingId)) {
+            throw new DomainException("所选项目已存在同名服务器：" + name);
         }
     }
 
@@ -128,10 +127,10 @@ public class DeploymentServerCommandService {
         }
     }
 
-    private static ProjectId requireProject(ProjectId projectId) {
-        if (projectId == null) {
-            throw new DomainException("请选择服务器归属项目");
+    private static List<ProjectId> requireProjects(List<ProjectId> projectIds) {
+        if (projectIds == null || projectIds.isEmpty()) {
+            throw new DomainException("请至少选择一个服务器归属项目");
         }
-        return projectId;
+        return List.copyOf(projectIds);
     }
 }

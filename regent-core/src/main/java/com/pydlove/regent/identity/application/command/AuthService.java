@@ -21,12 +21,11 @@ import com.pydlove.regent.shared.domain.DomainException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 
 /** 注册、登录与会话校验的统一用例入口。 */
-public class AuthService {
+public class AuthService implements CredentialAuthenticator {
 
     private static final int MIN_PASSWORD_LENGTH = 8;
     private static final int MAX_PASSWORD_LENGTH = 128;
@@ -84,7 +83,7 @@ public class AuthService {
             throw new DomainException("该邮箱已注册，请直接登录");
         }
 
-        Username username = allocateUsername(email);
+        Username username = UsernameAllocator.allocate(userRepository, email);
         emailVerificationService.verifyRegistrationCode(email, command.emailCode());
         Instant now = clock.instant();
         User user = User.register(email, username, passwordHasher.hash(command.password()), now);
@@ -93,6 +92,24 @@ public class AuthService {
     }
 
     public AuthSessionGrant login(LoginCommand command) {
+        User user = requireUser(command);
+        Instant now = clock.instant();
+        Duration ttl = command.rememberMe() ? rememberedSessionTtl : sessionTtl;
+        Instant expiresAt = now.plus(ttl);
+        String rawToken = tokenCodec.generateRawToken();
+        AuthSession session = AuthSession.open(
+                user.getId(), tokenCodec.hash(rawToken), now, expiresAt, command.rememberMe());
+        sessionRepository.save(session);
+        return new AuthSessionGrant(view(user), rawToken, expiresAt, command.rememberMe());
+    }
+
+    /** 只校验账号密码，不创建浏览器 Cookie 会话；手机端据此签发自己的令牌组。 */
+    @Override
+    public AuthenticatedUser authenticateCredentials(LoginCommand command) {
+        return view(requireUser(command));
+    }
+
+    private User requireUser(LoginCommand command) {
         Objects.requireNonNull(command, "登录命令");
         if (command.identifier() == null || command.identifier().isBlank()
                 || command.password() == null || command.password().isEmpty()) {
@@ -112,15 +129,7 @@ public class AuthService {
         if (!passwordHasher.matches(command.password(), user.getPasswordHash())) {
             throw invalidCredentials();
         }
-
-        Instant now = clock.instant();
-        Duration ttl = command.rememberMe() ? rememberedSessionTtl : sessionTtl;
-        Instant expiresAt = now.plus(ttl);
-        String rawToken = tokenCodec.generateRawToken();
-        AuthSession session = AuthSession.open(
-                user.getId(), tokenCodec.hash(rawToken), now, expiresAt, command.rememberMe());
-        sessionRepository.save(session);
-        return new AuthSessionGrant(view(user), rawToken, expiresAt, command.rememberMe());
+        return user;
     }
 
     /**
@@ -140,6 +149,24 @@ public class AuthService {
                 user.getId(), tokenCodec.hash(rawToken), now, expiresAt, true);
         sessionRepository.save(session);
         return new AuthSessionGrant(view(user), rawToken, expiresAt, true);
+    }
+
+    public AuthenticatedUser changePassword(UserId userId,
+                                            String currentPassword,
+                                            String newPassword) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AuthenticationException("登录已失效，请重新登录"));
+        if (currentPassword == null
+                || !passwordHasher.matches(currentPassword, user.getPasswordHash())) {
+            throw new DomainException("当前密码不正确");
+        }
+        requirePasswordPolicy(newPassword);
+        if (newPassword.equals(currentPassword)) {
+            throw new DomainException("新密码不能与当前密码相同");
+        }
+        user.changePassword(passwordHasher.hash(newPassword));
+        userRepository.update(user);
+        return view(user);
     }
 
     public AuthenticatedUser currentUser(String rawToken) {
@@ -200,35 +227,6 @@ public class AuthService {
 
     private static AuthenticationException invalidCredentials() {
         return new AuthenticationException("账号或密码错误");
-    }
-
-    private Username allocateUsername(Email email) {
-        String base = email.localPart().toLowerCase(Locale.ROOT)
-                .replaceAll("[^a-z0-9_-]+", "-")
-                .replaceAll("^-+|-+$", "");
-        if (base.isBlank()) {
-            base = "user";
-        } else if (base.length() < 3) {
-            base = "user-" + base;
-        }
-        base = truncate(base, 24);
-
-        Username first = Username.of(base);
-        if (!userRepository.existsByUsername(first)) {
-            return first;
-        }
-        for (int suffix = 2; suffix < 10_000; suffix++) {
-            String tail = "-" + suffix;
-            Username candidate = Username.of(truncate(base, 32 - tail.length()) + tail);
-            if (!userRepository.existsByUsername(candidate)) {
-                return candidate;
-            }
-        }
-        throw new DomainException("无法为该邮箱生成可用账号，请更换邮箱重试");
-    }
-
-    private static String truncate(String value, int maxLength) {
-        return value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
 
     private static void requirePasswordPolicy(String password) {

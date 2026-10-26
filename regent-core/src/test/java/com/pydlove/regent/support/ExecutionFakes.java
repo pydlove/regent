@@ -10,6 +10,7 @@ import com.pydlove.regent.execution.domain.model.AttachmentId;
 import com.pydlove.regent.execution.domain.model.ExecDecision;
 import com.pydlove.regent.execution.domain.model.ExecRequest;
 import com.pydlove.regent.execution.domain.model.ExecResult;
+import com.pydlove.regent.execution.domain.model.ExecutionDevice;
 import com.pydlove.regent.execution.domain.model.RunEvent;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.model.Task;
@@ -19,6 +20,11 @@ import com.pydlove.regent.execution.domain.model.TaskAdjustmentStatus;
 import com.pydlove.regent.execution.domain.model.TaskAttachment;
 import com.pydlove.regent.execution.domain.model.TaskDraft;
 import com.pydlove.regent.execution.domain.model.TaskDraftId;
+import com.pydlove.regent.execution.domain.model.TaskDocument;
+import com.pydlove.regent.execution.domain.model.TaskDocumentId;
+import com.pydlove.regent.execution.domain.model.LibraryDocument;
+import com.pydlove.regent.execution.domain.model.LibraryDocumentId;
+import com.pydlove.regent.execution.domain.model.LibraryType;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskRunId;
@@ -27,9 +33,12 @@ import com.pydlove.regent.execution.domain.port.AgentExecutor;
 import com.pydlove.regent.execution.domain.port.BranchManager;
 import com.pydlove.regent.execution.domain.port.RunEventListener;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
+import com.pydlove.regent.execution.domain.repository.ExecutionDeviceRepository;
 import com.pydlove.regent.execution.domain.repository.TaskAdjustmentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskAttachmentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskDraftRepository;
+import com.pydlove.regent.execution.domain.repository.TaskDocumentRepository;
+import com.pydlove.regent.execution.domain.repository.LibraryDocumentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
 import com.pydlove.regent.governance.domain.model.Decision;
@@ -48,6 +57,7 @@ import com.pydlove.regent.project.domain.model.EnvironmentScope;
 import com.pydlove.regent.project.domain.repository.EnvironmentEntryRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
+import com.pydlove.regent.requirement.domain.model.RequirementId;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.domain.TransactionRunner;
@@ -135,6 +145,7 @@ public final class ExecutionFakes {
         public final List<String> created = new ArrayList<>();
         public final List<String> switched = new ArrayList<>();
         public String current = "main";
+        public String currentCommit = "0123456789abcdef0123456789abcdef01234567";
         public RuntimeException failure;
 
         @Override
@@ -143,6 +154,14 @@ public final class ExecutionFakes {
                 throw failure;
             }
             return Optional.ofNullable(current);
+        }
+
+        @Override
+        public Optional<String> currentCommit(String projectPath) {
+            if (failure != null) {
+                throw failure;
+            }
+            return Optional.ofNullable(currentCommit);
         }
 
         @Override
@@ -256,6 +275,15 @@ public final class ExecutionFakes {
         }
 
         @Override
+        public List<Task> findByRequirement(RequirementId requirementId) {
+            return store.values().stream()
+                    .filter(task -> task.getRequirementId()
+                            .map(requirementId::equals)
+                            .orElse(false))
+                    .toList();
+        }
+
+        @Override
         public List<Task> findRunning() {
             return store.values().stream()
                     .filter(task -> task.getStatus() == TaskStatus.RUNNING)
@@ -351,13 +379,7 @@ public final class ExecutionFakes {
     public static final class Runs implements TaskRunRepository {
 
         private final Map<Long, TaskRun> store = new LinkedHashMap<>();
-        private Tasks tasks;
         private long sequence;
-
-        /** 接上任务仓储：租约是按项目算的，而项目挂在任务上，替身也得顺着这条线找。 */
-        public void wire(Tasks tasks) {
-            this.tasks = tasks;
-        }
 
         public TaskRun get(long id) {
             return store.get(id);
@@ -395,14 +417,6 @@ public final class ExecutionFakes {
         }
 
         @Override
-        public boolean hasActiveLease(ProjectId projectId, Instant now) {
-            return store.values().stream().anyMatch(run -> run.hasLease() && !run.isLeaseExpiredAt(now)
-                    && tasks != null && tasks.findById(run.getTaskId())
-                            .map(task -> task.getProjectId().equals(projectId))
-                            .orElse(false));
-        }
-
-        @Override
         public List<TaskRun> findExpiredLeases(Instant now) {
             return store.values().stream()
                     .filter(run -> run.getStatus() == RunStatus.RUNNING && run.isLeaseExpiredAt(now))
@@ -418,8 +432,22 @@ public final class ExecutionFakes {
         }
 
         @Override
-        public void renewLease(TaskRunId runId, Instant leaseExpiresAt) {
-            // 续租不动替身：到期时间是 TaskRun.renewLease 在内存里改的，这里再改一遍是重复
+        public List<TaskRun> findRunningByDevice(String deviceId) {
+            return store.values().stream()
+                    .filter(run -> run.getStatus() == RunStatus.RUNNING)
+                    .filter(run -> deviceId.equals(run.getDeviceId()))
+                    .toList();
+        }
+
+        @Override
+        public void renewLease(TaskRunId runId,
+                               String deviceId,
+                               Instant leaseExpiresAt,
+                               Instant lastHeartbeatAt) {
+            TaskRun run = store.get(runId.value());
+            if (run != null) {
+                run.renewLease(run.getAgentName(), deviceId, leaseExpiresAt, lastHeartbeatAt);
+            }
         }
 
         @Override
@@ -428,6 +456,32 @@ public final class ExecutionFakes {
                 run.assignIdentity(TaskRunId.of(++sequence));
             }
             store.put(run.getId().value(), run);
+        }
+    }
+
+    public static final class Devices implements ExecutionDeviceRepository {
+
+        private final Map<String, ExecutionDevice> store = new LinkedHashMap<>();
+
+        public void add(ExecutionDevice device) {
+            store.put(device.deviceId(), device);
+        }
+
+        @Override
+        public Optional<ExecutionDevice> findByDeviceId(String deviceId) {
+            return Optional.ofNullable(store.get(deviceId));
+        }
+
+        @Override
+        public List<ExecutionDevice> findByOwner(UserId ownerId) {
+            return store.values().stream()
+                    .filter(device -> device.ownerId().equals(ownerId))
+                    .toList();
+        }
+
+        @Override
+        public void save(ExecutionDevice device) {
+            store.put(device.deviceId(), device);
         }
     }
 
@@ -529,6 +583,14 @@ public final class ExecutionFakes {
         @Override
         public Optional<Decision> findById(DecisionId id) {
             return Optional.ofNullable(store.get(id.value()));
+        }
+
+        @Override
+        public List<Decision> findPendingByTaskForUpdate(TaskId taskId) {
+            return store.values().stream()
+                    .filter(decision -> decision.getTaskId().equals(taskId))
+                    .filter(Decision::isPending)
+                    .toList();
         }
 
         @Override
@@ -641,6 +703,103 @@ public final class ExecutionFakes {
         @Override
         public List<TaskAttachment> findByTask(TaskId taskId) {
             return store.values().stream().filter(item -> item.taskId().equals(taskId)).toList();
+        }
+    }
+
+    public static final class Documents
+            implements TaskDocumentRepository, LibraryDocumentRepository {
+
+        private final Map<Long, TaskDocument> taskStore = new LinkedHashMap<>();
+        private final Map<Long, LibraryDocument> libraryStore = new LinkedHashMap<>();
+        private long taskSequence;
+        private long librarySequence;
+
+        public List<TaskDocument> allTaskDocuments() {
+            return List.copyOf(taskStore.values());
+        }
+
+        public List<LibraryDocument> allLibraryDocuments() {
+            return List.copyOf(libraryStore.values());
+        }
+
+        @Override
+        public TaskDocument save(TaskDocument document) {
+            TaskDocument persisted = document.id() == null
+                    ? document.withIdentity(TaskDocumentId.of(++taskSequence))
+                    : document;
+            taskStore.put(persisted.id().value(), persisted);
+            return persisted;
+        }
+
+        @Override
+        public Optional<TaskDocument> findById(TaskDocumentId id) {
+            return Optional.ofNullable(taskStore.get(id.value()));
+        }
+
+        @Override
+        public Optional<TaskDocument> findByIdOwned(TaskDocumentId id, UserId ownerId) {
+            return findById(id);
+        }
+
+        @Override
+        public List<TaskDocument> findByTask(TaskId taskId) {
+            return taskStore.values().stream()
+                    .filter(document -> document.taskId().equals(taskId))
+                    .toList();
+        }
+
+        @Override
+        public LibraryDocument save(LibraryDocument document) {
+            LibraryDocument persisted = document.id() == null
+                    ? document.withIdentity(LibraryDocumentId.of(++librarySequence))
+                    : document;
+            libraryStore.put(persisted.id().value(), persisted);
+            return persisted;
+        }
+
+        @Override
+        public Optional<LibraryDocument> findById(LibraryDocumentId id) {
+            return Optional.ofNullable(libraryStore.get(id.value()));
+        }
+
+        @Override
+        public Optional<LibraryDocument> findByIdOwned(LibraryDocumentId id, UserId ownerId) {
+            return findById(id);
+        }
+
+        @Override
+        public Optional<LibraryDocument> findByProjectAndHash(ProjectId projectId, String contentHash) {
+            return libraryStore.values().stream()
+                    .filter(document -> document.projectId().equals(projectId))
+                    .filter(document -> document.contentHash().equals(contentHash))
+                    .findFirst();
+        }
+
+        @Override
+        public Optional<LibraryDocument> findByProjectAndTypeAndHash(ProjectId projectId,
+                                                                     LibraryType libraryType,
+                                                                     String contentHash) {
+            return libraryStore.values().stream()
+                    .filter(document -> document.projectId().equals(projectId))
+                    .filter(document -> document.libraryType() == libraryType)
+                    .filter(document -> document.contentHash().equals(contentHash))
+                    .findFirst();
+        }
+
+        @Override
+        public List<LibraryDocument> findByProject(ProjectId projectId) {
+            return libraryStore.values().stream()
+                    .filter(document -> document.projectId().equals(projectId))
+                    .toList();
+        }
+
+        @Override
+        public List<LibraryDocument> findByProjectAndType(ProjectId projectId,
+                                                          LibraryType libraryType) {
+            return libraryStore.values().stream()
+                    .filter(document -> document.projectId().equals(projectId))
+                    .filter(document -> document.libraryType() == libraryType)
+                    .toList();
         }
     }
 

@@ -2,18 +2,24 @@ package com.pydlove.regent.boot.config;
 
 import com.pydlove.regent.identity.application.command.AuthService;
 import com.pydlove.regent.identity.application.command.EmailVerificationService;
+import com.pydlove.regent.identity.application.command.MobileAuthService;
 import com.pydlove.regent.identity.application.command.UserProfileService;
+import com.pydlove.regent.identity.application.command.UserProvisioningService;
 import com.pydlove.regent.identity.domain.port.EmailVerificationCodec;
 import com.pydlove.regent.identity.domain.port.PasswordHasher;
 import com.pydlove.regent.identity.domain.port.SessionTokenCodec;
+import com.pydlove.regent.identity.domain.port.TemporaryPasswordGenerator;
 import com.pydlove.regent.identity.domain.port.VerificationEmailSender;
 import com.pydlove.regent.identity.domain.repository.AuthSessionRepository;
 import com.pydlove.regent.identity.domain.repository.EmailVerificationCodeRepository;
+import com.pydlove.regent.identity.domain.repository.MobileAuthSessionRepository;
 import com.pydlove.regent.identity.domain.repository.UserRepository;
 import com.pydlove.regent.identity.infrastructure.security.Pbkdf2PasswordHasher;
 import com.pydlove.regent.identity.infrastructure.security.SecureEmailVerificationCodec;
 import com.pydlove.regent.identity.infrastructure.security.SecureSessionTokenCodec;
+import com.pydlove.regent.identity.infrastructure.security.FixedTemporaryPasswordGenerator;
 import com.pydlove.regent.shared.domain.port.AttachmentStorage;
+import com.pydlove.regent.shared.domain.TransactionRunner;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -28,6 +34,18 @@ public class AuthConfig {
     @Bean
     public PasswordHasher passwordHasher() {
         return new Pbkdf2PasswordHasher();
+    }
+
+    @Bean
+    public UserProvisioningService userProvisioningService(
+            UserRepository userRepository,
+            PasswordHasher passwordHasher) {
+        return new UserProvisioningService(userRepository, passwordHasher, Clock.systemUTC());
+    }
+
+    @Bean
+    public TemporaryPasswordGenerator temporaryPasswordGenerator() {
+        return new FixedTemporaryPasswordGenerator();
     }
 
     @Bean
@@ -78,6 +96,26 @@ public class AuthConfig {
                 Clock.systemUTC(),
                 sessionTtl,
                 rememberedSessionTtl);
+    }
+
+    @Bean
+    public MobileAuthService mobileAuthService(
+            AuthService authService,
+            UserRepository userRepository,
+            MobileAuthSessionRepository sessionRepository,
+            SessionTokenCodec sessionTokenCodec,
+            TransactionRunner transactionRunner,
+            @Value("${regent.auth.mobile-access-ttl:PT30M}") Duration accessTtl,
+            @Value("${regent.auth.mobile-refresh-ttl:PT720H}") Duration refreshTtl) {
+        return new MobileAuthService(
+                authService,
+                userRepository,
+                sessionRepository,
+                sessionTokenCodec,
+                transactionRunner,
+                Clock.systemUTC(),
+                accessTtl,
+                refreshTtl);
     }
 
     @Bean

@@ -28,7 +28,13 @@
         JOIN project p ON p.id = t.project_id
         WHERE a.id = #{id}
           AND t.deleted = 0
-          AND p.owner_id = #{ownerId}
+          AND (
+              p.owner_id = #{ownerId}
+              OR EXISTS (
+                  SELECT 1 FROM project_member pm
+                  WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+              )
+          )
     </select>
 
     <!-- 按 ID 升序 = 上传顺序：界面上的缩略图要按人贴的顺序排 -->

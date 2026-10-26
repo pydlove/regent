@@ -22,6 +22,8 @@ import { getDashboardSnapshot, type DashboardSnapshot } from '@/api/dashboard'
 import { ApiError } from '@/api/http'
 import BugSeverityBadge from '@/components/business/BugSeverityBadge.vue'
 import DecisionLevelBadge from '@/components/business/DecisionLevelBadge.vue'
+import ExecutionControlTower from '@/components/business/ExecutionControlTower.vue'
+import FirstRunGuide from '@/components/business/FirstRunGuide.vue'
 import TaskStatusBadge from '@/components/business/TaskStatusBadge.vue'
 import TokenUsageDialog from '@/components/business/TokenUsageDialog.vue'
 import Button from '@/components/ui/button/Button.vue'
@@ -410,6 +412,8 @@ onUnmounted(() => {
         </div>
       </header>
 
+      <FirstRunGuide />
+
       <div
         v-if="error && snapshot"
         role="alert"
@@ -433,6 +437,8 @@ onUnmounted(() => {
       </div>
 
       <template v-if="snapshot">
+        <ExecutionControlTower />
+
         <section
           aria-label="核心指标"
           class="mt-4 grid grid-cols-2 gap-2.5 md:grid-cols-5"
@@ -441,12 +447,12 @@ onUnmounted(() => {
             v-for="metric in metrics"
             :key="metric.key"
             type="button"
-            class="group relative flex min-h-[120px] min-w-0 flex-col overflow-hidden rounded-card border border-separator-soft bg-content px-4 py-3.5 text-left shadow-panel transition duration-200 ease-apple hover:-translate-y-0.5 hover:border-accent/20 hover:shadow-popover focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/35"
+            class="group relative flex min-h-[92px] min-w-0 flex-col overflow-hidden rounded-panel border border-separator-soft bg-content px-3 py-2.5 text-left shadow-panel transition duration-200 ease-apple hover:-translate-y-0.5 hover:border-accent/20 hover:shadow-popover focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/35"
             :class="{ 'col-span-2 md:col-span-1': metric.key === 'tokens' }"
             @click="openMetric(metric)"
           >
             <div class="relative flex items-center gap-2">
-              <span class="grid size-8 shrink-0 place-items-center rounded-panel" :class="metric.iconClass">
+              <span class="grid size-7 shrink-0 place-items-center rounded-control" :class="metric.iconClass">
                 <Icon :as="metric.icon" size="inline" />
               </span>
               <span class="truncate text-subhead font-emphasis text-label-secondary">{{ metric.label }}</span>
@@ -456,8 +462,8 @@ onUnmounted(() => {
                 class="absolute right-0 top-1/2 -translate-y-1/2 text-label-tertiary opacity-0 transition-opacity duration-[120ms] ease-apple group-hover:opacity-100"
               />
             </div>
-            <div class="relative mt-3 flex min-w-0 items-baseline gap-1.5">
-              <span class="tnum truncate text-metric font-bold" :class="metric.valueClass">
+            <div class="relative mt-2 flex min-w-0 items-baseline gap-1.5">
+              <span class="tnum truncate text-title font-bold" :class="metric.valueClass">
                 {{ metric.valueText }}
               </span>
               <span v-if="metric.unit" class="shrink-0 text-subhead text-label-tertiary">

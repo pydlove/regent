@@ -27,9 +27,9 @@ Regent 换个做法：需求一次性录进平台，平台逐个调起 Codex 执
 | 重启恢复 | 平台重启后把遗留的内部执行标记为「已中断」，任务自动重新排队；有 `thread_id` 时继续原会话 |
 | 缺陷闭环 | 执行中发现的问题进 Bug 单，派生修复任务，按等级决定自动修还是等批 |
 | 插件能力库 | 把 Kafka 读取、数据库工具等组件存成固定版本能力包，执行时直接交给 AI 复用 |
-| 项目目录 | 可注册普通目录、单仓库或包含多个 Git 仓库的父目录；只有根目录本身是有效 Git 仓库时才记录分支 |
-| 项目资料 | 注册项目后由 Codex 只读分析工作区，自动生成技术栈、目录、启动验证和风险说明 |
-| 远程部署 | 按项目维护可复用服务器和加密密码，远程目录由配置统一提供；脚本保存和执行前会做逐行规范检测，不合规脚本不能运行，密码不会进入部署/执行快照或日志 |
+| 项目目录 | 研发项目先创建组织内的业务主体，代码目录由开发成员后续在自己的执行设备上绑定 |
+| 项目资料 | 绑定工作区后由 Codex 只读分析，自动生成技术栈、目录、启动验证和风险说明 |
+| 远程部署 | 一台可复用服务器可关联多个项目，密码加密保存，远程目录由配置统一提供；脚本保存和执行前会做逐行规范检测，不合规脚本不能运行，密码不会进入部署/执行快照或日志 |
 | 双通道通知 | 邮件为基座，微信/飞书推送为增强，通道失败逐级降级 |
 
 ## 决策分级
@@ -48,6 +48,7 @@ Regent 换个做法：需求一次性录进平台，平台逐个调起 Codex 执
 | `TECH_STACK.md` | 技术选型、Flyway 规范、配置约定 |
 | `ARCHITECTURE.md` | 限界上下文、聚合边界、分包规范、反模式 |
 | `FRONTEND.md` | 前端 UI 框架、macOS 设计令牌、组件清单 |
+| `regent-mobile/README.md` | 手机 App P0 技术验证、Capacitor 与原生构建说明 |
 | `AGENTS.md` | 硬约束与工作流，**改代码前必读** |
 
 ## 快速开始
@@ -66,8 +67,75 @@ Regent 换个做法：需求一次性录进平台，平台逐个调起 Codex 执
 `VITE_DOWNLOAD_MACOS_URL` / `VITE_DOWNLOAD_WINDOWS_URL`，或由后端发布清单提供。未发布对应系统
 安装包时页面显示“安装包暂未发布”，并引导直接使用浏览器版，不再跳转外部空页面。
 
-桌面客户端源码在 `regent-desktop/`，使用 Electron 包装现有 Web 工作台。首次启动填写 Regent
-服务地址，客户端会持久化登录状态。构建发布包：
+手机 App 下载页是公开的 `/download/app`，工作台工具栏、页脚和桌面下载页均提供快捷入口。
+Android APK 与 iOS TestFlight/App Store 链接可配置到
+`VITE_DOWNLOAD_ANDROID_URL` / `VITE_DOWNLOAD_IOS_URL`，或写入发布清单的
+`downloads.android` / `downloads.ios`。未发布时明确显示“内测包暂未发布”。
+
+当前已开放 Android 9+ P0 内测调试 APK；iOS 需要 Apple Developer 签名后通过 TestFlight 发布。
+
+## 研发交付流程
+
+项目工作区不再单独提供“研发流程”页签；“版本”页是研发流程唯一入口。
+左侧选择版本，右侧展示该版本的立项、需求、研发交付与发布进度。
+
+```text
+项目 → 产品版本 → 版本立项 → 需求池 → 需求评审 → 详细设计 → 设计评审
+→ 研发 → 冒烟 → 自动化回归 → 待转测
+→ 发布轮次 → 转测 → 集成测试 → 版本回归
+→ 发版评审 → 生产发布 → 发布观察 → 关闭
+```
+
+流程数据保存在 `initiative`、`product_version`、`requirement`、`requirement_delivery`、
+`build_artifact`、`release` 和 `delivery_gate` 表。立项审批先填写或上传会议纪要，
+再由项目负责人同意立项；发布绑定不可变构建制品，每个阶段推进都写入门禁记录。
+
+产品版本是研发流程入口。每个版本必须单独完成版本立项审批，再在需求池手工录入、
+CSV 导入或由 AI 整理产品想法。只有规划中且版本立项已批准的版本可以纳入新需求；
+版本确认后锁定新增范围，但已纳入需求仍可继续评审。
+需求评审通过后成为正式需求，并自动创建“详细设计”阶段交付，不再重复创建需求评审交付。
+CSV 模板字段为“需求标题、需求描述、验收标准、补充澄清”；AI 只生成可编辑草稿，
+人工确认后才写入需求池。
+
+项目团队与角色保存在 `project_member`，角色属于整个项目/产品，所有产品版本和研发流程共用。
+新项目创建后的第一步是配置团队角色；版本立项由产品负责人发起，需求评审由产品负责人审批，
+设计评审和研发完成由技术负责人确认，
+冒烟/自动化/转测/集成由测试负责人推进，发版和生产发布由发布负责人确认。版本详情首屏显示
+当前阶段、下一步责任人、“待我处理”事项和可执行的唯一主操作；无权操作时只显示等待提示。
+项目只有一个负责人时允许单人代审，并在门禁意见中留痕。
+
+当前冒烟和自动化阶段先保留人工确认，后续接入 `ProductTestPlan`、现有自动化测试结果和部署记录；
+详细设计见 `doc/设计文档/研发交付全流程设计.md`。
+
+## 组织与账号管理
+
+账号是全局身份，项目归属于组织。顶部工具栏可以在组织之间切换，项目列表会按当前组织过滤。
+
+`组织`页面对组织所有者、组织管理员和项目经理开放：
+
+- 组织所有者/管理员：创建组织、邀请成员、调整组织角色、移出成员、查看审计；
+- 项目经理：查看组织成员和项目，创建并管理自己有权限的项目；
+- 普通成员：不能进入组织管理，只能访问被加入的项目。
+
+创建账号采用邀请制。管理员生成 7 天有效的一次性邀请链接，系统会通过已配置的 SMTP 自动发送
+邀请邮件，邮件使用 `https://ichuang.top/regent/invite/{token}` 形式的公开地址；发送失败时邀请
+仍然保留，管理员可以复制链接手动发送。新邮箱接受时创建账号并设置密码，已有账号登录后接受邀请
+即可加入组织。邀请令牌只保存 SHA-256，不保存明文。
+
+管理员也可以手动创建账号：填写邮箱、显示名称和组织角色后，系统生成一次性初始密码并在创建时
+展示一次。成员首次登录会被强制跳转到修改密码页，完成改密前业务接口不可用。
+
+组织成员加入项目团队后，再分配团队角色。当前支持项目负责人、业务负责人、产品负责人、技术负责人、
+架构师、开发、测试负责人、运维/SRE、安全/合规、发布负责人、观察者和审计员。一个账号可以在不同
+项目承担不同角色；项目负责人、组织管理员和项目经理可以从组织成员目录中添加团队成员。
+组织成员页会同时展示每个人的组织角色、所属项目和项目角色。
+
+现有账号迁移时会自动生成个人组织，原有项目归入对应个人组织，不要求重新注册。
+详细设计见 `doc/设计文档/组织与账号管理设计.md`。
+
+桌面客户端源码在 `regent-desktop/`，使用 Electron 包装现有 Web 工作台。默认安装会自动连接
+`https://ichuang.top/regent/decisions`，普通用户无需填写服务地址；自建服务可在菜单中切换。
+构建发布包：
 
 ```bash
 cd regent-desktop
@@ -102,8 +170,18 @@ npm run build:release
 
 ```bash
 node scripts/release-version.mjs \
-  --version feature_V1.0.2_R100B003 \
+  --version Regent_V1.0.3_R100B002 \
   --notes "修复登录中继与优化安装流程"
+```
+
+只修改网页或后端、不需要更新桌面客户端时，增加 `--web-only`。这类版本仍会提示浏览器刷新，
+但不会下载 Runtime，也不会弹出桌面升级框：
+
+```bash
+node scripts/release-version.mjs \
+  --version Regent_V1.0.3_R100B003 \
+  --web-only \
+  --notes "仅更新网页与后端"
 ```
 
 没有 CDN 时，把安装包和 `latest.json` 放到后端 `~/.regent/downloads`，执行
@@ -126,7 +204,10 @@ node scripts/release-version.mjs \
 
 > **后端默认不拉起 Codex**（`regent.execution.dispatch.enabled: false`）。任务由当前访问设备上的
 > Regent 设备代理领取，并调用那台设备自己的 Codex。桌面客户端会自动启动设备代理；
-> 只使用浏览器时，可在设备上执行 `cd regent-desktop && npm run device-agent`。
+> 只使用浏览器时，执行一次 `./deploy/local/device-agent.sh install`，设备代理会由
+> launchd 常驻并在登录后自动启动。
+> Windows 浏览器使用便携版中的 `Install-Device-Agent-Autostart.cmd`，当前用户登录后
+> 会自动启动设备代理；不需要保持浏览器或终端窗口打开。
 > 打开「设置 → 执行」后会自动完成配对，检测和任务执行都不会回退到后端机器。
 
 手机公网访问见 `doc/设计文档/移动端公网中继.md` 与 `deploy/README.md`：
@@ -155,7 +236,7 @@ curl -s http://127.0.0.1:8787/api/agent/contract.md   # 协议全文，读一次
 
 - **设备代理走带登录保护的 `/api/device-agent/**`**：浏览器先为设备换取长期 Bearer 会话，
   再由代理领取和上报任务；
-- **Codex 与工作区在执行设备上**：项目工作区路径必须在该设备存在；项目根目录不是 Git 时
+- **Codex 与工作区在执行设备上**：完成工作区绑定后，项目路径必须在该设备存在；未绑定时可以立项和录需求，但不能派发任务。项目根目录不是 Git 时
   `branch` 为空，直接在 `workdir` 当前状态执行；
 - **认领即拿租约**，默认 900 秒不心跳就按失联处理（`regent.agent.lease-seconds`），
   回收由 `AgentLeaseJob` 负责，任务会回到可以重试的状态。
@@ -175,6 +256,7 @@ regent-interfaces/      REST、调度入口、CLI、DTO
 regent-boot/            Spring Boot 启动与装配
 regent-relay/           公网中继与本地连接器（零第三方运行时依赖）
 regent-web/             前端（Vue 3 + Tailwind v4，macOS 观感）
+regent-mobile/          手机 App（Vue 3 + Capacitor，iOS / Android）
 doc/                    需求 / 设计 / 开发 / 数据库 / 测试 / bug
 deploy/                 本地启停脚本 + 远程发布脚本
 ```
@@ -200,27 +282,28 @@ deploy/                 本地启停脚本 + 远程发布脚本
   `POST /api/tasks/{id}/retry|cancel|dispatch`、`GET /api/tasks/{id}/runs`、`GET /api/runs/{id}`、
   `POST /api/tasks/{id}/attachments`（贴图，`multipart/form-data`）、`GET /api/tasks/{id}/attachments`、
   `GET /api/attachments/{id}/content`（原图）、
-  `GET /api/projects`、`POST /api/projects`（注册项目）、
-  `GET /api/projects/directories`（列本机目录，给注册表单的路径选择器用）、
+  `GET /api/projects`、`POST /api/projects`（创建研发项目；组织与名称为主，标识自动生成，工作区可后绑）、
+  `GET /api/projects/directories`（列本机目录，给后续工作区绑定使用）、
   `GET|PUT /api/execution/settings`（读取 / 修改最大同时运行任务数）、
   `POST /api/auth/email-codes`（发送邮箱注册验证码）、`POST /api/auth/register`（邮箱验证码注册）、
   `POST /api/auth/login|logout`、`GET /api/auth/me`（会话认证，登录支持邮箱或旧用户名；
   `rememberMe` 开启 180 天持久登录，剩余有效期过半后自动顺延）、
+  `POST /api/mobile/auth/login|refresh|logout`（手机独立 Bearer 双令牌与安装实例隔离）、
   `GET /api/decisions`（支持等级 / 范围 / 项目 / 关键词 / 分页）、`POST /api/decisions/{id}/approve|reject`、
   `GET|POST /api/plugins`、`PUT /api/plugins/{id}`、`PUT /api/plugins/{id}/enabled`（插件库与版本）、
   `GET|PUT /api/tasks/{id}/plugins`（任务固定版本绑定）、
   `GET /api/bugs`（支持范围 / 严重级 / 项目 / 关键词 / 分页）、`POST /api/bugs`（人工录入）、
   `POST /api/bugs/{id}/fix-task`（创建并派发修复任务、回填修复任务号）、
   `GET|POST /api/deployment-servers`、`GET|PUT|DELETE /api/deployment-servers/{id}`
-  （项目级可复用服务器，密码只写不读）、
+  （可跨项目复用的服务器，`projectIds` 可多选，密码只写不读）、
   `GET|POST /api/deployments`、`PUT|DELETE /api/deployments/{id}`、
   `POST /api/deployments/{id}/run`、`GET /api/deployments/{id}/runs`、
   **外部执行者**：`GET /api/agent/contract(.md)`（协议全文 + 出参 schema）、
   `GET /api/agent/tasks?project=…`（可领清单）、`POST /api/agent/tasks/claim`、
   `POST /api/agent/runs/{id}/heartbeat`、`POST /api/agent/runs/{id}/report`
 - 前端：任务列表 / 分页 / 筛选 / 搜索 / 检查器、**新建任务弹框（贴图 + 拖放）与任务编辑弹框**、
-  **项目管理页**（项目画像、Codex 生成资料 + 最近任务）与「注册项目」（入口在工具栏项目下拉右边、项目页、
-  以及一个项目都没有时的新建任务弹框里；路径能手打、也能从本机目录树里选）、按项目筛选、决策审批闭环、
+  **项目管理页**（项目画像、Codex 生成资料 + 最近任务）与「新建项目」（入口在工具栏项目下拉右边、项目页、
+  以及一个项目都没有时的新建任务弹框里；只填组织和名称，代码目录后续由开发成员绑定）、按项目筛选、决策审批闭环、
   **运行记录面板与事件流弹框**、**详情里的附件缩略图与看图弹框**、**执行设置弹框**、
   **插件库与任务插件绑定**、**服务器库与部署脚本服务器复用**
 - 测试：`regent-core` 单测（毫秒级反馈回路）+ 适配器 11 个 + 26 条集成测试

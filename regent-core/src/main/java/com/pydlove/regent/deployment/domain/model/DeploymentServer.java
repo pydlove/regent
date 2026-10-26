@@ -5,10 +5,18 @@ import com.pydlove.regent.shared.domain.DomainException;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * 可复用的部署服务器。具体部署目录和脚本属于部署配置；这里只保存一个可复用的
  * 默认远程目录，用来在新建部署时预填 {@code REGENT_DEPLOY_DIRECTORY}。
+ *
+ * <p>一台服务器可以归属多个项目。服务器是连接信息的事实源，项目关联只表达哪些项目
+ * 可以在新建部署时选择它；部署配置自身仍只归属一个项目。
  *
  * <p>SSH 密码同样不在聚合里，由独立凭据端口按服务器 ID 加密保存。
  */
@@ -20,7 +28,7 @@ public class DeploymentServer {
     private static final int MAX_REMOTE_DIRECTORY_LENGTH = 512;
 
     private DeploymentServerId id;
-    private final ProjectId projectId;
+    private Set<ProjectId> projectIds;
     private String name;
     private String host;
     private int port;
@@ -31,7 +39,7 @@ public class DeploymentServer {
     private Instant updatedAt;
 
     private DeploymentServer(DeploymentServerId id,
-                             ProjectId projectId,
+                             Collection<ProjectId> projectIds,
                              String name,
                              String host,
                              int port,
@@ -41,7 +49,7 @@ public class DeploymentServer {
                              Instant createdAt,
                              Instant updatedAt) {
         this.id = id;
-        this.projectId = requireNotNull(projectId, "归属项目");
+        this.projectIds = requireProjectIds(projectIds);
         this.createdAt = requireNotNull(createdAt, "创建时间").truncatedTo(ChronoUnit.MILLIS);
         this.updatedAt = requireNotNull(updatedAt, "更新时间").truncatedTo(ChronoUnit.MILLIS);
         apply(name, host, port, username, authType, defaultRemoteDirectory);
@@ -53,7 +61,17 @@ public class DeploymentServer {
                                           int port,
                                           String username,
                                           DeploymentAuthType authType) {
-        return create(projectId, name, host, port, username, authType, null);
+        return create(Collections.singletonList(projectId), name, host, port, username,
+                authType, null);
+    }
+
+    public static DeploymentServer create(List<ProjectId> projectIds,
+                                          String name,
+                                          String host,
+                                          int port,
+                                          String username,
+                                          DeploymentAuthType authType) {
+        return create(projectIds, name, host, port, username, authType, null);
     }
 
     public static DeploymentServer create(ProjectId projectId,
@@ -63,8 +81,19 @@ public class DeploymentServer {
                                           String username,
                                           DeploymentAuthType authType,
                                           String defaultRemoteDirectory) {
+        return create(Collections.singletonList(projectId), name, host, port, username, authType,
+                defaultRemoteDirectory);
+    }
+
+    public static DeploymentServer create(List<ProjectId> projectIds,
+                                          String name,
+                                          String host,
+                                          int port,
+                                          String username,
+                                          DeploymentAuthType authType,
+                                          String defaultRemoteDirectory) {
         Instant now = now();
-        return new DeploymentServer(null, projectId, name, host, port, username, authType,
+        return new DeploymentServer(null, projectIds, name, host, port, username, authType,
                 defaultRemoteDirectory, now, now);
     }
 
@@ -77,7 +106,21 @@ public class DeploymentServer {
                                            DeploymentAuthType authType,
                                            Instant createdAt,
                                            Instant updatedAt) {
-        return restore(id, projectId, name, host, port, username, authType, null, createdAt, updatedAt);
+        return restore(id, Collections.singletonList(projectId), name, host, port, username,
+                authType, null, createdAt, updatedAt);
+    }
+
+    public static DeploymentServer restore(DeploymentServerId id,
+                                           List<ProjectId> projectIds,
+                                           String name,
+                                           String host,
+                                           int port,
+                                           String username,
+                                           DeploymentAuthType authType,
+                                           Instant createdAt,
+                                           Instant updatedAt) {
+        return restore(id, projectIds, name, host, port, username, authType, null,
+                createdAt, updatedAt);
     }
 
     public static DeploymentServer restore(DeploymentServerId id,
@@ -90,7 +133,21 @@ public class DeploymentServer {
                                            String defaultRemoteDirectory,
                                            Instant createdAt,
                                            Instant updatedAt) {
-        return new DeploymentServer(requireNotNull(id, "部署服务器 ID"), projectId, name,
+        return restore(id, Collections.singletonList(projectId), name, host, port, username, authType,
+                defaultRemoteDirectory, createdAt, updatedAt);
+    }
+
+    public static DeploymentServer restore(DeploymentServerId id,
+                                           List<ProjectId> projectIds,
+                                           String name,
+                                           String host,
+                                           int port,
+                                           String username,
+                                           DeploymentAuthType authType,
+                                           String defaultRemoteDirectory,
+                                           Instant createdAt,
+                                           Instant updatedAt) {
+        return new DeploymentServer(requireNotNull(id, "部署服务器 ID"), projectIds, name,
                 host, port, username, authType, defaultRemoteDirectory, createdAt, updatedAt);
     }
 
@@ -99,7 +156,17 @@ public class DeploymentServer {
                        int port,
                        String username,
                        DeploymentAuthType authType) {
-        update(name, host, port, username, authType, defaultRemoteDirectory);
+        update(projectIds, name, host, port, username, authType, defaultRemoteDirectory);
+    }
+
+    public void update(ProjectId projectId,
+                       String name,
+                       String host,
+                       int port,
+                       String username,
+                       DeploymentAuthType authType) {
+        update(Collections.singletonList(projectId), name, host, port, username, authType,
+                defaultRemoteDirectory);
     }
 
     public void update(String name,
@@ -108,6 +175,17 @@ public class DeploymentServer {
                        String username,
                        DeploymentAuthType authType,
                        String defaultRemoteDirectory) {
+        update(projectIds, name, host, port, username, authType, defaultRemoteDirectory);
+    }
+
+    public void update(Collection<ProjectId> projectIds,
+                       String name,
+                       String host,
+                       int port,
+                       String username,
+                       DeploymentAuthType authType,
+                       String defaultRemoteDirectory) {
+        this.projectIds = requireProjectIds(projectIds);
         apply(name, host, port, username, authType, defaultRemoteDirectory);
         this.updatedAt = now();
     }
@@ -123,7 +201,7 @@ public class DeploymentServer {
         if (id == null) {
             throw new DomainException("部署服务器尚未持久化，不能用于执行");
         }
-        return new DeploymentServerSnapshot(id, projectId, name, host, port, username, authType);
+        return new DeploymentServerSnapshot(id, name, host, port, username, authType);
     }
 
     private void apply(String name,
@@ -159,6 +237,20 @@ public class DeploymentServer {
             throw new DomainException("服务器地址格式不正确：" + value);
         }
         return value;
+    }
+
+    private static Set<ProjectId> requireProjectIds(Collection<ProjectId> projectIds) {
+        if (projectIds == null || projectIds.isEmpty()) {
+            throw new DomainException("请至少选择一个服务器归属项目");
+        }
+        Set<ProjectId> normalized = new LinkedHashSet<>();
+        for (ProjectId projectId : projectIds) {
+            ProjectId value = requireNotNull(projectId, "归属项目");
+            if (!normalized.add(value)) {
+                throw new DomainException("服务器归属项目不能重复：" + value.value());
+            }
+        }
+        return normalized;
     }
 
     private static String requireUsername(String username) {
@@ -222,8 +314,12 @@ public class DeploymentServer {
         return id;
     }
 
-    public ProjectId getProjectId() {
-        return projectId;
+    public List<ProjectId> getProjectIds() {
+        return List.copyOf(projectIds);
+    }
+
+    public boolean belongsTo(ProjectId projectId) {
+        return projectIds.contains(projectId);
     }
 
     public String getName() {

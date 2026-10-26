@@ -1,0 +1,40 @@
+{
+  "name": "regent-mobile",
+  "version": "1.0.6",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "mock:api": "node scripts/mock-api.mjs",
+    "assets:generate": "bash scripts/generate-assets.sh",
+    "build": "vue-tsc --noEmit && vite build",
+    "build:runtime": "node scripts/build-mobile-runtime.mjs",
+    "test": "vitest run",
+    "preview": "vite preview --host 127.0.0.1",
+    "cap:sync": "npm run build && cap sync",
+    "cap:add:android": "cap add android",
+    "cap:add:ios": "cap add ios"
+  },
+  "dependencies": {
+    "@aparajita/capacitor-biometric-auth": "10.0.0",
+    "@aparajita/capacitor-secure-storage": "8.0.1",
+    "@capacitor/android": "8.5.3",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/core": "8.5.3",
+    "@capacitor/ios": "8.5.3",
+    "@capacitor/keyboard": "^8.0.0",
+    "@capgo/capacitor-updater": "8.53.1",
+    "@lucide/vue": "1.57.0",
+    "tweetnacl": "1.0.3",
+    "vue": "3.5.44"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3",
+    "@types/node": "26.6.5",
+    "@vitejs/plugin-vue": "6.0.10",
+    "typescript": "6.0.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.5",
+    "vue-tsc": "3.3.13"
+  }
+}

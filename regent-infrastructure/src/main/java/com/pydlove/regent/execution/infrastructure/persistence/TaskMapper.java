@@ -21,6 +21,8 @@ public interface TaskMapper {
 
     List<TaskData> selectRunning();
 
+    List<TaskData> selectByRequirement(@Param("requirementId") long requirementId);
+
     List<TaskListRow> selectListPage(@Param("status") String status,
                                      @Param("level") String level,
                                      @Param("projectId") Long projectId,
@@ -76,6 +78,9 @@ public interface TaskMapper {
 
     /** 用户明确提交等待执行位的任务。 */
     List<TaskData> selectQueued(@Param("limit") int limit);
+
+    List<TaskData> selectQueuedOwned(@Param("ownerId") long ownerId,
+                                     @Param("limit") int limit);
 
     int insert(TaskData data);
 

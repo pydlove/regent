@@ -6,6 +6,7 @@ import java.util.List;
 public record EnvironmentRequest(
         String scope,
         Long projectId,
+        List<Long> projectIds,
         String value,
         List<String> tags,
         String description,

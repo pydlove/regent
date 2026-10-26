@@ -60,10 +60,17 @@ const stepClass =
 
 <template>
   <div
-    class="grid h-footer shrink-0 grid-cols-[1fr_auto] items-center gap-3 border-t border-separator bg-window px-3 lg:px-5"
+    class="relative grid h-footer shrink-0 grid-cols-[1fr_auto] items-center gap-3 bg-window px-3 lg:px-5"
     role="navigation"
     aria-label="分页"
   >
+    <!--
+      分隔线不能占布局高度：border-t 会把 32px 内容区压成 31px，
+      24px 控件上下只能分到 3.5px，亚像素取整后就会出现一边 3px、一边 4px。
+      改成绝对定位发丝线后，控件在 32px 内严格上下各留 4px。
+    -->
+    <span aria-hidden="true" class="pointer-events-none absolute inset-x-0 top-0 h-px bg-separator" />
+
     <p class="justify-self-start tnum text-caption leading-none text-label-secondary" aria-live="polite">
       <template v-if="total > 0">{{ rangeStart }}–{{ rangeEnd }} / 共 {{ total }} 条</template>
       <template v-else>没有可显示的记录</template>

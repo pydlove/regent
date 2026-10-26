@@ -3,11 +3,17 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  createRuntimeArchive,
+  stageRuntime,
+  stageShell,
+} from './runtime-package.mjs'
 
 const projectDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const packageJson = JSON.parse(fs.readFileSync(path.join(projectDirectory, 'package.json'), 'utf8'))
+const shellInfo = JSON.parse(fs.readFileSync(path.join(projectDirectory, 'shell-info.json'), 'utf8'))
 const version = packageJson.version
-const releaseCode = process.env.REGENT_RELEASE_CODE?.trim() || ''
+const releaseCode = process.env.REGENT_RELEASE_CODE?.trim() || shellInfo.shellRelease
 const artifactVersion = releaseCode ? `${version}-${releaseCode}` : version
 const releaseDirectory = path.join(projectDirectory, 'dist')
 const workDirectory = path.join(releaseDirectory, 'work')
@@ -138,12 +144,12 @@ function iconSet() {
   ])
 }
 
-function packageApplication(platform, arch, outputDirectory, electronZipDir) {
+function packageApplication(sourceDirectory, platform, arch, outputDirectory, electronZipDir) {
   if (!fs.existsSync(electronPackager)) {
     throw new Error(`找不到本地 electron-packager：${electronPackager}`)
   }
   runWithRetry(electronPackager, [
-    '.',
+    sourceDirectory,
     'Regent',
     `--platform=${platform}`,
     `--arch=${arch}`,
@@ -167,9 +173,9 @@ function packageApplication(platform, arch, outputDirectory, electronZipDir) {
   })
 }
 
-function buildMacDmg(electronZipDir) {
+function buildMacDmg(electronZipDir, shellDirectory) {
   const macOutput = path.join(workDirectory, 'mac')
-  packageApplication('darwin', 'universal', macOutput, electronZipDir)
+  packageApplication(shellDirectory, 'darwin', 'universal', macOutput, electronZipDir)
   const application = path.join(macOutput, 'Regent-darwin-universal', 'Regent.app')
   run('codesign', ['--force', '--deep', '--sign', '-', application])
 
@@ -202,10 +208,70 @@ function buildMacDmg(electronZipDir) {
   return dmg
 }
 
-function buildWindowsZip(electronZipDir) {
+function buildWindowsZip(electronZipDir, shellDirectory) {
   const windowsOutput = path.join(workDirectory, 'windows')
-  packageApplication('win32', 'x64', windowsOutput, electronZipDir)
+  packageApplication(shellDirectory, 'win32', 'x64', windowsOutput, electronZipDir)
   const applicationDirectory = path.join(windowsOutput, 'Regent-win32-x64')
+  fs.writeFileSync(
+    path.join(applicationDirectory, 'Start-Device-Agent.cmd'),
+    '@echo off\r\nstart "" /min "%~dp0Regent.exe" --device-agent\r\n',
+    'utf8',
+  )
+  fs.writeFileSync(
+    path.join(applicationDirectory, 'install-device-agent.ps1'),
+    `$ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$exe = Join-Path $root 'Regent.exe'
+if (-not (Test-Path $exe)) { throw '缺少 Regent.exe' }
+$shortcutPath = Join-Path ([Environment]::GetFolderPath('Startup')) 'Regent Device Agent.lnk'
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut($shortcutPath)
+$shortcut.TargetPath = $exe
+$shortcut.Arguments = '--device-agent'
+$shortcut.WorkingDirectory = $root
+$shortcut.WindowStyle = 7
+$shortcut.Save()
+Start-Process -FilePath $exe -ArgumentList '--device-agent' -WorkingDirectory $root -WindowStyle Hidden
+Write-Host 'Regent 设备代理已启动，并设置为登录后自动启动。'
+`,
+    'utf8',
+  )
+  fs.writeFileSync(
+    path.join(applicationDirectory, 'uninstall-device-agent.ps1'),
+    `$ErrorActionPreference = 'Stop'
+$shortcutPath = Join-Path ([Environment]::GetFolderPath('Startup')) 'Regent Device Agent.lnk'
+Remove-Item $shortcutPath -Force -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -Filter "Name='Regent.exe'" |
+  Where-Object { $_.CommandLine -match '--device-agent' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+Write-Host 'Regent 设备代理开机启动已移除。'
+`,
+    'utf8',
+  )
+  fs.writeFileSync(
+    path.join(applicationDirectory, 'Install-Device-Agent-Autostart.cmd'),
+    '@echo off\r\nchcp 65001 >nul\r\npowershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-device-agent.ps1"\r\npause\r\n',
+    'utf8',
+  )
+  fs.writeFileSync(
+    path.join(applicationDirectory, 'Uninstall-Device-Agent-Autostart.cmd'),
+    '@echo off\r\nchcp 65001 >nul\r\npowershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall-device-agent.ps1"\r\npause\r\n',
+    'utf8',
+  )
+  fs.writeFileSync(
+    path.join(applicationDirectory, 'README-Windows-Agent.txt'),
+    `Regent Windows 设备代理
+
+首次使用：
+1. 解压整个目录，不要只复制 Regent.exe。
+2. 双击 Install-Device-Agent-Autostart.cmd。
+3. 回到 Regent 网页并点击“重新检测”。
+
+只启动一次：双击 Start-Device-Agent.cmd。
+取消登录自启动：双击 Uninstall-Device-Agent-Autostart.cmd。
+`,
+    'utf8',
+  )
   const zip = path.join(releaseDirectory, `Regent-${artifactVersion}-Windows-x64.zip`)
   fs.rmSync(zip, { force: true })
   run('ditto', [
@@ -224,10 +290,24 @@ fs.rmSync(releaseDirectory, { recursive: true, force: true })
 fs.mkdirSync(workDirectory, { recursive: true })
 iconSet()
 const electronZipDir = prepareElectronZipDirectory()
-const macos = buildMacDmg(electronZipDir)
-const windows = buildWindowsZip(electronZipDir)
+const runtimeDirectory = stageRuntime(projectDirectory, path.join(workDirectory, 'runtime'), {
+  releaseCode,
+  minShellRelease: shellInfo.shellRelease,
+})
+const runtime = createRuntimeArchive(
+  runtimeDirectory,
+  path.join(releaseDirectory, `Regent-${artifactVersion}-runtime.zip`),
+)
+const shellDirectory = stageShell(
+  projectDirectory,
+  runtimeDirectory,
+  path.join(workDirectory, 'shell'),
+)
+const macos = buildMacDmg(electronZipDir, shellDirectory)
+const windows = buildWindowsZip(electronZipDir, shellDirectory)
 
 console.log('\n发布产物：')
 console.log(`macOS: ${macos}`)
 console.log(`Windows: ${windows}`)
+console.log(`Runtime: ${runtime}`)
 console.log(`平台: ${os.platform()} ${os.arch()}`)

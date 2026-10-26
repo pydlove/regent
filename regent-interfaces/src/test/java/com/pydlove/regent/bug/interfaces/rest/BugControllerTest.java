@@ -20,6 +20,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -78,6 +79,21 @@ class BugControllerTest {
 
         assertEquals(BugId.of(108), commandService.wontFixId);
         assertEquals("上游接口决定保留该行为", commandService.wontFixReason);
+    }
+
+    @Test
+    @DisplayName("不修复接口允许不传理由")
+    void marksWontFixWithoutReason() throws Exception {
+        queryService.status = BugStatus.WONTFIX;
+
+        mockMvc.perform(post("/api/bugs/{id}/wont-fix", 108)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("WONTFIX"));
+
+        assertEquals(BugId.of(108), commandService.wontFixId);
+        assertNull(commandService.wontFixReason);
     }
 
     private static final class RecordingBugCommandService extends BugCommandService {

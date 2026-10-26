@@ -1,24 +1,20 @@
 <script setup lang="ts">
-import { FolderOpen } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/http'
-import { createProject, listDirectories, updateProject } from '@/api/projects'
+import { createProject, updateProject } from '@/api/projects'
 import Button from '@/components/ui/button/Button.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import DialogField from '@/components/ui/dialog/DialogField.vue'
-import Icon from '@/components/ui/icon/Icon.vue'
 import Input from '@/components/ui/input/Input.vue'
-import Select from '@/components/ui/select/Select.vue'
 import Switch from '@/components/ui/switch/Switch.vue'
 
-import DirectoryPickerDialog from './DirectoryPickerDialog.vue'
 import { useToast } from '@/composables/useToast'
 import { useProjectDialog } from '@/composables/useProjectDialog'
-import { useExecutionRuntimeStore } from '@/stores/useExecutionRuntimeStore'
+import { useOrganizationStore } from '@/stores/useOrganizationStore'
 import { useTaskStore } from '@/stores/useTaskStore'
 import type { Project } from '@/types/api'
-import type { DecisionLevel } from '@/types/task'
 
 /*
  * 注册项目。
@@ -39,71 +35,32 @@ const emit = defineEmits<{
 const open = defineModel<boolean>('open', { default: false })
 
 const toast = useToast()
+const router = useRouter()
 const store = useTaskStore()
-const executionRuntime = useExecutionRuntimeStore()
+const organizationStore = useOrganizationStore()
 // 同一个弹框只挂在 App 上，页面想「知道刚建了什么」得从这个共享位子上读
 const { editingProject, lastRegistered, lastUpdated } = useProjectDialog()
 
-const code = ref('')
 const name = ref('')
-const path = ref('')
-const level = ref<string>('L1')
 const enabled = ref(true)
 const error = ref<string | null>(null)
 const saving = ref(false)
 const editing = computed(() => editingProject.value)
 
-const levelOptions = [
-  { value: 'L0', label: 'L0 · 完全自主' },
-  { value: 'L1', label: 'L1 · 自主但进日报' },
-  { value: 'L2', label: 'L2 · 需人工批准' },
-  { value: 'L3', label: 'L3 · 强阻塞' },
-]
-
-const codeValid = computed(() => /^[a-z][a-z0-9_]{0,63}$/.test(code.value))
-
-/*
- * 路径可以手打（从别处复制一整条更省事），也可以点「选择…」从本机目录树里挑。
- *
- * 失焦时问一次后端「这个目录在不在」：判据只能在那一侧（也只有它问得到本机文件系统），
- * 前端负责把结论摆在输入框下面。等提交才报错的话，人多半已经在想别的事了，
- * 回来只看到一句红字，还得自己回想是哪一行。
- */
-const pathError = ref<string | null>(null)
-const pickerOpen = ref(false)
-
-const checkPath = async () => {
-  pathError.value = null
-  const value = path.value.trim()
-  // 连绝对路径都不是，就不用问后端了 —— 提交时它还会再拦一次
-  if (!value.startsWith('/')) return
-  try {
-    await listDirectories(value)
-  } catch (e) {
-    pathError.value = e instanceof ApiError ? e.message : '读不到这个目录'
-  }
-}
-
-const onPicked = (picked: string) => {
-  path.value = picked
-  pathError.value = null
-}
 const canSave = computed(
-  () => codeValid.value && name.value.trim().length > 0 && path.value.trim().startsWith('/'),
+  () =>
+    (editing.value || organizationStore.currentId !== null)
+    && (editing.value || organizationStore.canManageProjects)
+    && name.value.trim().length > 0,
 )
 
 // 注册时清空；编辑时填入当前值。两种模式共用同一个表单，避免字段与校验漂移。
 watch(open, (value) => {
   if (!value) return
   const project = editingProject.value
-  code.value = project?.code ?? ''
   name.value = project?.name ?? ''
-  path.value = project?.path ?? ''
-  level.value = project?.defaultDecisionLevel ?? 'L1'
   enabled.value = project?.enabled ?? true
   error.value = null
-  pathError.value = null
-  pickerOpen.value = false
 })
 
 const save = async () => {
@@ -111,14 +68,25 @@ const save = async () => {
   saving.value = true
   error.value = null
   try {
-    const input = {
-      name: name.value.trim(),
-      path: path.value.trim(),
-      defaultDecisionLevel: level.value as DecisionLevel,
-    }
-    const saved = editingProject.value
-      ? await updateProject(editingProject.value.id, { ...input, enabled: enabled.value })
-      : await createProject({ ...input, code: code.value.trim() })
+    const current = editingProject.value
+    const saved = current
+      ? await updateProject(current.id, {
+          name: name.value.trim(),
+          path: current.path,
+          defaultDecisionLevel: current.defaultDecisionLevel,
+          versionSource: current.versionSource,
+          fallbackVersion: current.fallbackVersion,
+          enabled: enabled.value,
+        })
+      : await createProject({
+          organizationId: organizationStore.currentId!,
+          code: '',
+          name: name.value.trim(),
+          path: null,
+          defaultDecisionLevel: 'L1',
+          versionSource: 'GIT_TAG',
+          fallbackVersion: null,
+        })
     // 重新拉而不是本地 push：库里回填了什么（ID、启用状态）由后端说了算，
     // 而且工具栏的项目下拉要立刻看到最新名称与状态
     await store.loadProjects()
@@ -133,14 +101,12 @@ const save = async () => {
     } else {
       lastRegistered.value = saved
       emit('registered', saved)
-      if (executionRuntime.status?.available === false) {
-        toast.warning(
-          `项目「${saved.name}」已注册`,
-          'Codex 尚未就绪，项目资料暂未生成；安装后可在项目页重新生成',
-        )
-      } else {
-        toast.success(`项目「${saved.name}」已注册`, 'Codex 正在只读分析项目并生成项目资料')
-      }
+      store.projectId = saved.id
+      await router.replace({ path: '/projects', query: { view: 'members' } })
+      toast.success(
+        `项目「${saved.name}」已创建`,
+        '第一步请配置项目团队与角色，所有版本共用这套角色',
+      )
     }
   } catch (e) {
     // 失败原因留在表单里而不是弹 toast：人正对着这几行输入，改的就是它们
@@ -155,70 +121,60 @@ const save = async () => {
   <Dialog
     v-model:open="open"
     layout="form"
-    :title="editing ? '编辑项目' : '注册项目'"
+    :title="editing ? '编辑项目' : '新建项目'"
     :description="editing
-      ? '更新工作区、决策阈值和派发状态；项目标识创建后不可修改。'
-      : '项目决定 codex 在哪个目录跑，以及多高的决策必须惊动人。'"
+      ? '维护项目名称和派发状态。'
+      : '创建项目后先配置团队角色，再进入版本规划和版本立项。'"
   >
     <div class="flex flex-col gap-3">
       <DialogField
-        label="标识"
-        :hint="editing ? '项目标识创建后不可修改' : '小写字母开头，字母数字下划线，建后不改'"
+        v-if="!editing"
+        label="所属组织"
+        :hint="organizationStore.current ? '项目创建后不能更换组织' : '请先创建或切换到一个组织'"
       >
-        <Input
-          v-model="code"
-          placeholder="例如：regent"
-          :disabled="editing !== null"
-          :invalid="code.length > 0 && !codeValid"
-        />
+        <div class="rounded-control border border-separator-soft bg-window px-3 py-2 text-caption text-label">
+          {{ organizationStore.current?.name ?? '尚未选择组织' }}
+        </div>
       </DialogField>
 
       <DialogField label="名称">
         <Input v-model="name" :maxlength="128" placeholder="例如：需求执行平台" />
       </DialogField>
 
-      <DialogField label="路径" hint="codex 的工作目录，必须在本机已存在">
-        <div class="flex items-center gap-2">
-          <!-- 包一层给 flex-1：Input 的变体里有 w-full，直接挂 flex-1 谁生效取决于
-               Tailwind 产物顺序（这个坑在优先级输入框上踩过一次） -->
-          <div class="min-w-0 flex-1">
-            <Input
-              v-model="path"
-              :maxlength="512"
-              placeholder="/Users/you/workspace/my-project"
-              :invalid="pathError !== null"
-              @blur="checkPath"
-            />
-          </div>
-          <Button @click="pickerOpen = true">
-            <Icon :as="FolderOpen" size="inline" />选择…
-          </Button>
-        </div>
-        <p v-if="pathError" class="mt-1 text-caption text-danger">{{ pathError }}</p>
-      </DialogField>
-
-      <DialogField label="决策阈值" hint="高于这个等级的决策一律升级人工">
-        <Select v-model="level" :items="levelOptions" block />
-      </DialogField>
+      <div
+        v-if="!editing"
+        class="rounded-panel border border-accent/20 bg-accent/5 px-3 py-2.5"
+      >
+        <p class="text-caption font-emphasis text-label">创建后第一步：配置团队角色</p>
+        <p class="mt-1 text-caption text-label-tertiary">
+          团队成员角色属于整个项目/产品，所有版本和研发流程共用。代码目录由开发成员后续绑定。
+        </p>
+      </div>
 
       <DialogField
         v-if="editing"
         label="派发状态"
-        hint="关闭后不再派发新任务，历史任务与项目资料保持不变"
+        hint="关闭后不再派发新任务，历史任务与项目摘要保持不变"
       >
         <Switch v-model="enabled" :label="enabled ? '启用，允许派发' : '已暂停，不派发新任务'" />
       </DialogField>
 
       <p v-if="error" class="text-caption text-danger">{{ error }}</p>
+      <p v-if="!editing && !organizationStore.currentId" class="text-caption text-warning">
+        当前账号还没有组织。请先到“组织管理”创建组织，再新建项目。
+      </p>
+      <p
+        v-else-if="!editing && !organizationStore.canManageProjects"
+        class="text-caption text-warning"
+      >
+        当前组织角色不能创建项目，请让组织管理员分配“项目经理”或更高角色。
+      </p>
     </div>
-
-    <!-- 选择器挂在项目弹框里：它只在填路径时需要，开在别处就要多一份「刚才在填哪个项目」的状态 -->
-    <DirectoryPickerDialog v-model:open="pickerOpen" :initial="path" @picked="onPicked" />
 
     <template #footer>
       <Button @click="open = false">取消</Button>
       <Button variant="primary" :disabled="!canSave || saving" @click="save">
-        {{ saving ? '保存中…' : editing ? '保存修改' : '注册项目' }}
+        {{ saving ? '保存中…' : editing ? '保存修改' : '创建项目' }}
       </Button>
     </template>
   </Dialog>

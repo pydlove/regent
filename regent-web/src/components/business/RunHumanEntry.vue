@@ -16,6 +16,7 @@ import {
 } from '@lucide/vue'
 import { computed, ref } from 'vue'
 
+import MarkdownContent from '@/components/business/MarkdownContent.vue'
 import type { RunHumanItem } from '@/components/business/runEvents'
 import Badge from '@/components/ui/badge/Badge.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
@@ -147,7 +148,7 @@ function changeKindClass(kind: string) {
       <span class="text-caption font-emphasis text-label">{{ speaker }}</span>
       <span class="tnum ml-auto shrink-0 text-caption text-label-tertiary">{{ formatRelative(item.at) }}</span>
     </div>
-    <p class="mt-1.5 whitespace-pre-wrap text-body text-label">{{ item.text }}</p>
+    <MarkdownContent class="mt-2 text-label" :markdown="item.text" />
   </template>
 
   <!-- 执行器的最终汇报：出参 JSON 翻成人话，原始 JSON 见「出参原文」 -->
@@ -158,7 +159,7 @@ function changeKindClass(kind: string) {
       <Badge :tone="reportTone(item.status)">{{ reportLabel(item.status) }}</Badge>
       <span class="tnum ml-auto shrink-0 text-caption text-label-tertiary">{{ formatRelative(item.at) }}</span>
     </div>
-    <p v-if="item.summary" class="mt-1.5 whitespace-pre-wrap text-body text-label">{{ item.summary }}</p>
+    <MarkdownContent v-if="item.summary" class="mt-2 text-label" :markdown="item.summary" />
     <p v-else class="mt-1.5 text-caption text-label-tertiary">这次汇报没有带摘要。</p>
   </template>
 

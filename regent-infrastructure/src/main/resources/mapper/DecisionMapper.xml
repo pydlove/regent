@@ -20,6 +20,16 @@
         WHERE id = #{id}
     </select>
 
+    <select id="selectPendingByTaskForUpdate"
+            resultType="com.pydlove.regent.governance.infrastructure.persistence.DecisionData">
+        SELECT <include refid="columns"/>
+        FROM decision
+        WHERE task_id = #{taskId}
+          AND status = 'PENDING'
+        ORDER BY id ASC
+        FOR UPDATE
+    </select>
+
     <!--
       最近一条已决议的决策。按 id 降序而不是 raised_at：决策单号单调递增，同一毫秒内
       连提两条时时间戳会并列，序号不会。

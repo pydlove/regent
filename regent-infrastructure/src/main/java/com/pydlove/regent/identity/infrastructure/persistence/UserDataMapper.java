@@ -22,6 +22,7 @@ final class UserDataMapper {
         data.setDisplayName(user.getDisplayName().value());
         data.setEmail(user.getEmail() == null ? null : user.getEmail().value());
         data.setPasswordHash(user.getPasswordHash().value());
+        data.setMustChangePassword(user.mustChangePassword());
         if (user.getAvatar() != null) {
             data.setAvatarFilename(user.getAvatar().filename());
             data.setAvatarContentType(user.getAvatar().contentType());
@@ -40,6 +41,7 @@ final class UserDataMapper {
                 Username.of(data.getUsername()),
                 DisplayName.of(data.getDisplayName()),
                 new PasswordHash(data.getPasswordHash()),
+                Boolean.TRUE.equals(data.getMustChangePassword()),
                 data.getAvatarStoragePath() == null
                         ? null
                         : new UserAvatar(

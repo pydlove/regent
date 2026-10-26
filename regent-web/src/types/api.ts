@@ -39,6 +39,7 @@ export type AuthUser = {
   displayName: string
   email: string | null
   avatarUrl: string | null
+  mustChangePassword: boolean
 }
 
 /** 批量删除中的一个失败项。 */
@@ -136,6 +137,7 @@ export type TaskSummary = {
 export type TaskDetail = {
   id: number
   projectId: number
+  requirementId: number | null
   source: TaskSource
   title: string
   prompt: string
@@ -199,8 +201,14 @@ export type TaskRunSummary = {
   executor: string
   /** 外部执行者的自称；平台自己拉起的执行器为 null */
   agentName: string | null
+  /** 设备代理的稳定 UUID；通用外部协议未上报设备号时为 null */
+  deviceId: string | null
   /** 外部执行者的租约到期时间；没有外部执行者持有（或已收场）时为 null */
   leaseExpiresAt: string | null
+  /** 外部执行者最后一次续租时间 */
+  lastHeartbeatAt: string | null
+  /** 这次执行最后一条事件时间 */
+  lastEventAt: string | null
   summary: string | null
   /** 出参是否符合约定。false 说明这次执行的结论读不懂，界面要标出来 */
   schemaValid: boolean
@@ -224,9 +232,281 @@ export type RunEvent = {
 
 export type TaskRunDetail = {
   run: TaskRunSummary
+  diagnostic: ExecutionDiagnostic
   /** 末条消息原文（codex 的 -o 文件内容），复盘用 */
   rawResult: string | null
   events: RunEvent[]
+}
+
+export type ReviewSnapshotStatus =
+  | 'WAITING_REVIEW'
+  | 'IN_REVIEW'
+  | 'CHANGES_REQUESTED'
+  | 'APPROVED'
+  | 'COMMITTED'
+  | 'REJECTED'
+  | 'EXPIRED'
+
+export type ReviewRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH'
+export type ReviewFindingSeverity = 'BLOCKER' | 'CRITICAL' | 'MAJOR' | 'MINOR' | 'INFO'
+export type ReviewFindingStatus = 'PENDING' | 'CONFIRMED' | 'FALSE_POSITIVE' | 'FIXED'
+export type ReviewEvidenceStatus = 'PASSED' | 'FAILED' | 'NOT_EXECUTED' | 'UNAVAILABLE'
+export type ReviewDecisionType = 'APPROVED' | 'CHANGES_REQUESTED' | 'REJECTED'
+export type ReviewUnitDecisionStatus = 'PENDING' | 'APPROVED' | 'CHANGES_REQUESTED' | 'REJECTED'
+
+export type ReviewHunk = {
+  filePath: string
+  oldStart: number
+  oldLines: number
+  newStart: number
+  newLines: number
+  content: string
+}
+
+export type ReviewChangeUnit = {
+  id: number
+  sequenceNo: number
+  kind: 'BUSINESS' | 'GENERATED' | 'LOCKFILE' | 'FORMATTING' | 'BINARY' | 'UNKNOWN'
+  riskLevel: ReviewRiskLevel
+  title: string
+  reason: string
+  decisionQuestion: string
+  moduleName: string | null
+  filePaths: string[]
+  keyHunks: ReviewHunk[]
+  requiresView: boolean
+  viewedAt: string | null
+  decisionStatus: ReviewUnitDecisionStatus
+  decisionComment: string | null
+  decidedBy: number
+  decidedAt: string | null
+}
+
+export type ReviewFinding = {
+  id: number
+  changeUnitId: number | null
+  severity: ReviewFindingSeverity
+  status: ReviewFindingStatus
+  title: string
+  description: string
+  impact: string | null
+  filePath: string | null
+  lineStart: number | null
+  lineEnd: number | null
+  suggestedAction: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type ReviewEvidence = {
+  id: number
+  changeUnitId: number | null
+  type: 'TEST' | 'BUILD' | 'LOG' | 'SCREENSHOT' | 'API' | 'DATABASE_MIGRATION' | 'DEPLOYMENT_PRECHECK'
+  status: ReviewEvidenceStatus
+  title: string
+  command: string | null
+  summary: string | null
+  sourceType: string
+  sourceId: number | null
+  occurredAt: string
+}
+
+export type ReviewSnapshot = {
+  id: number
+  taskId: number
+  taskRunId: number
+  projectId: number
+  baseRef: string | null
+  headRef: string | null
+  gitRepository: boolean
+  diffHash: string
+  fileCount: number
+  additions: number
+  deletions: number
+  status: ReviewSnapshotStatus
+  analysisStatus: 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'SKIPPED'
+  analysisError: string | null
+  diffTruncated: boolean
+  requiredUnitCount: number
+  viewedRequiredUnitCount: number
+  approvedUnitCount: number
+  changeRequestedUnitCount: number
+  rejectedUnitCount: number
+  unresolvedBlockerCount: number
+  canApprove: boolean
+  deployable: boolean
+  commitSha: string | null
+  commitMessage: string | null
+  committedBy: number
+  committedAt: string | null
+  reviewedAt: string | null
+  createdAt: string
+  updatedAt: string
+  changeUnits: ReviewChangeUnit[]
+  findings: ReviewFinding[]
+  evidence: ReviewEvidence[]
+}
+
+export type ReviewDecision = {
+  id: number
+  snapshotId: number
+  decision: ReviewDecisionType
+  operatorId: number
+  comment: string | null
+  createdAt: string
+}
+
+export type TaskReview = {
+  snapshot: ReviewSnapshot | null
+  decisions: ReviewDecision[]
+  progress: ReviewGenerationProgress
+}
+
+export type ReviewGenerationProgress = {
+  status: 'IDLE' | 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED'
+  stage: 'idle' | 'queued' | 'diff' | 'analysis' | 'fallback' | 'saving' | 'completed' | 'failed' | 'timeout'
+  message: string
+  updatedAt: string | null
+  error: string | null
+}
+
+export type ReviewDiff = {
+  content: string
+  truncated: boolean
+}
+
+export type ReviewDecisionAction = {
+  snapshot: ReviewSnapshot
+  decision: ReviewDecision
+  continuationTaskId: number | null
+}
+
+export type ReviewGitCommit = {
+  enabled: boolean
+  canCommit: boolean
+  reason: string
+  projectName: string
+  branchName: string
+  headCommit: string
+  ticket: string
+  fileCount: number
+  filePaths: string[]
+  suggestedMessage: string
+  validationPattern: string
+  validationHint: string
+  commitSha: string
+  committedAt: string | null
+}
+
+export type ExecutionDiagnostic = {
+  healthStatus: ExecutionControlTowerStatus | 'FAILED' | 'UNKNOWN'
+  failureCategory: string | null
+  lastSuccessStage: string
+  failureStage: string | null
+  retryable: boolean
+  requiresDeviceChange: boolean
+  requiresDecision: boolean
+  summary: string | null
+  lastActivityAt: string | null
+}
+
+export type ExecutionControlTowerStatus =
+  | 'HEALTHY'
+  | 'SLOW'
+  | 'STALLED'
+  | 'DEVICE_LOST'
+  | 'FAILED'
+  | 'UNKNOWN'
+
+export type ExecutionControlTowerEntry = {
+  executionType: 'TASK' | 'DEPLOYMENT'
+  businessId: number
+  runId: number | null
+  attemptNo: number | null
+  projectId: number
+  projectName: string
+  name: string
+  businessStatus: string
+  healthStatus: ExecutionControlTowerStatus
+  stage: string
+  statusDetail: string
+  deviceName: string
+  executor: string | null
+  failureCategory: string | null
+  startedAt: string | null
+  lastActivityAt: string | null
+  finishedAt: string | null
+  retryable: boolean
+  stoppable: boolean
+  reviewable: boolean
+}
+
+export type ExecutionControlTowerSnapshot = {
+  activeCount: number
+  queuedCount: number
+  blockedCount: number
+  abnormalCount: number
+  totalCount: number
+  entries: ExecutionControlTowerEntry[]
+}
+
+export type RequirementStatus =
+  | 'DRAFT'
+  | 'CLARIFYING'
+  | 'READY'
+  | 'PLANNED'
+  | 'RUNNING'
+  | 'PARTIAL'
+  | 'DONE'
+  | 'CANCELLED'
+
+export type RequirementPoolStatus = 'POOL' | 'IN_REVIEW' | 'FORMAL' | 'REJECTED'
+
+export type RequirementSource = 'MANUAL' | 'IMPORT' | 'AI'
+
+export type RequirementTaskDraft = {
+  key: string
+  title: string
+  objective: string
+  scope: string[]
+  outOfScope: string[]
+  acceptanceCriteria: string[]
+  dependencies: string[]
+  priority: number
+  risk: string
+  suggestedOrder: number
+}
+
+export type RequirementTask = {
+  id: number
+  title: string
+  status: TaskStatus
+  priority: number
+  dependencies: number[]
+}
+
+export type Requirement = {
+  id: number
+  projectId: number
+  initiativeId: number | null
+  versionId: number | null
+  title: string
+  rawText: string
+  acceptanceText: string | null
+  clarificationText: string | null
+  status: RequirementStatus
+  poolStatus: RequirementPoolStatus
+  source: RequirementSource
+  reviewComment: string | null
+  reviewedBy: number | null
+  reviewedAt: string | null
+  clarificationQuestions: string[]
+  assumptions: string[]
+  taskDrafts: RequirementTaskDraft[]
+  tasks: RequirementTask[]
+  createdAt: string
+  updatedAt: string
+  plannedAt: string | null
 }
 
 export type PlanRunSummary = {
@@ -302,6 +582,102 @@ export type TaskAttachment = ImageAttachment & {
   taskId: number
 }
 
+/** 任务绑定的文档。内容走 contentUrl 下载，不在列表里传字节。 */
+export type TaskDocument = {
+  id: number
+  taskId: number
+  libraryDocumentId: number | null
+  filename: string
+  contentType: string
+  sizeBytes: number
+  contentUrl: string
+  savedToLibrary: boolean
+}
+
+/** 项目文件库中的可复用文档。 */
+export type LibraryDocument = {
+  id: number
+  projectId: number
+  libraryType: LibraryType
+  sourceTaskId: number | null
+  filename: string
+  contentType: string
+  sizeBytes: number
+  contentUrl: string
+  createdAt: string
+}
+
+export type LibraryType =
+  | 'GENERAL'
+  | 'DEVELOPMENT_RULE'
+  | 'REQUIREMENT'
+  | 'DESIGN'
+  | 'TESTING'
+
+export type CodeStandardScope =
+  | 'GENERAL'
+  | 'FRONTEND'
+  | 'BACKEND'
+  | 'TESTING'
+  | 'SECURITY'
+  | 'DATABASE'
+  | 'DEPLOYMENT'
+
+export type CodeStandard = {
+  id: number
+  projectId: number
+  name: string
+  description: string | null
+  scope: CodeStandardScope
+  enabled: boolean
+  defaultApply: boolean
+  sortOrder: number
+  archived: boolean
+  sourceProjectId: number | null
+  sourceStandardId: number | null
+  sourceVersionNo: number | null
+  currentVersion: number
+  filename: string | null
+  sizeBytes: number
+  contentHash: string | null
+  contentUrl: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type CodeStandardVersion = {
+  id: number
+  standardId: number
+  versionNo: number
+  filename: string
+  contentType: string
+  sizeBytes: number
+  contentHash: string
+  contentUrl: string
+  createdAt: string
+}
+
+export type TaskCodeStandard = {
+  id: number
+  taskId: number
+  standardId: number
+  standardVersionId: number
+  name: string
+  versionNo: number
+  filename: string
+  contentType: string
+  sizeBytes: number
+  contentHash: string
+  contentUrl: string
+  sourceProjectId: number | null
+  createdAt: string
+}
+
+export type CodeStandardCopyResult = {
+  copied: string[]
+  skipped: Array<{ name: string; reason: string }>
+}
+
 /** Bug 单的一张图片附件。 */
 export type BugAttachment = ImageAttachment & {
   bugId: number
@@ -315,14 +691,20 @@ export type BugAttachment = ImageAttachment & {
  */
 export type Project = {
   id: number
+  organizationId: number | null
   code: string
   name: string
-  path: string
+  /** 本机代码目录；研发项目未绑定时为空 */
+  path: string | null
   /** 项目级自动决策阈值，高于它的决策一律升级人工 */
   defaultDecisionLevel: DecisionLevel
+  /** Git Tag 自动解析，或使用项目设置的固定版本 */
+  versionSource: 'GIT_TAG' | 'MANUAL'
+  /** Git Tag 不可用时使用；手动模式必填 */
+  fallbackVersion: string | null
   /** 暂停开关；关掉之后不再派发新任务，但录入不受影响 */
   enabled: boolean
-  /** Codex 生成的项目资料状态 */
+  /** Codex 生成的项目摘要状态 */
   summaryStatus: 'NOT_GENERATED' | 'GENERATING' | 'READY' | 'FAILED'
   /** Codex 只读分析项目后生成的 Markdown 资料 */
   summary: string | null
@@ -330,6 +712,14 @@ export type Project = {
   summaryError: string | null
   /** 最近一次成功生成时间 */
   summaryGeneratedAt: string | null
+}
+
+/** 项目当前提交可解析出的发布版本。 */
+export type ProjectVersion = {
+  version: string | null
+  source: 'GIT_TAG' | 'MANUAL' | 'FALLBACK' | 'NONE'
+  available: boolean
+  message: string
 }
 
 /** 项目工作区的当前 Git 分支；没有 Git 管理或处于游离 HEAD 时为 null。 */
@@ -343,8 +733,9 @@ export type EnvironmentScope = 'GLOBAL' | 'PROJECT'
 export type EnvironmentEntry = {
   id: number
   scope: EnvironmentScope
-  /** scope=GLOBAL 时为 null；scope=PROJECT 时必填 */
+  /** scope=GLOBAL 时为 null；scope=PROJECT 时为第一个归属项目。 */
   projectId: number | null
+  projectIds: number[]
   key: string
   value: string
   tags: string[]
@@ -475,8 +866,11 @@ export type DeploymentRunStatus =
 /** 部署配置列表项；脚本正文只在详情接口返回。 */
 export type DeploymentSummary = {
   id: number
+  /** 多个归属项目中的主项目，用于兼容旧执行记录。 */
   projectId: number
   projectName: string
+  projectIds: number[]
+  projectNames: string[]
   serverId: number
   serverName: string
   name: string
@@ -504,7 +898,8 @@ export type DeploymentDetail = DeploymentSummary & {
 /** 可复用的部署服务器；密码永远不在响应里。 */
 export type DeploymentServer = {
   id: number
-  projectId: number
+  /** 可在新建部署时选择这台服务器的项目。 */
+  projectIds: number[]
   name: string
   host: string
   port: number
@@ -540,6 +935,11 @@ export type DeploymentRunSummary = {
   id: number
   deploymentId: number
   projectId: number
+  taskId: number | null
+  reviewSnapshotId: number | null
+  reviewDecisionId: number | null
+  projectVersion: string | null
+  versionSource: 'GIT_TAG' | 'MANUAL' | 'FALLBACK' | 'NONE' | null
   deploymentName: string
   host: string
   port: number
@@ -614,6 +1014,61 @@ export type RelayInstallResult = {
   success: boolean
   installDirectory: string
   message: string
+}
+
+/** 企业 Git 提交信息模板与最终文本校验规范。 */
+export type GitCommitSettings = {
+  enabled: boolean
+  defaultType: string
+  defaultScope: string
+  subjectTemplate: string
+  bodyTemplate: string
+  validationPattern: string
+  validationHint: string
+}
+
+export type GitCommitStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED'
+
+/** 平台发起的一次 Git 提交尝试。 */
+export type GitCommitSummary = {
+  id: number
+  projectId: number
+  projectName: string
+  taskId: number
+  taskTitle: string
+  ticket: string | null
+  message: string
+  branchName: string
+  commitSha: string | null
+  status: GitCommitStatus
+  failureReason: string | null
+  operatorName: string
+  startedAt: string
+  finishedAt: string | null
+  reviewSnapshotId: number
+}
+
+export type GitCommitDetail = {
+  summary: GitCommitSummary
+  reviewDecisionId: number
+  repositoryPath: string
+  baseRef: string | null
+  filePaths: string[]
+  failureReason: string | null
+  outputSummary: string | null
+}
+
+export type GitCommitPage = {
+  items: GitCommitSummary[]
+  total: number
+  page: number
+  size: number
+}
+
+export type CodeEditor = {
+  id: 'VS_CODE' | 'CURSOR' | 'INTELLIJ_IDEA'
+  name: string
+  supportsFileNavigation: boolean
 }
 
 /**

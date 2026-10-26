@@ -10,7 +10,16 @@ public record AuthenticatedUser(
         String username,
         String displayName,
         String email,
-        Long avatarVersion) {
+        Long avatarVersion,
+        boolean mustChangePassword) {
+
+    public AuthenticatedUser(long id,
+                             String username,
+                             String displayName,
+                             String email,
+                             Long avatarVersion) {
+        this(id, username, displayName, email, avatarVersion, false);
+    }
 
     public static AuthenticatedUser from(User user) {
         Objects.requireNonNull(user, "用户");
@@ -19,6 +28,7 @@ public record AuthenticatedUser(
                 user.getUsername().value(),
                 user.getDisplayName().value(),
                 user.getEmail() == null ? null : user.getEmail().value(),
-                user.getAvatar() == null ? null : user.getAvatar().updatedAt().toEpochMilli());
+                user.getAvatar() == null ? null : user.getAvatar().updatedAt().toEpochMilli(),
+                user.mustChangePassword());
     }
 }

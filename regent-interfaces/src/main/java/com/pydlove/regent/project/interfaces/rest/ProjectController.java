@@ -3,6 +3,7 @@ package com.pydlove.regent.project.interfaces.rest;
 import com.pydlove.regent.identity.application.query.AuthenticatedUser;
 import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.identity.interfaces.rest.AuthSessionInterceptor;
+import com.pydlove.regent.organization.domain.model.OrganizationId;
 import com.pydlove.regent.project.application.command.ProjectRegistrationService;
 import com.pydlove.regent.project.application.command.ProjectSummaryGenerationService;
 import com.pydlove.regent.project.application.command.ProjectUpdateService;
@@ -10,14 +11,18 @@ import com.pydlove.regent.project.application.command.RegisterProjectCommand;
 import com.pydlove.regent.project.application.command.UpdateProjectCommand;
 import com.pydlove.regent.project.application.query.DirectoryListingService;
 import com.pydlove.regent.project.application.query.ProjectGitBranchQueryService;
+import com.pydlove.regent.project.application.query.ProjectVersionService;
 import com.pydlove.regent.project.domain.model.Project;
 import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.project.domain.model.ProjectVersionSource;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
+import com.pydlove.regent.project.domain.repository.ProjectProfile;
 import com.pydlove.regent.project.interfaces.dto.DirectoryListingResponse;
 import com.pydlove.regent.project.interfaces.dto.ProjectCreateRequest;
 import com.pydlove.regent.project.interfaces.dto.ProjectGitBranchResponse;
 import com.pydlove.regent.project.interfaces.dto.ProjectResponse;
 import com.pydlove.regent.project.interfaces.dto.ProjectUpdateRequest;
+import com.pydlove.regent.project.interfaces.dto.ProjectVersionResponse;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 import jakarta.servlet.http.HttpServletRequest;
@@ -47,6 +52,7 @@ public class ProjectController {
     private final ProjectUpdateService projectUpdateService;
     private final DirectoryListingService directoryListingService;
     private final ProjectGitBranchQueryService projectGitBranchQueryService;
+    private final ProjectVersionService projectVersionService;
     private final ProjectSummaryGenerationService projectSummaryGenerationService;
 
     public ProjectController(ProjectProfileRepository projectProfileRepository,
@@ -54,12 +60,14 @@ public class ProjectController {
                              ProjectUpdateService projectUpdateService,
                              DirectoryListingService directoryListingService,
                              ProjectGitBranchQueryService projectGitBranchQueryService,
+                             ProjectVersionService projectVersionService,
                              ProjectSummaryGenerationService projectSummaryGenerationService) {
         this.projectProfileRepository = projectProfileRepository;
         this.projectRegistrationService = projectRegistrationService;
         this.projectUpdateService = projectUpdateService;
         this.directoryListingService = directoryListingService;
         this.projectGitBranchQueryService = projectGitBranchQueryService;
+        this.projectVersionService = projectVersionService;
         this.projectSummaryGenerationService = projectSummaryGenerationService;
     }
 
@@ -78,8 +86,10 @@ public class ProjectController {
     }
 
     @GetMapping
-    public List<ProjectResponse> list(HttpServletRequest request) {
-        return projectProfileRepository.findAll(currentUser(request)).stream()
+    public List<ProjectResponse> list(@RequestParam(required = false) Long organizationId,
+                                      HttpServletRequest request) {
+        OrganizationId scope = organizationId == null ? null : OrganizationId.of(organizationId);
+        return projectProfileRepository.findAll(currentUser(request), scope).stream()
                 .map(ProjectResponse::from)
                 .toList();
     }
@@ -89,6 +99,12 @@ public class ProjectController {
         return new ProjectGitBranchResponse(
                 projectGitBranchQueryService.currentBranch(ProjectId.of(id), currentUser(request))
                         .orElse(null));
+    }
+
+    @GetMapping("/{id}/version")
+    public ProjectVersionResponse version(@PathVariable long id, HttpServletRequest request) {
+        return ProjectVersionResponse.from(
+                projectVersionService.resolve(ProjectId.of(id), currentUser(request)));
     }
 
     /**
@@ -102,6 +118,9 @@ public class ProjectController {
     public ProjectResponse create(@RequestBody ProjectCreateRequest request,
                                   HttpServletRequest servletRequest) {
         UserId ownerId = currentUser(servletRequest);
+        if (request.organizationId() == null) {
+            throw new IllegalArgumentException("缺少 organizationId");
+        }
         Project project = projectRegistrationService.register(new RegisterProjectCommand(
                 request.code(),
                 request.name(),
@@ -109,7 +128,11 @@ public class ProjectController {
                 // 技术栈与验证方式还没有入口，等情况出现时在请求体、画像、响应三处一起加
                 null,
                 null,
-                DecisionLevel.parse(request.defaultDecisionLevel())), ownerId);
+                DecisionLevel.parse(
+                        request.defaultDecisionLevel() == null ? "L1" : request.defaultDecisionLevel()),
+                ProjectVersionSource.parse(
+                        request.versionSource() == null ? "GIT_TAG" : request.versionSource()),
+                request.fallbackVersion()), ownerId, OrganizationId.of(request.organizationId()));
         return ProjectResponse.from(projectProfileRepository.findById(project.getId(), ownerId)
                 .orElseThrow(() -> new EntityNotFoundException("项目刚注册就查不到了：" + project.getId())));
     }
@@ -123,10 +146,20 @@ public class ProjectController {
             throw new IllegalArgumentException("缺少 enabled");
         }
         UserId ownerId = currentUser(servletRequest);
+        ProjectProfile current = projectProfileRepository.findById(ProjectId.of(id), ownerId)
+                .orElseThrow(() -> new EntityNotFoundException("项目不存在：" + id));
+        ProjectVersionSource versionSource = request.versionSource() == null
+                ? current.versionSource()
+                : ProjectVersionSource.parse(request.versionSource());
+        String fallbackVersion = request.versionSource() == null
+                ? current.fallbackVersion()
+                : request.fallbackVersion();
         Project project = projectUpdateService.update(ProjectId.of(id), new UpdateProjectCommand(
                 request.name(),
                 request.path(),
                 DecisionLevel.parse(request.defaultDecisionLevel()),
+                versionSource,
+                fallbackVersion,
                 request.enabled()), ownerId);
         return ProjectResponse.from(projectProfileRepository.findById(project.getId(), ownerId)
                 .orElseThrow(() -> new EntityNotFoundException("项目刚更新就查不到了：" + project.getId())));

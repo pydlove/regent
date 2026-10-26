@@ -12,6 +12,7 @@ import com.pydlove.regent.governance.domain.model.DecisionStatus;
 import com.pydlove.regent.governance.domain.repository.ApprovalTokenRepository;
 import com.pydlove.regent.governance.domain.repository.DecisionRepository;
 import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.requirement.domain.model.RequirementId;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.domain.TransactionRunner;
@@ -63,11 +64,15 @@ class DecisionApprovalServiceTest {
     }
 
     private Decision pendingDecision() {
+        return pendingDecision(DECISION_ID);
+    }
+
+    private Decision pendingDecision(DecisionId decisionId) {
         Decision decision = Decision.raise(new DecisionRaise(
                 TaskId.of(TASK_ID), ProjectId.of(1L), DecisionLevel.L1, DecisionLevel.L2, 3L,
                 "要不要给订单表加 refund_no 字段？", List.of("加字段并补索引", "先加字段"),
                 "建议加字段并补索引", true, "orders 表"));
-        decision.assignIdentity(DECISION_ID);
+        decision.assignIdentity(decisionId);
         decisions.save(decision);
         return decision;
     }
@@ -172,12 +177,16 @@ class DecisionApprovalServiceTest {
         @Test
         void 决策落已驳回且阻塞中的任务终止() {
             Decision decision = pendingDecision();
+            Decision stale = pendingDecision(DecisionId.of(8L));
             Task task = blockedTask();
             resetCounters();
 
             Decision result = service.reject(DECISION_ID.value(), ReviewCommand.of(null, "会影响线上数据"));
 
             assertEquals(DecisionStatus.REJECTED, result.getStatus());
+            assertEquals(DecisionStatus.REJECTED, stale.getStatus(),
+                    "任务终止后同任务的其它待批决策也必须关闭");
+            assertTrue(stale.getResolutionNote().orElseThrow().contains("任务已终止"));
             assertEquals(TaskStatus.CANCELLED, task.getStatus());
             assertNull(task.getBlockingDecisionId().orElse(null));
         }
@@ -338,6 +347,14 @@ class DecisionApprovalServiceTest {
         }
 
         @Override
+        public List<Decision> findPendingByTaskForUpdate(TaskId taskId) {
+            return store.values().stream()
+                    .filter(decision -> decision.getTaskId().equals(taskId))
+                    .filter(Decision::isPending)
+                    .toList();
+        }
+
+        @Override
         public void save(Decision decision) {
             store.put(decision.getId().value(), decision);
             saves++;
@@ -405,6 +422,15 @@ class DecisionApprovalServiceTest {
         @Override
         public Optional<Task> findByIdForUpdate(TaskId id) {
             return findById(id);
+        }
+
+        @Override
+        public List<Task> findByRequirement(RequirementId requirementId) {
+            return store.values().stream()
+                    .filter(task -> task.getRequirementId()
+                            .map(requirementId::equals)
+                            .orElse(false))
+                    .toList();
         }
 
         @Override

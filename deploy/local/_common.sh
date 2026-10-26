@@ -23,17 +23,20 @@ BACKEND_LOG="$LOG_DIR/backend.log"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
 RELAY_LOG="$LOG_DIR/relay-connector.log"
 RELAY_ENV_FILE="$RUNTIME_DIR/relay-connector.env"
+DEVICE_AGENT_LOG="$LOG_DIR/device-agent.log"
 # 后端从稳定副本启动，不直接跑 target/ 里的构建产物：
 # mvn clean 会删掉正在被 JVM 打开的 fat jar，之后类加载和 ServiceLoader 会随机失败。
 BACKEND_RUNTIME_JAR="$APP_DIR/regent-boot.jar"
 
 BACKEND_PORT=8787
 FRONTEND_PORT=12580
+DEVICE_AGENT_PORT=12601
 
 # 中继连接器的 launchd 标签。托管与 nohup 两套方式必须互斥，
 # 否则同一条配置会被连两份，服务器侧看到的连接数会莫名翻倍。
 RELAY_AGENT_LABEL="com.pydlove.regent.relay-connector"
 BACKEND_AGENT_LABEL="com.pydlove.regent.backend"
+DEVICE_AGENT_LABEL="com.pydlove.regent.device-agent"
 
 relay_agent_loaded() {
     [ "$(uname -s)" = "Darwin" ] && launchctl print "gui/$(id -u)/$RELAY_AGENT_LABEL" >/dev/null 2>&1
@@ -41,6 +44,10 @@ relay_agent_loaded() {
 
 backend_agent_loaded() {
     [ "$(uname -s)" = "Darwin" ] && launchctl print "gui/$(id -u)/$BACKEND_AGENT_LABEL" >/dev/null 2>&1
+}
+
+device_agent_loaded() {
+    [ "$(uname -s)" = "Darwin" ] && launchctl print "gui/$(id -u)/$DEVICE_AGENT_LABEL" >/dev/null 2>&1
 }
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; DIM='\033[2m'; NC='\033[0m'

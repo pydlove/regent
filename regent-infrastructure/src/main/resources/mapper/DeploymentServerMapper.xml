@@ -3,65 +3,124 @@
 <mapper namespace="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentServerMapper">
 
     <sql id="serverColumns">
-        id, project_id, name, host, port, ssh_username, auth_type,
-        default_remote_directory, created_at, updated_at
+        s.id, s.name, s.host, s.port, s.ssh_username, s.auth_type,
+        s.default_remote_directory, s.created_at, s.updated_at
     </sql>
 
     <select id="selectById"
             resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentServerRow">
         SELECT <include refid="serverColumns"/>
-        FROM deployment_server
-        WHERE id = #{id} AND deleted = 0
+        FROM deployment_server s
+        WHERE s.id = #{id} AND s.deleted = 0
     </select>
 
     <select id="selectByIdOwned"
             resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentServerRow">
         SELECT <include refid="serverColumns"/>
-        FROM deployment_server
-        WHERE id = #{id}
-          AND deleted = 0
-          AND project_id IN (SELECT id FROM project WHERE owner_id = #{ownerId})
+        FROM deployment_server s
+        WHERE s.id = #{id}
+          AND s.deleted = 0
+          AND EXISTS (
+              SELECT 1
+              FROM deployment_server_project dsp
+              JOIN project p ON p.id = dsp.project_id
+              WHERE dsp.server_id = s.id
+                AND (
+                  p.owner_id = #{ownerId}
+                  OR EXISTS (
+                    SELECT 1 FROM project_member pm
+                    WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+                  )
+                )
+                AND p.deleted = 0
+          )
     </select>
 
     <select id="selectByIdForUpdate"
             resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentServerRow">
         SELECT <include refid="serverColumns"/>
-        FROM deployment_server
-        WHERE id = #{id} AND deleted = 0
+        FROM deployment_server s
+        WHERE s.id = #{id} AND s.deleted = 0
         FOR UPDATE
     </select>
 
     <select id="selectAll"
             resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentServerRow">
         SELECT <include refid="serverColumns"/>
-        FROM deployment_server
-        WHERE deleted = 0
+        FROM deployment_server s
+        WHERE s.deleted = 0
         <if test="projectId != null">
-            AND project_id = #{projectId}
+            AND EXISTS (
+                SELECT 1
+                FROM deployment_server_project dsp
+                WHERE dsp.server_id = s.id
+                  AND dsp.project_id = #{projectId}
+            )
         </if>
         <if test="ownerId != null">
-            AND project_id IN (SELECT id FROM project WHERE owner_id = #{ownerId})
+            AND EXISTS (
+                SELECT 1
+                FROM deployment_server_project dsp
+                JOIN project p ON p.id = dsp.project_id
+                WHERE dsp.server_id = s.id
+                  AND (
+                    p.owner_id = #{ownerId}
+                    OR EXISTS (
+                      SELECT 1 FROM project_member pm
+                      WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+                    )
+                  )
+                  AND p.deleted = 0
+            )
         </if>
-        ORDER BY updated_at DESC, id DESC
+        ORDER BY s.updated_at DESC, s.id DESC
     </select>
 
-    <select id="countByName" resultType="int">
-        SELECT COUNT(*)
-        FROM deployment_server
-        WHERE project_id = #{projectId}
-          AND name = #{name}
-          AND deleted = 0
+    <select id="selectProjectLinks"
+            resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentServerProjectRow">
+        SELECT server_id, project_id
+        FROM deployment_server_project
+        WHERE server_id IN
+        <foreach collection="serverIds" item="serverId" open="(" separator="," close=")">
+            #{serverId}
+        </foreach>
+        ORDER BY server_id, project_id
+    </select>
+
+    <select id="countByNameInProjects" resultType="int">
+        SELECT COUNT(DISTINCT s.id)
+        FROM deployment_server s
+        JOIN deployment_server_project dsp ON dsp.server_id = s.id
+        WHERE dsp.project_id IN
+        <foreach collection="projectIds" item="projectId" open="(" separator="," close=")">
+            #{projectId}
+        </foreach>
+          AND s.name = #{name}
+          AND s.deleted = 0
         <if test="excludingId != null">
-            AND id != #{excludingId}
+            AND s.id != #{excludingId}
         </if>
     </select>
+
+    <delete id="deleteProjectLinks">
+        DELETE FROM deployment_server_project
+        WHERE server_id = #{serverId}
+    </delete>
+
+    <insert id="insertProjectLinks">
+        INSERT INTO deployment_server_project (server_id, project_id, created_at)
+        VALUES
+        <foreach collection="projectIds" item="projectId" separator=",">
+            (#{serverId}, #{projectId}, UTC_TIMESTAMP(3))
+        </foreach>
+    </insert>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO deployment_server (
-            project_id, name, host, port, ssh_username, auth_type,
+            name, host, port, ssh_username, auth_type,
             default_remote_directory, deleted, created_at, updated_at
         ) VALUES (
-            #{projectId}, #{name}, #{host}, #{port}, #{sshUsername}, #{authType},
+            #{name}, #{host}, #{port}, #{sshUsername}, #{authType},
             #{defaultRemoteDirectory}, 0, #{createdAt}, #{updatedAt}
         )
     </insert>

@@ -150,8 +150,13 @@ const toggleValue = (id: number) => {
   revealed.value = next
 }
 
+const projectNamesOf = (entry: EnvironmentEntry) =>
+  entry.projectIds.map(
+    (projectId) => projectNames.value[projectId] ?? `项目 #${projectId}`,
+  )
+
 const scopeLabel = (entry: EnvironmentEntry) =>
-  entry.scope === 'GLOBAL' ? '全局' : projectNames.value[entry.projectId ?? -1] ?? `项目 #${entry.projectId}`
+  entry.scope === 'GLOBAL' ? '全局' : projectNamesOf(entry).join('、')
 
 const filteredEntries = computed(() => {
   const query = keyword.value.trim().toLocaleLowerCase('zh-CN')
@@ -347,10 +352,10 @@ const entryCountLabel = computed(() =>
     <EnvironmentDetailDialog
       v-model:open="detailOpen"
       :entry="detailEntry"
-      :project-name="
+      :project-names="
         detailEntry?.scope === 'PROJECT'
-          ? projectNames[detailEntry.projectId ?? -1] ?? `项目 #${detailEntry.projectId}`
-          : ''
+          ? projectNamesOf(detailEntry)
+          : []
       "
       @edit="editFromDetail"
       @copy="copyFromDetail"

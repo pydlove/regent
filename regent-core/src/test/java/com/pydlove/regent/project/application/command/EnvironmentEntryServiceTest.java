@@ -52,10 +52,38 @@ class EnvironmentEntryServiceTest {
     }
 
     @Test
+    @DisplayName("项目级环境可以同时归属多个项目")
+    void createsEnvironmentForMultipleProjects() {
+        EnvironmentEntry entry = service.create(new SaveEnvironmentCommand(
+                EnvironmentScope.PROJECT,
+                List.of(ProjectId.of(1L), ProjectId.of(2L)),
+                "shared-value",
+                List.of("共享"),
+                "共享环境",
+                false));
+
+        assertEquals(List.of(ProjectId.of(1L), ProjectId.of(2L)), entry.getProjectIds());
+        assertEquals(ProjectId.of(1L), entry.getProjectId());
+    }
+
+    @Test
+    @DisplayName("多项目环境中任一项目不存在时整体拒绝")
+    void rejectsUnknownProjectInMultipleSelection() {
+        assertThrows(EntityNotFoundException.class, () -> service.create(new SaveEnvironmentCommand(
+                EnvironmentScope.PROJECT,
+                List.of(ProjectId.of(1L), ProjectId.of(99L)),
+                "value",
+                List.of(),
+                "共享环境",
+                false)));
+        assertTrue(repository.entries.isEmpty());
+    }
+
+    @Test
     @DisplayName("用途说明是必填项")
     void requiresPurposeDescription() {
         assertThrows(DomainException.class, () -> service.create(new SaveEnvironmentCommand(
-                EnvironmentScope.GLOBAL, null, "value", List.of(), "  ", false)));
+                EnvironmentScope.GLOBAL, (ProjectId) null, "value", List.of(), "  ", false)));
     }
 
     @Test
@@ -117,7 +145,7 @@ class EnvironmentEntryServiceTest {
         public List<EnvironmentEntry> findApplicableTo(ProjectId projectId) {
             return entries.values().stream()
                     .filter(entry -> entry.getScope() == EnvironmentScope.GLOBAL
-                            || entry.getProjectId().equals(projectId))
+                            || entry.belongsTo(projectId))
                     .toList();
         }
 

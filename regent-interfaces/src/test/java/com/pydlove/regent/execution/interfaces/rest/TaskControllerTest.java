@@ -116,7 +116,7 @@ class TaskControllerTest {
         private CreateTaskContinuationCommand continuation;
 
         private RecordingTaskCommandService() {
-            super(null, null);
+            super(null, null, null, null);
         }
 
         @Override

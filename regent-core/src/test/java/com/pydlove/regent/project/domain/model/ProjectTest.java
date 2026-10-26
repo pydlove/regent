@@ -44,6 +44,16 @@ class ProjectTest {
     }
 
     @Test
+    @DisplayName("研发项目可以先创建业务主体，稍后再绑定本机工作区")
+    void allowsProjectWithoutWorkspace() {
+        Project project = Project.register(
+                "app_audit", "审计平台", " ", null, null, DecisionLevel.L1);
+
+        assertNull(project.getPath());
+        assertFalse(project.hasWorkspace());
+    }
+
+    @Test
     @DisplayName("标识只允许小写字母开头的字母数字下划线")
     void rejectsIllegalCode() {
         assertThrows(DomainException.class, () -> register("App_Audit", "审计平台", "/tmp/x"));
@@ -82,6 +92,23 @@ class ProjectTest {
         assertEquals("/tmp/new", project.getPath());
         assertEquals(DecisionLevel.L3, project.getDefaultDecisionLevel());
         assertFalse(project.isEnabled());
+    }
+
+    @Test
+    @DisplayName("项目版本策略随画像一起保存并校验")
+    void updatesVersionSettings() {
+        Project project = register("app_audit", "审计平台", "/tmp/old");
+
+        project.updateDetails(
+                "审计平台", "/tmp/old", DecisionLevel.L1,
+                ProjectVersionSource.MANUAL, "2026.10.22", true);
+
+        assertEquals(ProjectVersionSource.MANUAL, project.getVersionSource());
+        assertEquals("2026.10.22", project.getFallbackVersion());
+        assertThrows(DomainException.class, () -> project.updateDetails(
+                "审计平台", "/tmp/old", DecisionLevel.L1,
+                ProjectVersionSource.MANUAL, null, true));
+        assertEquals("2026.10.22", project.getFallbackVersion(), "非法修改不能留下半更新状态");
     }
 
     @Test

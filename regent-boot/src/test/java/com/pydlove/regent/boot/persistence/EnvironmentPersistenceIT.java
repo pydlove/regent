@@ -19,6 +19,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -74,7 +76,7 @@ class EnvironmentPersistenceIT {
                 "it_env_auto_project", "自动环境项目", workspace.toString(), null, null, DecisionLevel.L1));
 
         EnvironmentEntry global = environmentEntryService.create(new SaveEnvironmentCommand(
-                EnvironmentScope.GLOBAL, null, "global-db", List.of("数据库"),
+                EnvironmentScope.GLOBAL, List.of(), "global-db", List.of("数据库"),
                 "全局数据库只读连接串", false));
         EnvironmentEntry scoped = environmentEntryService.create(new SaveEnvironmentCommand(
                 EnvironmentScope.PROJECT, project.getId(), "project-db", List.of(),
@@ -87,6 +89,33 @@ class EnvironmentPersistenceIT {
         assertTrue(scoped.isSecret());
         assertThrows(DomainException.class, () -> environmentEntryService.create(
                 new SaveEnvironmentCommand(
-                        EnvironmentScope.GLOBAL, null, "x", List.of(), "  ", false)));
+                        EnvironmentScope.GLOBAL, List.of(), "x", List.of(), "  ", false)));
+    }
+
+    @Test
+    @DisplayName("一条环境信息可以同时被多个项目检索到")
+    void sharesEnvironmentAcrossProjects(@TempDir Path workspace) throws IOException {
+        Files.createDirectories(workspace.resolve("first"));
+        Files.createDirectories(workspace.resolve("second"));
+        Project first = projectRegistrationService.register(new RegisterProjectCommand(
+                "it_env_shared_first", "共享环境项目一",
+                workspace.resolve("first").toString(), null, null, DecisionLevel.L1));
+        Project second = projectRegistrationService.register(new RegisterProjectCommand(
+                "it_env_shared_second", "共享环境项目二",
+                workspace.resolve("second").toString(), null, null, DecisionLevel.L1));
+
+        EnvironmentEntry shared = environmentEntryService.create(new SaveEnvironmentCommand(
+                EnvironmentScope.PROJECT,
+                List.of(first.getId(), second.getId()),
+                "shared-value",
+                List.of("共享"),
+                "多项目共享环境",
+                false));
+
+        assertEquals(List.of(first.getId(), second.getId()), shared.getProjectIds());
+        assertTrue(environmentEntryRepository.findApplicableTo(first.getId()).stream()
+                .anyMatch(entry -> entry.getId().equals(shared.getId())));
+        assertTrue(environmentEntryRepository.findApplicableTo(second.getId()).stream()
+                .anyMatch(entry -> entry.getId().equals(shared.getId())));
     }
 }

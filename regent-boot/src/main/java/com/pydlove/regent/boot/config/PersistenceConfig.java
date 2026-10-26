@@ -13,13 +13,18 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @MapperScan({
         "com.pydlove.regent.bug.infrastructure.persistence",
+        "com.pydlove.regent.delivery.infrastructure.persistence",
         "com.pydlove.regent.deployment.infrastructure.persistence",
         "com.pydlove.regent.execution.infrastructure.persistence",
+        "com.pydlove.regent.gitcommit.infrastructure.persistence",
         "com.pydlove.regent.governance.infrastructure.persistence",
         "com.pydlove.regent.identity.infrastructure.persistence",
+        "com.pydlove.regent.organization.infrastructure.persistence",
         "com.pydlove.regent.plan.infrastructure.persistence",
         "com.pydlove.regent.plugin.infrastructure.persistence",
         "com.pydlove.regent.project.infrastructure.persistence",
+        "com.pydlove.regent.requirement.infrastructure.persistence",
+        "com.pydlove.regent.review.infrastructure.persistence",
         "com.pydlove.regent.settings.infrastructure.persistence",
         "com.pydlove.regent.testing.infrastructure.persistence"
 })

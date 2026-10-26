@@ -22,6 +22,15 @@ public interface BranchManager {
     Optional<String> currentBranch(String projectPath);
 
     /**
+     * 当前工作区的提交基线。审阅快照用它回答“这次任务从哪段代码开始改”。
+     *
+     * <p>非 Git 目录、空仓库或多仓库父目录无法给出稳定提交，返回空而不伪造 ref。
+     */
+    default Optional<String> currentCommit(String projectPath) {
+        return Optional.empty();
+    }
+
+    /**
      * 任务执行完成后，AI 明确要求隔离时才创建功能分支；未提交改动会随工作区一起带过去。
      *
      * <p>非 Git 目录、多仓库父目录和空仓库无法在根目录创建分支，此时安静返回空，

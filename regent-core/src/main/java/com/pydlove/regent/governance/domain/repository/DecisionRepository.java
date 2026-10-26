@@ -4,6 +4,7 @@ import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.governance.domain.model.Decision;
 import com.pydlove.regent.governance.domain.model.DecisionId;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -16,6 +17,9 @@ import java.util.Optional;
 public interface DecisionRepository {
 
     Optional<Decision> findById(DecisionId id);
+
+    /** 锁住某个任务尚未决议的全部决策；任务终止时用它们统一关闭待办。 */
+    List<Decision> findPendingByTaskForUpdate(TaskId taskId);
 
     /** 新增或整体更新。新增时由实现回填数据库生成的主键（{@code Decision.assignIdentity}）。 */
     void save(Decision decision);

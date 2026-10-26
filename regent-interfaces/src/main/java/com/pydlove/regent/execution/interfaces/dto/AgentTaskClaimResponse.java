@@ -20,6 +20,7 @@ public record AgentTaskClaimResponse(String protocol,
                                      String instruction,
                                      String sessionId,
                                      List<Image> images,
+                                     List<Document> documents,
                                      List<Plugin> plugins,
                                      List<EnvironmentVariable> environment,
                                      String decisionThreshold,
@@ -32,6 +33,9 @@ public record AgentTaskClaimResponse(String protocol,
                 work.title(), work.projectCode(), work.workdir(), work.branch(), work.instruction(),
                 work.sessionId(),
                 work.images().stream().map(image -> new Image(image.id(), image.filename(), image.path())).toList(),
+                work.documents().stream().map(document -> new Document(
+                        document.id(), document.filename(), document.contentType(),
+                        document.sizeBytes(), document.path())).toList(),
                 work.plugins().stream().map(plugin -> new Plugin(
                         plugin.id(), plugin.name(), plugin.revision(), plugin.filename(),
                         plugin.contentHash(), plugin.content())).toList(),
@@ -42,6 +46,13 @@ public record AgentTaskClaimResponse(String protocol,
     }
 
     public record Image(long id, String filename, String path) {
+    }
+
+    public record Document(long id,
+                           String filename,
+                           String contentType,
+                           long sizeBytes,
+                           String path) {
     }
 
     public record Plugin(long id,

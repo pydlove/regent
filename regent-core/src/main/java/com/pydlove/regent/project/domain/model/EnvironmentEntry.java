@@ -5,8 +5,10 @@ import com.pydlove.regent.shared.domain.DomainException;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -27,6 +29,7 @@ public class EnvironmentEntry {
     private final UserId userId;
     private EnvironmentScope scope;
     private ProjectId projectId;
+    private Set<ProjectId> projectIds;
     private String key;
     private String value;
     private List<String> tags;
@@ -38,7 +41,7 @@ public class EnvironmentEntry {
     private EnvironmentEntry(EnvironmentId id,
                              UserId userId,
                              EnvironmentScope scope,
-                             ProjectId projectId,
+                             Collection<ProjectId> projectIds,
                              String key,
                              String value,
                              List<String> tags,
@@ -48,7 +51,7 @@ public class EnvironmentEntry {
                              Instant updatedAt) {
         this.id = id;
         this.userId = userId;
-        apply(scope, projectId, key, value, tags, description, secret);
+        apply(scope, projectIds, key, value, tags, description, secret);
         this.createdAt = requireNotNull(createdAt, "创建时间");
         this.updatedAt = requireNotNull(updatedAt, "更新时间");
     }
@@ -59,7 +62,8 @@ public class EnvironmentEntry {
                                           String value,
                                           List<String> tags,
                                           String description) {
-        return create(null, scope, projectId, key, value, tags, description, false);
+        return create(null, scope, projectId == null ? List.of() : List.of(projectId),
+                key, value, tags, description, false);
     }
 
     public static EnvironmentEntry create(EnvironmentScope scope,
@@ -81,9 +85,22 @@ public class EnvironmentEntry {
                                           List<String> tags,
                                           String description,
                                           boolean secret) {
+        return create(userId, scope,
+                projectId == null ? List.of() : List.of(projectId),
+                key, value, tags, description, secret);
+    }
+
+    public static EnvironmentEntry create(UserId userId,
+                                          EnvironmentScope scope,
+                                          Collection<ProjectId> projectIds,
+                                          String key,
+                                          String value,
+                                          List<String> tags,
+                                          String description,
+                                          boolean secret) {
         Instant now = Instant.now();
         return new EnvironmentEntry(
-                null, userId, scope, projectId, key, value, tags, description, secret, now, now);
+                null, userId, scope, projectIds, key, value, tags, description, secret, now, now);
     }
 
     /** 从持久化数据重建，保留原始创建与更新时间。 */
@@ -97,7 +114,9 @@ public class EnvironmentEntry {
                                            boolean secret,
                                            Instant createdAt,
                                            Instant updatedAt) {
-        return restore(id, null, scope, projectId, key, value, tags, description, secret,
+        return restore(id, null, scope,
+                projectId == null ? List.of() : List.of(projectId),
+                key, value, tags, description, secret,
                 createdAt, updatedAt);
     }
 
@@ -112,8 +131,26 @@ public class EnvironmentEntry {
                                            boolean secret,
                                            Instant createdAt,
                                            Instant updatedAt) {
+        return restore(id, userId, scope,
+                projectId == null ? List.of() : List.of(projectId),
+                key, value, tags, description, secret,
+                createdAt, updatedAt);
+    }
+
+    public static EnvironmentEntry restore(EnvironmentId id,
+                                           UserId userId,
+                                           EnvironmentScope scope,
+                                           Collection<ProjectId> projectIds,
+                                           String key,
+                                           String value,
+                                           List<String> tags,
+                                           String description,
+                                           boolean secret,
+                                           Instant createdAt,
+                                           Instant updatedAt) {
         return new EnvironmentEntry(
-                id, userId, scope, projectId, key, value, tags, description, secret, createdAt, updatedAt);
+                id, userId, scope, projectIds, key, value, tags, description, secret,
+                createdAt, updatedAt);
     }
 
     public void update(EnvironmentScope scope,
@@ -123,7 +160,19 @@ public class EnvironmentEntry {
                        List<String> tags,
                        String description,
                        boolean secret) {
-        apply(scope, projectId, key, value, tags, description, secret);
+        apply(scope, projectId == null ? List.of() : List.of(projectId),
+                key, value, tags, description, secret);
+        this.updatedAt = Instant.now();
+    }
+
+    public void update(EnvironmentScope scope,
+                       Collection<ProjectId> projectIds,
+                       String key,
+                       String value,
+                       List<String> tags,
+                       String description,
+                       boolean secret) {
+        apply(scope, projectIds, key, value, tags, description, secret);
         this.updatedAt = Instant.now();
     }
 
@@ -135,20 +184,27 @@ public class EnvironmentEntry {
     }
 
     private void apply(EnvironmentScope scope,
-                       ProjectId projectId,
+                       Collection<ProjectId> projectIds,
                        String key,
                        String value,
                        List<String> tags,
                        String description,
                        boolean secret) {
         this.scope = requireNotNull(scope, "环境归属");
-        if (scope == EnvironmentScope.GLOBAL && projectId != null) {
+        LinkedHashSet<ProjectId> normalized = new LinkedHashSet<>();
+        if (projectIds != null) {
+            for (ProjectId projectId : projectIds) {
+                normalized.add(requireNotNull(projectId, "归属项目"));
+            }
+        }
+        if (scope == EnvironmentScope.GLOBAL && !normalized.isEmpty()) {
             throw new DomainException("全局环境不能绑定项目");
         }
-        if (scope == EnvironmentScope.PROJECT && projectId == null) {
-            throw new DomainException("项目环境必须指定项目");
+        if (scope == EnvironmentScope.PROJECT && normalized.isEmpty()) {
+            throw new DomainException("项目环境必须至少指定一个项目");
         }
-        this.projectId = projectId;
+        this.projectIds = normalized;
+        this.projectId = normalized.isEmpty() ? null : normalized.iterator().next();
         this.key = requireKey(key);
         this.value = requireValue(value);
         this.tags = normalizeTags(tags);
@@ -170,6 +226,14 @@ public class EnvironmentEntry {
 
     public ProjectId getProjectId() {
         return projectId;
+    }
+
+    public List<ProjectId> getProjectIds() {
+        return List.copyOf(projectIds);
+    }
+
+    public boolean belongsTo(ProjectId projectId) {
+        return projectIds.contains(projectId);
     }
 
     public String getKey() {

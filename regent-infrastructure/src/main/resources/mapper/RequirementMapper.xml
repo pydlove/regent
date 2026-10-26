@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.requirement.infrastructure.persistence.RequirementMapper">
+
+    <sql id="columns">
+        r.id, r.project_id, r.initiative_id, r.version_id, r.title, r.raw_text,
+        r.acceptance_text, r.clarification_text, r.status, r.pool_status, r.source,
+        r.review_comment, r.reviewed_by, r.reviewed_at,
+        r.clarification_questions, r.assumptions, r.task_drafts,
+        r.planned_at, r.clarified_at, r.created_at, r.updated_at
+    </sql>
+
+    <select id="selectById" resultType="com.pydlove.regent.requirement.infrastructure.persistence.RequirementData">
+        SELECT <include refid="columns"/>
+        FROM requirement r
+        WHERE r.id = #{id} AND r.deleted = 0
+    </select>
+
+    <select id="selectByIdOwned" resultType="com.pydlove.regent.requirement.infrastructure.persistence.RequirementData">
+        SELECT <include refid="columns"/>
+        FROM requirement r
+        JOIN project p ON p.id = r.project_id
+        WHERE r.id = #{id}
+          AND r.deleted = 0
+          AND p.deleted = 0
+          AND (
+            p.owner_id = #{ownerId}
+            OR EXISTS (
+              SELECT 1 FROM project_member pm
+              WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+            )
+          )
+    </select>
+
+    <select id="selectByProject" resultType="com.pydlove.regent.requirement.infrastructure.persistence.RequirementData">
+        SELECT <include refid="columns"/>
+        FROM requirement r
+        WHERE r.project_id = #{projectId} AND r.deleted = 0
+        ORDER BY r.created_at DESC, r.id DESC
+    </select>
+
+    <select id="selectByProjectOwned" resultType="com.pydlove.regent.requirement.infrastructure.persistence.RequirementData">
+        SELECT <include refid="columns"/>
+        FROM requirement r
+        JOIN project p ON p.id = r.project_id
+        WHERE r.project_id = #{projectId}
+          AND r.deleted = 0
+          AND p.deleted = 0
+          AND (
+            p.owner_id = #{ownerId}
+            OR EXISTS (
+              SELECT 1 FROM project_member pm
+              WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+            )
+          )
+        ORDER BY r.created_at DESC, r.id DESC
+    </select>
+
+    <select id="selectAllOwned" resultType="com.pydlove.regent.requirement.infrastructure.persistence.RequirementData">
+        SELECT <include refid="columns"/>
+        FROM requirement r
+        JOIN project p ON p.id = r.project_id
+        WHERE r.deleted = 0
+          AND p.deleted = 0
+          AND (
+            p.owner_id = #{ownerId}
+            OR EXISTS (
+              SELECT 1 FROM project_member pm
+              WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+            )
+          )
+        ORDER BY r.created_at DESC, r.id DESC
+    </select>
+
+    <select id="selectDeletedByIdOwned" resultType="com.pydlove.regent.requirement.infrastructure.persistence.RequirementData">
+        SELECT <include refid="columns"/>, r.deleted, r.deleted_at, r.deleted_by
+        FROM requirement r
+        JOIN project p ON p.id = r.project_id
+        WHERE r.id = #{id}
+          AND r.deleted = 1
+          AND p.deleted = 0
+          AND (
+            p.owner_id = #{ownerId}
+            OR EXISTS (
+              SELECT 1 FROM project_member pm
+              WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+            )
+          )
+    </select>
+
+    <select id="selectDeletedByProjectOwned" resultType="com.pydlove.regent.requirement.infrastructure.persistence.RequirementData">
+        SELECT <include refid="columns"/>, r.deleted, r.deleted_at, r.deleted_by
+        FROM requirement r
+        JOIN project p ON p.id = r.project_id
+        WHERE r.project_id = #{projectId}
+          AND r.deleted = 1
+          AND p.deleted = 0
+          AND (
+            p.owner_id = #{ownerId}
+            OR EXISTS (
+              SELECT 1 FROM project_member pm
+              WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+            )
+          )
+        ORDER BY r.deleted_at DESC, r.id DESC
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO requirement (
+            project_id, initiative_id, version_id, title, raw_text, acceptance_text,
+            clarification_text, status, pool_status, source, review_comment, reviewed_by, reviewed_at,
+            clarification_questions, assumptions, task_drafts, planned_at, clarified_at,
+            deleted, created_at, updated_at
+        ) VALUES (
+            #{projectId}, #{initiativeId}, #{versionId}, #{title}, #{rawText}, #{acceptanceText},
+            #{clarificationText}, #{status}, #{poolStatus}, #{source}, #{reviewComment},
+            #{reviewedBy}, #{reviewedAt},
+            #{clarificationQuestions}, #{assumptions}, #{taskDrafts}, #{plannedAt}, #{clarifiedAt},
+            0, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="update">
+        UPDATE requirement
+        SET title = #{title},
+            raw_text = #{rawText},
+            acceptance_text = #{acceptanceText},
+            clarification_text = #{clarificationText},
+            status = #{status},
+            version_id = #{versionId},
+            pool_status = #{poolStatus},
+            source = #{source},
+            review_comment = #{reviewComment},
+            reviewed_by = #{reviewedBy},
+            reviewed_at = #{reviewedAt},
+            clarification_questions = #{clarificationQuestions},
+            assumptions = #{assumptions},
+            task_drafts = #{taskDrafts},
+            planned_at = #{plannedAt},
+            clarified_at = #{clarifiedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="moveToTrash">
+        UPDATE requirement
+        SET deleted = 1,
+            deleted_at = #{deletedAt},
+            deleted_by = #{deletedBy},
+            updated_at = #{deletedAt}
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="restore">
+        UPDATE requirement
+        SET deleted = 0,
+            deleted_at = NULL,
+            deleted_by = NULL,
+            updated_at = #{updatedAt}
+        WHERE id = #{id} AND deleted = 1
+    </update>
+
+</mapper>

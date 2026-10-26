@@ -9,12 +9,12 @@ import {
 } from '@/api/deploymentServers'
 import { ApiError } from '@/api/http'
 import Button from '@/components/ui/button/Button.vue'
+import Checkbox from '@/components/ui/checkbox/Checkbox.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import DialogField from '@/components/ui/dialog/DialogField.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import Input from '@/components/ui/input/Input.vue'
 import SegmentedControl from '@/components/ui/segmented-control/SegmentedControl.vue'
-import Select from '@/components/ui/select/Select.vue'
 import { useToast } from '@/composables/useToast'
 import type { DeploymentAuthType, DeploymentServer, Project } from '@/types/api'
 
@@ -27,7 +27,7 @@ const emit = defineEmits<{ saved: [server: DeploymentServer] }>()
 const open = defineModel<boolean>('open', { default: false })
 const toast = useToast()
 
-const projectId = ref('')
+const selectedProjectIds = ref<number[]>([])
 const name = ref('')
 const host = ref('')
 const port = ref('22')
@@ -39,12 +39,6 @@ const credentialConfigured = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
-const projectItems = computed(() =>
-  props.projects.map((project) => ({
-    value: String(project.id),
-    label: project.enabled ? project.name : `${project.name}（已暂停）`,
-  })),
-)
 const authItems = [
   { value: 'KEY', label: 'SSH 密钥' },
   { value: 'PASSWORD', label: '密码' },
@@ -57,7 +51,7 @@ const authModel = computed({
 })
 const canSave = computed(
   () =>
-    projectId.value !== '' &&
+    selectedProjectIds.value.length > 0 &&
     name.value.trim().length > 0 &&
     host.value.trim().length > 0 &&
     Number(port.value) >= 1 &&
@@ -69,6 +63,12 @@ const canSave = computed(
     !saving.value,
 )
 
+const toggleProject = (projectId: number) => {
+  selectedProjectIds.value = selectedProjectIds.value.includes(projectId)
+    ? selectedProjectIds.value.filter((id) => id !== projectId)
+    : [...selectedProjectIds.value, projectId]
+}
+
 function messageOf(value: unknown): string {
   return value instanceof ApiError
     ? value.message
@@ -79,12 +79,14 @@ watch(open, (value) => {
   if (!value) return
   saving.value = false
   error.value = null
-  projectId.value = String(
-    props.server?.projectId ??
-      props.defaultProjectId ??
-      props.projects[0]?.id ??
-      '',
-  )
+  selectedProjectIds.value = [
+    ...(props.server?.projectIds ??
+      (props.defaultProjectId !== null
+        ? [props.defaultProjectId]
+        : props.projects[0]
+          ? [props.projects[0].id]
+          : [])),
+  ]
   name.value = props.server?.name ?? ''
   host.value = props.server?.host ?? ''
   port.value = String(props.server?.port ?? 22)
@@ -100,7 +102,7 @@ const save = async () => {
   saving.value = true
   error.value = null
   const input: SaveDeploymentServerInput = {
-    projectId: Number(projectId.value),
+    projectIds: [...selectedProjectIds.value],
     name: name.value.trim(),
     host: host.value.trim(),
     port: Number(port.value),
@@ -133,18 +135,31 @@ const save = async () => {
     layout="form"
     size="large"
     :title="server ? '编辑服务器' : '新建服务器'"
-    description="服务器按项目复用；部署脚本只引用服务器，不再重复填写主机和认证信息。"
+    description="服务器可同时归属多个项目；部署脚本只引用服务器，不再重复填写主机和认证信息。"
     :icon="Server"
   >
     <div class="flex flex-col gap-3">
-      <DialogField label="归属项目" label-width="w-24" required hint="创建后不能修改服务器归属">
-        <Select
-          v-model="projectId"
-          :items="projectItems"
-          :disabled="server !== null"
-          placeholder="选择项目"
-          class="w-full"
-        />
+      <DialogField
+        label="归属项目"
+        label-width="w-24"
+        required
+        :hint="`可多选，当前已选 ${selectedProjectIds.length} 个；保存时会同步更新项目关联`"
+      >
+        <div
+          class="scroll-area max-h-40 w-full overflow-y-auto rounded-panel border border-separator-soft bg-content p-1.5"
+        >
+          <Checkbox
+            v-for="project in projects"
+            :key="project.id"
+            :model-value="selectedProjectIds.includes(project.id)"
+            :label="project.enabled ? project.name : `${project.name}（已暂停）`"
+            class="w-full rounded-control px-2 py-1.5 hover:bg-hover"
+            @update:model-value="toggleProject(project.id)"
+          />
+          <p v-if="projects.length === 0" class="px-2 py-1.5 text-caption text-label-tertiary">
+            暂无项目，请先创建项目
+          </p>
+        </div>
       </DialogField>
 
       <DialogField

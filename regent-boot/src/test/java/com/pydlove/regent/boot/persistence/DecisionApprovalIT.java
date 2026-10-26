@@ -1,5 +1,6 @@
 package com.pydlove.regent.boot.persistence;
 
+import com.pydlove.regent.execution.application.command.TaskCommandService;
 import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
@@ -67,6 +68,9 @@ class DecisionApprovalIT {
 
     @Autowired
     private TaskRepository taskRepository;
+
+    @Autowired
+    private TaskCommandService taskCommandService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -142,6 +146,22 @@ class DecisionApprovalIT {
         assertTrue(loaded.getResolutionNote().orElseThrow().contains("线上数据"));
 
         assertEquals(TaskStatus.CANCELLED, taskRepository.findById(task.getId()).orElseThrow().getStatus());
+    }
+
+    @Test
+    @DisplayName("人工终止任务时关闭待批决策并留痕")
+    void 人工终止任务关闭决策() {
+        Task task = 阻塞中的任务();
+        Decision decision = 待批决策(task);
+
+        taskCommandService.cancel(task.getId());
+
+        assertEquals(TaskStatus.CANCELLED,
+                taskRepository.findById(task.getId()).orElseThrow().getStatus());
+        Decision loaded = decisionRepository.findById(decision.getId()).orElseThrow();
+        assertEquals(DecisionStatus.REJECTED, loaded.getStatus());
+        assertEquals(ResolvedBy.HUMAN, loaded.getResolvedBy().orElseThrow());
+        assertEquals("任务已终止，决策自动关闭", loaded.getResolutionNote().orElseThrow());
     }
 
     @Test

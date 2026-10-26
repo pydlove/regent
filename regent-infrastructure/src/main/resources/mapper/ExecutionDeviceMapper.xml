@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.execution.infrastructure.persistence.ExecutionDeviceMapper">
+
+    <sql id="columns">
+        id, device_id, owner_id, hostname, platform, executor, agent_instance_id, codex_available,
+        codex_executable_path, codex_version, codex_message, codex_checked_at,
+        client_release, shell_release, last_seen_at, last_claimed_at, created_at, updated_at
+    </sql>
+
+    <select id="selectByDeviceId" resultType="com.pydlove.regent.execution.infrastructure.persistence.ExecutionDeviceData">
+        SELECT <include refid="columns"/>
+        FROM execution_device
+        WHERE device_id = #{deviceId}
+    </select>
+
+    <select id="selectByOwner" resultType="com.pydlove.regent.execution.infrastructure.persistence.ExecutionDeviceData">
+        SELECT <include refid="columns"/>
+        FROM execution_device
+        WHERE owner_id = #{ownerId}
+        ORDER BY last_seen_at DESC
+    </select>
+
+    <insert id="upsert">
+        INSERT INTO execution_device (
+            device_id, owner_id, hostname, platform, executor, agent_instance_id, codex_available,
+            codex_executable_path, codex_version, codex_message, codex_checked_at,
+            client_release, shell_release, last_seen_at, last_claimed_at, created_at, updated_at
+        ) VALUES (
+            #{deviceId}, #{ownerId}, #{hostname}, #{platform}, #{executor}, #{agentInstanceId}, #{codexAvailable},
+            #{codexExecutablePath}, #{codexVersion}, #{codexMessage}, #{codexCheckedAt},
+            #{clientRelease}, #{shellRelease}, #{lastSeenAt}, #{lastClaimedAt}, #{createdAt}, #{updatedAt}
+        )
+        ON DUPLICATE KEY UPDATE
+            owner_id = VALUES(owner_id),
+            hostname = VALUES(hostname),
+            platform = VALUES(platform),
+            executor = VALUES(executor),
+            agent_instance_id = VALUES(agent_instance_id),
+            codex_available = VALUES(codex_available),
+            codex_executable_path = VALUES(codex_executable_path),
+            codex_version = VALUES(codex_version),
+            codex_message = VALUES(codex_message),
+            codex_checked_at = VALUES(codex_checked_at),
+            client_release = VALUES(client_release),
+            shell_release = VALUES(shell_release),
+            last_seen_at = VALUES(last_seen_at),
+            last_claimed_at = COALESCE(VALUES(last_claimed_at), last_claimed_at),
+            updated_at = VALUES(updated_at)
+    </insert>
+
+</mapper>

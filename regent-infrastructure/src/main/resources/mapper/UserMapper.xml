@@ -15,7 +15,7 @@
     </select>
 
     <select id="findByUsername" resultType="com.pydlove.regent.identity.infrastructure.persistence.UserData">
-        SELECT id, username, display_name, email, password_hash,
+        SELECT id, username, display_name, email, password_hash, must_change_password,
                avatar_filename, avatar_content_type, avatar_storage_path, avatar_updated_at,
                created_at
         FROM app_user
@@ -23,7 +23,7 @@
     </select>
 
     <select id="findByEmail" resultType="com.pydlove.regent.identity.infrastructure.persistence.UserData">
-        SELECT id, username, display_name, email, password_hash,
+        SELECT id, username, display_name, email, password_hash, must_change_password,
                avatar_filename, avatar_content_type, avatar_storage_path, avatar_updated_at,
                created_at
         FROM app_user
@@ -31,7 +31,7 @@
     </select>
 
     <select id="findById" resultType="com.pydlove.regent.identity.infrastructure.persistence.UserData">
-        SELECT id, username, display_name, email, password_hash,
+        SELECT id, username, display_name, email, password_hash, must_change_password,
                avatar_filename, avatar_content_type, avatar_storage_path, avatar_updated_at,
                created_at
         FROM app_user
@@ -40,12 +40,12 @@
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO app_user (
-            username, display_name, email, password_hash,
+            username, display_name, email, password_hash, must_change_password,
             avatar_filename, avatar_content_type, avatar_storage_path, avatar_updated_at,
             created_at
         )
         VALUES (
-            #{username}, #{displayName}, #{email}, #{passwordHash},
+            #{username}, #{displayName}, #{email}, #{passwordHash}, #{mustChangePassword},
             #{avatarFilename}, #{avatarContentType}, #{avatarStoragePath}, #{avatarUpdatedAt},
             #{createdAt}
         )
@@ -54,6 +54,8 @@
     <update id="update">
         UPDATE app_user
         SET display_name = #{displayName},
+            password_hash = #{passwordHash},
+            must_change_password = #{mustChangePassword},
             avatar_filename = #{avatarFilename},
             avatar_content_type = #{avatarContentType},
             avatar_storage_path = #{avatarStoragePath},

@@ -76,7 +76,10 @@ export const useTaskStore = defineStore('tasks', () => {
   const levelFilter = ref<DecisionLevel | 'ALL'>('ALL')
   /** null 表示全部项目。工具栏的筛选与新建任务弹框共用 projects 这一份列表 */
   const projectId = ref<number | null>(readProjectSelection())
+  /** 当前组织；项目查询始终限定在这个租户内。 */
+  const organizationId = ref<number | null>(null)
   const projects = ref<Project[]>([])
+  let projectsRequestSequence = 0
   /** 精确任务号筛选；由决策页跳转等外部入口设置 */
   const taskIdFilter = ref<number | null>(null)
   const keyword = ref('')
@@ -123,7 +126,16 @@ export const useTaskStore = defineStore('tasks', () => {
 
   /** 项目列表。失败时向上抛，由调用方决定怎么提示 —— 同一个请求在两个位置的失败语义不一样。 */
   const loadProjects = async () => {
-    const loaded = await listProjects()
+    const requestSequence = ++projectsRequestSequence
+    const scope = organizationId.value
+    if (scope === null) {
+      projects.value = []
+      projectId.value = null
+      writeProjectSelection(null)
+      return
+    }
+    const loaded = await listProjects(scope)
+    if (requestSequence !== projectsRequestSequence || organizationId.value !== scope) return
     projects.value = loaded
     // 启动时下拉可能先于列表返回而瞬时空置选中值，项目列表到手后按持久化 ID 再恢复一次；
     // 只有项目确实不在当前列表里（被删或换了库）才退回「全部」。
@@ -139,8 +151,10 @@ export const useTaskStore = defineStore('tasks', () => {
 
   /** 退出登录或切换账号时清掉上一个账号的项目范围，避免旧项目名在界面上闪一下。 */
   const clearProjectScope = () => {
+    projectsRequestSequence++
     projects.value = []
     projectId.value = null
+    organizationId.value = null
     items.value = []
     total.value = 0
     totalPages.value = 0
@@ -148,6 +162,14 @@ export const useTaskStore = defineStore('tasks', () => {
     detail.value = null
     counts.value = { ...EMPTY_COUNTS }
     writeProjectSelection(null)
+  }
+
+  const setOrganizationScope = async (nextOrganizationId: number | null) => {
+    organizationId.value = nextOrganizationId
+    projects.value = []
+    projectId.value = null
+    writeProjectSelection(null)
+    await Promise.all([loadProjects(), loadStats()])
   }
 
   const loadStats = async () => {
@@ -194,11 +216,14 @@ export const useTaskStore = defineStore('tasks', () => {
     detail.value = null
   }
 
-  /** 精确聚焦一条任务：清掉可能把它挡住的筛选，并回到第一页。 */
-  const focusTask = (taskId: number) => {
+  /**
+   * 精确聚焦一条任务：清掉可能把它挡住的状态、等级和关键词筛选，并回到第一页。
+   * projectId 来自深链时显式传入；null 表示控制塔本身就在“全部项目”范围。
+   */
+  const focusTask = (taskId: number, requestedProjectId: number | null = null) => {
     statusFilter.value = 'ALL'
     levelFilter.value = 'ALL'
-    projectId.value = null
+    projectId.value = requestedProjectId
     keyword.value = ''
     taskIdFilter.value = taskId
     page.value = 1
@@ -334,6 +359,7 @@ export const useTaskStore = defineStore('tasks', () => {
     statusFilter,
     levelFilter,
     projectId,
+    organizationId,
     projects,
     taskIdFilter,
     keyword,
@@ -345,6 +371,7 @@ export const useTaskStore = defineStore('tasks', () => {
     detail,
     load,
     loadProjects,
+    setOrganizationScope,
     clearProjectScope,
     loadStats,
     select,

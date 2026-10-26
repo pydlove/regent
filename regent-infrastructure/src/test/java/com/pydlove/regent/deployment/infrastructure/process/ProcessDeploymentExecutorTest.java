@@ -17,6 +17,10 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -120,11 +124,60 @@ class ProcessDeploymentExecutorTest {
         assertTrue(remoteCommand.contains("REGENT_DEPLOY_AUTH_TYPE='PASSWORD'"));
         assertTrue(remoteCommand.contains("REGENT_DEPLOY_DIRECTORY=\"$(pwd -P)\""));
         assertTrue(remoteCommand.contains("REGENT_DEPLOY_SCRIPT='publish.sh'"));
-        assertTrue(remoteCommand.contains("cd '/opt/app release' && env"));
+        assertTrue(remoteCommand.contains(
+                "mkdir -p '/opt/app release' && cd '/opt/app release' && env"));
         assertTrue(remoteCommand.endsWith(" bash -s"));
         assertFalse(remoteCommand.contains("s3cret"));
         assertEquals("#!/usr/bin/env bash\necho deploy\n\n",
                 Files.readString(stdin, StandardCharsets.UTF_8));
+    }
+
+    @Test
+    @DisplayName("停止请求会终止正在执行的部署进程并返回中断")
+    void cancelsRunningDeployment() throws Exception {
+        Path started = temp.resolve("started.txt");
+        Path script = temp.resolve("slow-ssh.sh");
+        Files.writeString(script, """
+                #!/bin/sh
+                printf 'started' > '%s'
+                trap '' TERM
+                sleep 30
+                """.formatted(started), StandardCharsets.UTF_8);
+        Files.setPosixFilePermissions(script, PosixFilePermissions.fromString("rwx------"));
+        ProcessDeploymentExecutor executor = new ProcessDeploymentExecutor(
+                script.toString(), Duration.ofSeconds(30));
+        StringBuilder log = new StringBuilder();
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<DeploymentExecutionResult> future = pool.submit(() -> executor.execute(
+                    new DeploymentExecutionRequest(
+                            DeploymentRunId.of(77L),
+                            ProjectId.of(7L),
+                            "api.example.com",
+                            22,
+                            "root",
+                            DeploymentAuthType.KEY,
+                            "/opt/app",
+                            "deploy.sh",
+                            "echo deploy\n",
+                            DeploymentExecutionMode.REMOTE_SCRIPT,
+                            null,
+                            null,
+                            temp.toString()), log::append));
+            for (int attempt = 0; attempt < 100 && !Files.exists(started); attempt++) {
+                Thread.sleep(20);
+            }
+            assertTrue(Files.exists(started), "模拟部署没有开始");
+
+            assertTrue(executor.cancel(DeploymentRunId.of(77L)));
+            DeploymentExecutionResult result = future.get(5, TimeUnit.SECONDS);
+
+            assertEquals(DeploymentRunStatus.INTERRUPTED, result.status());
+            assertEquals("用户停止部署", result.summary());
+            assertTrue(log.toString().contains("已收到停止请求"), log.toString());
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     private Path fakeSsh(Path arguments, Path stdin) throws Exception {

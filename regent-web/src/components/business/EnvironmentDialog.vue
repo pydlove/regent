@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import { createEnvironment, updateEnvironment, type SaveEnvironmentInput } from '@/api/environments'
 import { ApiError } from '@/api/http'
 import Button from '@/components/ui/button/Button.vue'
+import Checkbox from '@/components/ui/checkbox/Checkbox.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import DialogField from '@/components/ui/dialog/DialogField.vue'
 import Input from '@/components/ui/input/Input.vue'
@@ -27,7 +28,7 @@ const store = useTaskStore()
 const toast = useToast()
 
 const scope = ref<EnvironmentScope>('GLOBAL')
-const projectId = ref<string>()
+const selectedProjectIds = ref<number[]>([])
 const value = ref('')
 const tagsText = ref('')
 const name = ref('')
@@ -40,12 +41,6 @@ const scopeItems = [
   { value: 'PROJECT', label: '指定项目' },
 ]
 
-const projectItems = computed(() =>
-  store.projects.map((project) => ({
-    value: String(project.id),
-    label: project.enabled ? `${project.name}（${project.code}）` : `${project.name}（已暂停）`,
-  })),
-)
 const followsSelectedProject = computed(
   () =>
     props.entry === null &&
@@ -65,9 +60,15 @@ const nameValid = computed(() => {
 const canSave = computed(
   () =>
     nameValid.value &&
-    (scope.value === 'GLOBAL' || projectId.value !== undefined) &&
+    (scope.value === 'GLOBAL' || selectedProjectIds.value.length > 0) &&
     !saving.value,
 )
+
+const toggleProject = (projectId: number) => {
+  selectedProjectIds.value = selectedProjectIds.value.includes(projectId)
+    ? selectedProjectIds.value.filter((id) => id !== projectId)
+    : [...selectedProjectIds.value, projectId]
+}
 
 watch(open, async (opened) => {
   if (!opened) return
@@ -76,12 +77,15 @@ watch(open, async (opened) => {
   const source = props.entry ?? props.copySource
   if (followsSelectedProject.value) {
     scope.value = 'PROJECT'
-    projectId.value = String(store.projectId)
+    selectedProjectIds.value = store.projectId === null ? [] : [store.projectId]
   } else {
     scope.value = source?.scope ?? 'GLOBAL'
-    projectId.value = source?.projectId === null || source?.projectId === undefined
-      ? undefined
-      : String(source.projectId)
+    selectedProjectIds.value = [
+      ...(source?.projectIds ??
+        (source?.projectId === null || source?.projectId === undefined
+          ? []
+          : [source.projectId])),
+    ]
   }
   value.value = source?.value ?? ''
   tagsText.value = source?.tags.join(', ') ?? ''
@@ -91,10 +95,10 @@ watch(open, async (opened) => {
     await store.loadProjects()
     if (
       scope.value === 'PROJECT' &&
-      projectId.value === undefined &&
+      selectedProjectIds.value.length === 0 &&
       store.projects.length === 1
     ) {
-      projectId.value = String(store.projects[0].id)
+      selectedProjectIds.value = [store.projects[0].id]
     }
   } catch (e) {
     error.value = messageOf(e)
@@ -102,7 +106,7 @@ watch(open, async (opened) => {
 })
 
 watch(scope, (next) => {
-  if (next === 'GLOBAL') projectId.value = undefined
+  if (next === 'GLOBAL') selectedProjectIds.value = []
 })
 
 function messageOf(e: unknown): string {
@@ -123,7 +127,8 @@ const save = async () => {
   error.value = null
   const input: SaveEnvironmentInput = {
     scope: scope.value,
-    projectId: scope.value === 'PROJECT' ? Number(projectId.value) : null,
+    projectId: scope.value === 'PROJECT' ? selectedProjectIds.value[0] ?? null : null,
+    projectIds: scope.value === 'PROJECT' ? [...selectedProjectIds.value] : [],
     value: value.value,
     tags: parsedTags(),
     description: name.value.trim(),
@@ -174,8 +179,31 @@ const save = async () => {
           <Select v-model="scope" :items="scopeItems" block />
         </DialogField>
 
-        <DialogField v-if="scope === 'PROJECT'" label="项目" required>
-          <Select v-model="projectId" :items="projectItems" placeholder="选择项目" block />
+        <DialogField
+          v-if="scope === 'PROJECT'"
+          label="项目"
+          required
+          :hint="`可多选，当前已选 ${selectedProjectIds.length} 个项目`"
+        >
+          <div
+            class="scroll-area max-h-40 w-full overflow-y-auto rounded-panel border border-separator-soft bg-content p-1.5"
+          >
+            <Checkbox
+              v-for="project in store.projects"
+              :key="project.id"
+              :model-value="selectedProjectIds.includes(project.id)"
+              :label="
+                project.enabled
+                  ? `${project.name}（${project.code}）`
+                  : `${project.name}（已暂停）`
+              "
+              class="w-full rounded-control px-2 py-1.5 hover:bg-hover"
+              @update:model-value="toggleProject(project.id)"
+            />
+            <p v-if="store.projects.length === 0" class="px-2 py-1.5 text-caption text-label-tertiary">
+              暂无项目，请先创建项目
+            </p>
+          </div>
         </DialogField>
       </template>
 

@@ -9,30 +9,55 @@ const { pipeline } = require('node:stream/promises')
 const { URL } = require('node:url')
 const { promisify } = require('node:util')
 const { DeviceAgent } = require('./device-agent')
+const {
+  DEFAULT_LANDING_PATH,
+  DEFAULT_SERVER_URL,
+  appendServerPath,
+  normalizeServerUrl,
+} = require('./server-url')
+const { isShellCompatible } = require('./runtime-updater')
+const {
+  clientUpdateReleaseCode,
+  shouldPromptForClientUpdate,
+} = require('./update-policy')
+const {
+  readSkippedRelease,
+  writeSkippedRelease,
+} = require('./update-preferences')
 const releaseInfo = require('./release-info.json')
 
 const APP_TITLE = 'Regent AI'
 const PARTITION = 'persist:regent-desktop'
+const LOCAL_DEVICE_AGENT_URL = 'http://127.0.0.1:12601'
+const DEVICE_AGENT_MODE = process.argv.includes('--device-agent')
 const execFileAsync = promisify(execFile)
 const configPath = () => path.join(app.getPath('userData'), 'server.json')
+const updatePreferencesPath = () => path.join(app.getPath('userData'), 'update-preferences.json')
 
 let mainWindow = null
 let configWindow = null
 let updateWindow = null
+let updatePromptChoice = null
 let serverUrl = null
+let usingBuiltInServer = false
 let updateTimer = null
 let promptedReleaseCode = null
+let skippedReleaseCode = null
 let updating = false
 let updateStatus = { message: '正在准备更新…', progress: 0 }
 let deviceAgent = null
 let devicePairTimer = null
+let externalDeviceAgentUrl = null
 
 function readServerUrl() {
   try {
     const value = JSON.parse(fs.readFileSync(configPath(), 'utf8')).serverUrl
-    return normalizeServerUrl(value)
+    const normalized = normalizeServerUrl(value)
+    usingBuiltInServer = normalized === DEFAULT_SERVER_URL
+    return normalized
   } catch {
-    return null
+    usingBuiltInServer = true
+    return DEFAULT_SERVER_URL
   }
 }
 
@@ -41,26 +66,14 @@ function saveServerUrl(value) {
   fs.mkdirSync(path.dirname(configPath()), { recursive: true })
   fs.writeFileSync(configPath(), `${JSON.stringify({ serverUrl: normalized }, null, 2)}\n`, 'utf8')
   serverUrl = normalized
+  usingBuiltInServer = normalized === DEFAULT_SERVER_URL
   return normalized
 }
 
-function normalizeServerUrl(value) {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new Error('请输入 Regent 服务地址')
-  }
-  let url
-  try {
-    url = new URL(value.trim())
-  } catch {
-    throw new Error('服务地址格式不正确')
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('服务地址必须以 http:// 或 https:// 开头')
-  }
-  if (url.username || url.password) {
-    throw new Error('服务地址不能包含用户名或密码')
-  }
-  return url.origin
+function mainWindowUrl() {
+  return usingBuiltInServer
+    ? appendServerPath(serverUrl, DEFAULT_LANDING_PATH)
+    : serverUrl
 }
 
 async function probeServer(value) {
@@ -161,12 +174,15 @@ function createMainWindow() {
       title: '无法打开 Regent',
       message: '连接 Regent 服务失败',
       detail: `${description}\n${serverUrl}`,
-      buttons: ['重新配置', '退出'],
+      buttons: ['重试', '退出'],
       defaultId: 0,
       cancelId: 1,
     }).then(({ response }) => {
-      if (response === 0) openConfig()
-      else app.quit()
+      if (response === 0) {
+        void mainWindow?.loadURL(mainWindowUrl())
+      } else {
+        app.quit()
+      }
     })
   })
   mainWindow.webContents.once('did-finish-load', () => {
@@ -174,7 +190,7 @@ function createMainWindow() {
     void ensureDeviceAgentPairing()
     updateTimer = setInterval(() => void checkDesktopUpdate(), 30 * 60 * 1000)
   })
-  mainWindow.loadURL(serverUrl)
+  mainWindow.loadURL(mainWindowUrl())
 }
 
 async function deviceSessionCookieHeader() {
@@ -183,12 +199,20 @@ async function deviceSessionCookieHeader() {
 }
 
 async function ensureDeviceAgentPairing() {
-  if (!deviceAgent || !serverUrl || !mainWindow || mainWindow.isDestroyed()) return false
-  if (await deviceAgent.validatePairing()) return true
+  if (!serverUrl || !mainWindow || mainWindow.isDestroyed()) return false
   try {
+    if (externalDeviceAgentUrl) {
+      const current = await externalAgentRequest('/status')
+      if (current.paired && current.serverUrl
+          && normalizeServerUrl(current.serverUrl) === serverUrl) {
+        return true
+      }
+    } else if (await deviceAgent?.validatePairing()) {
+      return true
+    }
     const cookie = await deviceSessionCookieHeader()
     if (!cookie) return false
-    const response = await fetch(`${serverUrl}/api/auth/device-session`, {
+    const response = await fetch(serverEndpoint('/api/auth/device-session'), {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -199,7 +223,14 @@ async function ensureDeviceAgentPairing() {
     if (!response.ok) return false
     const grant = await response.json()
     if (!grant?.token) return false
-    deviceAgent.configure(serverUrl, grant.token)
+    if (externalDeviceAgentUrl) {
+      await externalAgentRequest('/pair', {
+        method: 'POST',
+        body: JSON.stringify({ serverUrl, token: grant.token }),
+      })
+    } else {
+      deviceAgent.configure(serverUrl, grant.token)
+    }
     return true
   } catch {
     return false
@@ -218,37 +249,108 @@ function scheduleDevicePairing() {
 async function checkDesktopUpdate() {
   if (!serverUrl || !mainWindow || mainWindow.isDestroyed() || updating) return
   try {
-    const response = await fetch(`${serverUrl}/api/release/latest`, {
+    const response = await fetch(serverEndpoint('/api/release/latest'), {
       cache: 'no-store',
       signal: AbortSignal.timeout(8000),
     })
     if (!response.ok) return
     const latest = await response.json()
-    const releaseCode = typeof latest.releaseCode === 'string' ? latest.releaseCode : ''
-    if (!releaseCode
-        || releaseCode === releaseInfo.releaseCode
-        || releaseCode === promptedReleaseCode) {
+    const releaseCode = clientUpdateReleaseCode(latest)
+    if (!releaseCode || !shouldPromptForClientUpdate(
+      latest,
+      global.regentRuntime?.activeRelease || releaseInfo.releaseCode,
+      promptedReleaseCode,
+      global.regentRuntime?.failedRelease,
+      skippedReleaseCode,
+    )) {
       return
     }
     promptedReleaseCode = releaseCode
-    const { response: action } = await dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: '发现新版本',
-      message: `Regent ${latest.version || releaseCode} 已发布`,
-      detail: `${latest.notes || '包含功能更新与问题修复。'}\n\n点击“下载并安装”后，客户端会自动下载、安装并重启。`,
-      buttons: ['下载并安装', '稍后'],
-      defaultId: 0,
-      cancelId: 1,
-    })
-    if (action === 0) {
-      await installUpdate(latest)
+    const incremental = canInstallRuntimeUpdate(latest.runtime)
+    const action = await showUpdatePrompt(latest, incremental)
+    if (action === 'skip') {
+      try {
+        skippedReleaseCode = writeSkippedRelease(updatePreferencesPath(), releaseCode)
+      } catch (error) {
+        console.warn(`保存跳过版本失败：${error.message}`)
+      }
+      return
+    }
+    if (action === 'install' || action === 'defer') {
+      await installUpdate(latest, action === 'install')
     }
   } catch {
     // 网络不可用时静默重试，不打断当前工作。
   }
 }
 
-async function installUpdate(latest) {
+function canInstallRuntimeUpdate(runtime) {
+  return Boolean(
+    global.regentRuntime?.managed
+    && global.regentRuntime.installRuntimeUpdate
+    && runtime?.releaseCode
+    && runtime?.url
+    && runtime?.sha256
+    && runtime?.signature
+    && isShellCompatible(runtime.minShellRelease, global.regentRuntime.shellRelease),
+  )
+}
+
+function settleUpdatePrompt(action) {
+  const pending = updatePromptChoice
+  if (!pending) return
+  updatePromptChoice = null
+  pending.resolve(action)
+  if (pending.window && !pending.window.isDestroyed()) pending.window.destroy()
+}
+
+function showUpdatePrompt(latest, incremental) {
+  const prompt = new BrowserWindow({
+    width: 460,
+    height: 360,
+    useContentSize: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    autoHideMenuBar: true,
+    title: '发现新版本',
+    backgroundColor: '#ececec',
+    parent: mainWindow || undefined,
+    modal: Boolean(mainWindow),
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'update-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  })
+  prompt.setMenu(null)
+  prompt.setMenuBarVisibility(false)
+  return new Promise((resolve) => {
+    updatePromptChoice = { window: prompt, resolve }
+    prompt.once('ready-to-show', () => {
+      if (!prompt.isDestroyed()) prompt.show()
+    })
+    prompt.on('closed', () => {
+      const pending = updatePromptChoice
+      if (pending?.window === prompt) {
+        updatePromptChoice = null
+        pending.resolve('cancel')
+      }
+    })
+    prompt.loadFile(path.join(__dirname, 'shell', 'update-prompt.html'), {
+      query: {
+        version: String(latest.version || latest.releaseCode || ''),
+        notes: String(latest.notes || '包含功能更新与问题修复。'),
+        incremental: incremental ? '1' : '0',
+        size: incremental ? formatBytes(latest.runtime.sizeBytes) : '',
+      },
+    }).catch(() => settleUpdatePrompt('cancel'))
+  })
+}
+
+async function installUpdate(latest, restartImmediately = true) {
   if (updating) return
   updating = true
   const platform = process.platform === 'darwin'
@@ -261,20 +363,21 @@ async function installUpdate(latest) {
     await showUpdateFailure('当前系统暂不支持自动更新')
     return
   }
-  const asset = latest.downloads?.[platform]
-  if (!asset?.url || !asset?.sha256) {
-    updating = false
-    await showUpdateFailure('发布清单缺少安装包或 SHA-256')
-    return
-  }
-
   const workDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'regent-update-'))
   try {
+    if (canInstallRuntimeUpdate(latest.runtime)) {
+      await installRuntimeUpdate(latest.runtime, workDirectory, restartImmediately)
+      return
+    }
+    const asset = latest.downloads?.[platform]
+    if (!asset?.url || !asset?.sha256) {
+      throw new Error('发布清单缺少可用的安装包或 SHA-256')
+    }
     createUpdateWindow()
     sendUpdateStatus('正在下载新版本…', 0)
     const extension = platform === 'macos' ? '.dmg' : '.zip'
     const downloadPath = path.join(workDirectory, `Regent-update${extension}`)
-    const downloadUrl = new URL(asset.url, serverUrl).toString()
+    const downloadUrl = serverEndpoint(asset.url)
     await downloadUpdate(downloadUrl, downloadPath, asset.sizeBytes)
 
     sendUpdateStatus('正在校验安装包…', 92)
@@ -283,11 +386,19 @@ async function installUpdate(latest) {
       throw new Error('安装包校验失败，请稍后重试')
     }
 
-    sendUpdateStatus('正在安装，客户端即将重启…', 97)
+    sendUpdateStatus(
+      restartImmediately
+        ? '正在安装，客户端即将重启…'
+        : '正在准备升级包，完成后可继续使用…',
+      97,
+    )
     if (platform === 'macos') {
-      await installMacUpdate(downloadPath, workDirectory)
+      await installMacUpdate(downloadPath, workDirectory, restartImmediately)
     } else {
-      await installWindowsUpdate(downloadPath, workDirectory)
+      await installWindowsUpdate(downloadPath, workDirectory, restartImmediately)
+    }
+    if (!restartImmediately) {
+      finishDeferredUpdate()
     }
   } catch (error) {
     updating = false
@@ -295,6 +406,37 @@ async function installUpdate(latest) {
     await showUpdateFailure(error instanceof Error ? error.message : String(error))
     fs.rmSync(workDirectory, { recursive: true, force: true })
   }
+}
+
+async function installRuntimeUpdate(runtime, workDirectory, restartImmediately) {
+  createUpdateWindow()
+  sendUpdateStatus('正在下载增量更新…', 0)
+  const downloadPath = path.join(workDirectory, 'Regent-runtime.zip')
+  await downloadUpdate(serverEndpoint(runtime.url), downloadPath, runtime.sizeBytes)
+
+  sendUpdateStatus('正在校验增量更新…', 92)
+  const digest = await sha256(downloadPath)
+  if (digest.toLowerCase() !== String(runtime.sha256).toLowerCase()) {
+    throw new Error('增量更新校验失败，请稍后重试')
+  }
+
+  sendUpdateStatus('正在安装增量更新…', 96)
+  global.regentRuntime.installRuntimeUpdate(downloadPath, runtime)
+  fs.rmSync(workDirectory, { recursive: true, force: true })
+  if (restartImmediately) {
+    sendUpdateStatus('更新完成，正在重启…', 100)
+    setTimeout(() => global.regentRuntime.relaunchForUpdate(), 500)
+  } else {
+    finishDeferredUpdate()
+  }
+}
+
+function finishDeferredUpdate() {
+  updating = false
+  sendUpdateStatus('升级包已准备，退出应用后自动安装…', 100)
+  setTimeout(() => {
+    if (!updating) closeUpdateWindow()
+  }, 1200)
 }
 
 async function showUpdateFailure(detail) {
@@ -308,7 +450,7 @@ async function showUpdateFailure(detail) {
     cancelId: 1,
   })
   if (response === 0) {
-    await shell.openExternal(`${serverUrl}/download`)
+    await shell.openExternal(serverEndpoint('/download'))
   }
 }
 
@@ -323,6 +465,7 @@ function createUpdateWindow() {
     closable: false,
     minimizable: false,
     maximizable: false,
+    autoHideMenuBar: true,
     title: '更新 Regent',
     backgroundColor: '#ececec',
     parent: mainWindow || undefined,
@@ -335,11 +478,33 @@ function createUpdateWindow() {
       sandbox: true,
     },
   })
-  updateWindow.once('ready-to-show', () => updateWindow?.show())
+  updateWindow.setMenu(null)
+  updateWindow.setMenuBarVisibility(false)
+  updateWindow.once('ready-to-show', async () => {
+    const target = updateWindow
+    if (!target || target.isDestroyed()) return
+    await fitUpdateWindowToContent(target).catch(() => undefined)
+    if (!target.isDestroyed()) target.show()
+  })
   updateWindow.on('closed', () => {
     updateWindow = null
   })
   updateWindow.loadFile(path.join(__dirname, 'shell', 'update.html'))
+}
+
+async function fitUpdateWindowToContent(target) {
+  const metrics = await target.webContents.executeJavaScript(`({
+    width: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
+    height: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
+    clientWidth: document.documentElement.clientWidth,
+    clientHeight: document.documentElement.clientHeight
+  })`)
+  const [width, height] = target.getContentSize()
+  const nextWidth = Math.min(520, Math.max(width, Math.ceil(metrics.width || 0)))
+  const nextHeight = Math.min(360, Math.max(height, Math.ceil(metrics.height || 0)))
+  if (nextWidth > metrics.clientWidth || nextHeight > metrics.clientHeight) {
+    target.setContentSize(nextWidth, nextHeight)
+  }
 }
 
 function sendUpdateStatus(message, progress) {
@@ -398,7 +563,7 @@ async function sha256(file) {
   return hash.digest('hex')
 }
 
-async function installMacUpdate(downloadPath, workDirectory) {
+async function installMacUpdate(downloadPath, workDirectory, restartImmediately) {
   const mountDirectory = path.join(workDirectory, 'mount')
   const stagedApplication = path.join(workDirectory, 'Regent.app')
   fs.mkdirSync(mountDirectory, { recursive: true })
@@ -445,10 +610,10 @@ rm -rf ${quote(workDirectory)}
     detached: true,
     stdio: 'ignore',
   }).unref()
-  app.quit()
+  if (restartImmediately) app.quit()
 }
 
-async function installWindowsUpdate(downloadPath, workDirectory) {
+async function installWindowsUpdate(downloadPath, workDirectory, restartImmediately) {
   const extractDirectory = path.join(workDirectory, 'extracted')
   await execFileAsync('powershell.exe', [
     '-NoProfile',
@@ -490,7 +655,7 @@ Remove-Item -LiteralPath ${quotePowerShell(workDirectory)} -Recurse -Force
     stdio: 'ignore',
     windowsHide: true,
   }).unref()
-  app.quit()
+  if (restartImmediately) app.quit()
 }
 
 function findFile(directory, filename) {
@@ -524,6 +689,41 @@ function isSameOrigin(value, base) {
   } catch {
     return false
   }
+}
+
+function serverEndpoint(pathname) {
+  return appendServerPath(serverUrl, pathname)
+}
+
+async function probeExternalDeviceAgent() {
+  try {
+    const response = await fetch(`${LOCAL_DEVICE_AGENT_URL}/status`, {
+      signal: AbortSignal.timeout(3000),
+    })
+    return response.ok ? LOCAL_DEVICE_AGENT_URL : null
+  } catch {
+    return null
+  }
+}
+
+async function externalAgentRequest(pathname, init = {}) {
+  const response = await fetch(`${externalDeviceAgentUrl}${pathname}`, {
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(init.headers || {}),
+    },
+    signal: AbortSignal.timeout(15000),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const message = typeof body.error === 'string'
+      ? body.error
+      : `设备代理请求失败（HTTP ${response.status}）`
+    throw new Error(message)
+  }
+  return body
 }
 
 function openConfig() {
@@ -619,38 +819,68 @@ ipcMain.handle('server:connect', async (_event, value) => {
 })
 ipcMain.handle('server:use-local', () => 'http://127.0.0.1:12580')
 ipcMain.handle('update:current', () => updateStatus)
+ipcMain.on('update:prompt-choice', (_event, action) => {
+  const choice = action === 'install' || action === 'defer' || action === 'skip'
+    ? action
+    : 'cancel'
+  settleUpdatePrompt(choice)
+})
 ipcMain.handle('device:status', async () => {
-  if (!deviceAgent) throw new Error('设备代理尚未初始化')
   await ensureDeviceAgentPairing()
+  if (externalDeviceAgentUrl) return externalAgentRequest('/status')
+  if (!deviceAgent) throw new Error('设备代理尚未初始化')
   return deviceAgent.status()
 })
 ipcMain.handle('device:run-task', async (_event, payload) => {
-  if (!deviceAgent) throw new Error('设备代理尚未初始化')
   if (!(await ensureDeviceAgentPairing())) {
     throw new Error('当前设备代理尚未完成配对，请先登录并稍候重试')
   }
+  if (externalDeviceAgentUrl) {
+    return externalAgentRequest('/run-task', {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    })
+  }
+  if (!deviceAgent) throw new Error('设备代理尚未初始化')
   return deviceAgent.runTask(payload || {})
 })
-ipcMain.handle('device:job', (_event, jobId) => {
+ipcMain.handle('device:job', async (_event, jobId) => {
+  if (externalDeviceAgentUrl) {
+    return externalAgentRequest(`/jobs/${encodeURIComponent(String(jobId))}`)
+  }
   const job = deviceAgent?.jobs.get(String(jobId))
   if (!job) throw new Error('设备执行任务不存在')
   return job
 })
 
 app.whenReady().then(async () => {
-  serverUrl = readServerUrl()
-  deviceAgent = new DeviceAgent({
-    stateFile: path.join(app.getPath('userData'), 'device-agent.json'),
-  })
-  deviceAgent.loadState()
-  if (deviceAgent.serverUrl !== serverUrl) {
-    deviceAgent.serverUrl = serverUrl
-    deviceAgent.token = null
-    deviceAgent.saveState()
+  if (DEVICE_AGENT_MODE) {
+    app.dock?.hide()
+    deviceAgent = new DeviceAgent({
+      stateFile: path.join(app.getPath('userData'), 'device-agent.json'),
+    })
+    deviceAgent.loadState()
+    await deviceAgent.startLocalServer()
+    global.regentRuntime?.markHealthy?.()
+    return
   }
-  await deviceAgent.startLocalServer().catch((error) => {
-    console.warn(`设备代理本地服务启动失败：${error.message}`)
-  })
+  serverUrl = readServerUrl()
+  skippedReleaseCode = readSkippedRelease(updatePreferencesPath())
+  externalDeviceAgentUrl = await probeExternalDeviceAgent()
+  if (!externalDeviceAgentUrl) {
+    deviceAgent = new DeviceAgent({
+      stateFile: path.join(app.getPath('userData'), 'device-agent.json'),
+    })
+    deviceAgent.loadState()
+    if (deviceAgent.serverUrl !== serverUrl) {
+      deviceAgent.serverUrl = serverUrl
+      deviceAgent.token = null
+      deviceAgent.saveState()
+    }
+    await deviceAgent.startLocalServer().catch((error) => {
+      console.warn(`设备代理本地服务启动失败：${error.message}`)
+    })
+  }
   buildMenu()
   await session.fromPartition(PARTITION).setPermissionRequestHandler(
     (webContents, permission, callback) => {
@@ -658,14 +888,13 @@ app.whenReady().then(async () => {
       callback(allowed.has(permission) && isSameOrigin(webContents.getURL(), serverUrl))
     },
   )
-  if (serverUrl) createMainWindow()
-  else createConfigWindow()
+  createMainWindow()
   scheduleDevicePairing()
+  global.regentRuntime?.markHealthy?.()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      if (serverUrl) createMainWindow()
-      else createConfigWindow()
+      createMainWindow()
     }
   })
 })

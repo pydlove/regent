@@ -177,6 +177,7 @@ public class CodexCliAdapter implements AgentExecutor, AutoCloseable {
             int exitCode = process.exitValue();
             String rawResult = readQuietly(outputFile);
             String stderrTail = tail(readQuietly(errorFile));
+            String diagnostic = firstNonBlank(summary.diagnostic(), stderrTail);
             cleanup(outputFile, errorFile, promptFile);
             GitRefGuard.cleanup(gitGuard);
             if (closing) {
@@ -187,13 +188,19 @@ public class CodexCliAdapter implements AgentExecutor, AutoCloseable {
                     request.projectId(), exitCode, summary.threadId(), summary.tokens().total());
 
             if (exitCode != 0) {
+                if (request.isResume() && resumeContextInvalid(diagnostic)) {
+                    log.warn("codex 会话上下文不可恢复，改用新会话重试：项目={} 会话={} 原因={}",
+                            request.projectId(), request.resumeThreadId(), firstLine(diagnostic));
+                    return execute(request.withResumeThreadId(null), listener);
+                }
                 return CodexReportTranslator.invalid(exitCode, summary.threadId(), summary.tokens(),
-                        "执行器退出码 " + exitCode + "：" + firstLine(stderrTail), rawResult);
+                        "执行器退出码 " + exitCode + "：" + firstLine(diagnostic), rawResult);
             }
             Optional<CodexJsonlParser.CodexReport> report = parser.parseReport(rawResult);
             if (report.isEmpty()) {
                 return CodexReportTranslator.invalid(exitCode, summary.threadId(), summary.tokens(),
-                        "末条消息不是约定结构的 JSON，无法读出结论", rawResult);
+                        "末条消息不是约定结构的 JSON，无法读出结论"
+                                + diagnosticSuffix(diagnostic), rawResult);
             }
             return CodexReportTranslator.translate(report.get(), exitCode, summary.threadId(),
                     summary.tokens(), rawResult);
@@ -355,6 +362,9 @@ public class CodexCliAdapter implements AgentExecutor, AutoCloseable {
                     if (event.usage() != null) {
                         summary.tokens = event.usage();
                     }
+                    if (event.diagnostic() != null) {
+                        summary.diagnostic = event.diagnostic();
+                    }
                     summary.events.add(event);
                 });
             }
@@ -422,6 +432,34 @@ public class CodexCliAdapter implements AgentExecutor, AutoCloseable {
         return end < 0 ? trimmed : trimmed.substring(0, end);
     }
 
+    private static String firstNonBlank(String preferred, String fallback) {
+        return preferred != null && !preferred.isBlank() ? preferred : fallback;
+    }
+
+    private static String diagnosticSuffix(String diagnostic) {
+        return diagnostic == null || diagnostic.isBlank()
+                ? "" : "；执行器错误：" + firstLine(diagnostic);
+    }
+
+    /**
+     * 只对明确的会话历史损坏做新会话降级。网络、鉴权、配额等失败仍原样暴露，
+     * 否则会把需要用户处理的环境问题误装成“重试一次就好了”。
+     */
+    static boolean resumeContextInvalid(String diagnostic) {
+        if (diagnostic == null || diagnostic.isBlank()) {
+            return false;
+        }
+        String text = diagnostic.toLowerCase();
+        boolean orphanToolCall = text.contains("tool_calls")
+                && (text.contains("tool messages") || text.contains("tool_call_id"));
+        return orphanToolCall
+                || text.contains("session not found")
+                || text.contains("conversation not found")
+                || text.contains("no rollout found")
+                || text.contains("thread/resume failed")
+                || text.contains("failed to resume session");
+    }
+
     /**
      * 读线程与调用线程之间的交接。
      *
@@ -433,6 +471,7 @@ public class CodexCliAdapter implements AgentExecutor, AutoCloseable {
         private final Queue<CodexJsonlParser.ParsedEvent> events = new ConcurrentLinkedQueue<>();
         private volatile String threadId;
         private volatile TokenUsage tokens = TokenUsage.ZERO;
+        private volatile String diagnostic;
 
         private String threadId() {
             return threadId;
@@ -440,6 +479,10 @@ public class CodexCliAdapter implements AgentExecutor, AutoCloseable {
 
         private TokenUsage tokens() {
             return tokens;
+        }
+
+        private String diagnostic() {
+            return diagnostic;
         }
     }
 }

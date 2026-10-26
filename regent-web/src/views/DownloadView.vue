@@ -8,6 +8,7 @@ import {
   Download,
   MonitorDown,
   ShieldCheck,
+  Smartphone,
   Sparkles,
 } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
@@ -25,6 +26,7 @@ import {
   preferredDownloadOrder,
   recommendedDownloadPlatform,
 } from '@/utils/downloadPlatform'
+import { appPath } from '@/utils/appBase'
 import { RouterLink } from 'vue-router'
 
 const auth = useAuthStore()
@@ -80,9 +82,10 @@ const downloads = computed(() => {
         : loadingRelease.value
           ? '正在读取发布信息…'
           : '安装包暂未发布',
-      url: latestRelease.value?.downloads.macos?.url
-        || import.meta.env.VITE_DOWNLOAD_MACOS_URL
-        || null,
+      url: publicAssetUrl(
+        latestRelease.value?.downloads.macos?.url
+          || import.meta.env.VITE_DOWNLOAD_MACOS_URL,
+      ),
       tone: 'bg-label text-content',
       recommended: recommendedPlatform === 'macos',
     },
@@ -97,9 +100,10 @@ const downloads = computed(() => {
         : loadingRelease.value
           ? '正在读取发布信息…'
           : '安装包暂未发布',
-      url: latestRelease.value?.downloads.windows?.url
-        || import.meta.env.VITE_DOWNLOAD_WINDOWS_URL
-        || null,
+      url: publicAssetUrl(
+        latestRelease.value?.downloads.windows?.url
+          || import.meta.env.VITE_DOWNLOAD_WINDOWS_URL,
+      ),
       tone: 'bg-accent-soft text-accent',
       recommended: recommendedPlatform === 'windows',
     },
@@ -108,6 +112,12 @@ const downloads = computed(() => {
     (left, right) => downloadOrder.indexOf(left.id) - downloadOrder.indexOf(right.id),
   )
 })
+
+function publicAssetUrl(url: string | undefined): string | null {
+  if (!url) return null
+  if (/^https?:\/\//i.test(url)) return url
+  return appPath(url)
+}
 
 onMounted(async () => {
   try {
@@ -177,6 +187,26 @@ const features = computed(() => [
                 ? '下载 Windows 便携版，解压后运行 Regent.exe。桌面端和浏览器版使用同一个账号。'
                 : '选择你的系统，下载安装或解压后打开工作台。桌面端和浏览器版使用同一个账号。' }}
             </p>
+
+            <RouterLink
+              :to="{ name: 'mobile-download' }"
+              class="group mt-5 flex max-w-xl items-center gap-3 rounded-panel border border-accent/20 bg-accent-soft/70 px-3.5 py-3 text-left transition-colors duration-100 ease-apple hover:border-accent/35 hover:bg-accent-soft"
+            >
+              <span class="grid size-9 shrink-0 place-items-center rounded-[8px] bg-content text-accent shadow-control">
+                <Icon :as="Smartphone" size="large" />
+              </span>
+              <span class="min-w-0 flex-1">
+                <span class="block text-caption font-emphasis text-label">离开电脑也能继续工作</span>
+                <span class="mt-0.5 block text-caption text-label-secondary">
+                  打开手机 App 下载页，随时查看任务并处理关键决策。
+                </span>
+              </span>
+              <Icon
+                :as="ArrowRight"
+                size="inline"
+                class="shrink-0 text-accent transition-transform duration-100 group-hover:translate-x-0.5"
+              />
+            </RouterLink>
           </div>
 
           <div class="download-platform-grid mt-8 grid gap-4 md:grid-cols-2">
@@ -304,11 +334,11 @@ const features = computed(() => [
                 <li>需要开机启动时，可右键 Regent.exe 创建桌面快捷方式并放入启动目录。</li>
               </ol>
               <p>
-                首次启动填写 Regent 服务地址。本机使用
-                <code class="font-mono text-label">http://127.0.0.1:12580</code>，公网使用实际部署地址。
+                首次启动会自动连接内置地址
+                <code class="font-mono text-label">https://ichuang.top/regent/decisions</code>，无需填写服务地址。
               </p>
               <p>
-                后续切换地址：菜单栏选择“文件 → 切换服务地址…”。便携版不会写入系统级安装记录。
+                使用自建服务时，可在菜单栏选择“文件 → 切换服务地址…”。便携版不会写入系统级安装记录。
               </p>
             </div>
             <div v-else class="mt-3 space-y-3 text-caption leading-relaxed text-label-secondary">
@@ -330,11 +360,11 @@ const features = computed(() => [
               <pre class="overflow-x-auto rounded-control bg-content px-3 py-2 font-mono text-[11px] text-label">xattr -cr /Applications/Regent.app
 open /Applications/Regent.app</pre>
               <p>
-                首次启动填写 Regent 服务地址。本机使用
-                <code class="font-mono text-label">http://127.0.0.1:12580</code>，公网使用实际部署地址。
+                首次启动会自动连接内置地址
+                <code class="font-mono text-label">https://ichuang.top/regent/decisions</code>，无需填写服务地址。
               </p>
               <p>
-                后续切换地址：菜单栏选择“文件 → 切换服务地址…”。详细教程也包含在 DMG 的
+                使用自建服务时，可在菜单栏选择“文件 → 切换服务地址…”。详细教程也包含在 DMG 的
                 <code class="font-mono text-label">安装说明.txt</code> 中。
               </p>
             </div>
@@ -349,6 +379,12 @@ open /Applications/Regent.app</pre>
         <p>
           安装遇到问题？<RouterLink class="font-emphasis text-accent hover:underline" :to="helpTo">查看使用说明</RouterLink>
         </p>
+        <RouterLink
+          class="inline-flex items-center gap-1 transition-colors hover:text-label"
+          :to="{ name: 'mobile-download' }"
+        >
+          <Icon :as="Smartphone" size="inline" />手机 App
+        </RouterLink>
         <span class="inline-flex items-center gap-1">
           <Icon :as="Sparkles" size="inline" />当前版本 {{ CURRENT_RELEASE.label }} · {{ displayDate }}
         </span>

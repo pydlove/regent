@@ -11,6 +11,11 @@ public class DeploymentRunData {
     private Long id;
     private Long deploymentId;
     private Long projectId;
+    private Long taskId;
+    private Long reviewSnapshotId;
+    private Long reviewDecisionId;
+    private String projectVersion;
+    private String versionSource;
     private String deploymentName;
     private String host;
     private Integer port;

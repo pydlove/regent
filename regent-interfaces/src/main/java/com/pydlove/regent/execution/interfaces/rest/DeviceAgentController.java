@@ -1,6 +1,7 @@
 package com.pydlove.regent.execution.interfaces.rest;
 
 import com.pydlove.regent.execution.application.command.AgentRunService;
+import com.pydlove.regent.execution.application.command.DevicePresenceService;
 import com.pydlove.regent.execution.application.query.AgentContractService;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskRunId;
@@ -11,9 +12,13 @@ import com.pydlove.regent.execution.interfaces.dto.AgentContractResponse;
 import com.pydlove.regent.execution.interfaces.dto.AgentHeartbeatRequest;
 import com.pydlove.regent.execution.interfaces.dto.AgentReportRequest;
 import com.pydlove.regent.execution.interfaces.dto.AgentReportResponse;
+import com.pydlove.regent.execution.interfaces.dto.AgentRunEventsRequest;
 import com.pydlove.regent.execution.interfaces.dto.AgentRunSnapshotResponse;
 import com.pydlove.regent.execution.interfaces.dto.AgentTaskClaimResponse;
 import com.pydlove.regent.execution.interfaces.dto.AgentTaskSummaryResponse;
+import com.pydlove.regent.execution.interfaces.dto.DevicePresenceRequest;
+import com.pydlove.regent.execution.interfaces.dto.DevicePresenceResponse;
+import com.pydlove.regent.execution.interfaces.dto.DeviceQueueTaskRequest;
 import com.pydlove.regent.identity.application.query.AuthenticatedUser;
 import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.identity.interfaces.rest.AuthSessionInterceptor;
@@ -47,17 +52,28 @@ public class DeviceAgentController {
     private final TaskRepository taskRepository;
     private final TaskRunRepository taskRunRepository;
     private final ProjectProfileRepository projectProfileRepository;
+    private final DevicePresenceService presenceService;
 
     public DeviceAgentController(AgentRunService agentRunService,
                                  AgentContractService agentContractService,
                                  TaskRepository taskRepository,
                                  TaskRunRepository taskRunRepository,
-                                 ProjectProfileRepository projectProfileRepository) {
+                                 ProjectProfileRepository projectProfileRepository,
+                                 DevicePresenceService presenceService) {
         this.agentRunService = agentRunService;
         this.agentContractService = agentContractService;
         this.taskRepository = taskRepository;
         this.taskRunRepository = taskRunRepository;
         this.projectProfileRepository = projectProfileRepository;
+        this.presenceService = presenceService;
+    }
+
+    @PostMapping("/presence")
+    public DevicePresenceResponse presence(@RequestBody DevicePresenceRequest presence,
+                                           HttpServletRequest request) {
+        UserId owner = currentUser(request);
+        return DevicePresenceResponse.from(
+                presenceService.heartbeat(owner, presence.toHeartbeat(java.time.Instant.now())));
     }
 
     @GetMapping("/contract")
@@ -91,30 +107,57 @@ public class DeviceAgentController {
         } else {
             requireProjectOwned(claim.projectCode(), owner);
         }
+        requireDeviceIfPresent(owner, claim.deviceId());
         return agentRunService.claim(
-                        claim.executor(), claim.sessionId(), claim.projectCode(), claim.taskId())
+                        claim.executor(), claim.sessionId(), claim.projectCode(),
+                        claim.taskId(), claim.deviceId())
                 .map(AgentTaskClaimResponse::from)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    @PostMapping("/tasks/{taskId}/queue")
+    public void queue(@PathVariable long taskId,
+                      @RequestBody DeviceQueueTaskRequest queued,
+                      HttpServletRequest request) {
+        UserId owner = currentUser(request);
+        requireTaskOwned(TaskId.of(taskId), owner);
+        agentRunService.queueForDevice(taskId);
+        presenceService.enqueue(owner, queued.deviceId(), taskId);
     }
 
     @PostMapping("/runs/{runId}/heartbeat")
     public AgentRunSnapshotResponse heartbeat(@PathVariable long runId,
                                               @RequestBody AgentHeartbeatRequest heartbeat,
                                               HttpServletRequest request) {
-        requireRunOwned(runId, currentUser(request));
+        UserId owner = currentUser(request);
+        requireRunOwned(runId, owner);
+        requireDeviceIfPresent(owner, heartbeat.deviceId());
         return AgentRunSnapshotResponse.from(
-                agentRunService.heartbeat(runId, heartbeat.executor()));
+                agentRunService.heartbeat(runId, heartbeat.executor(), heartbeat.deviceId()));
     }
 
     @PostMapping("/runs/{runId}/report")
     public AgentReportResponse report(@PathVariable long runId,
                                       @RequestBody AgentReportRequest report,
                                       HttpServletRequest request) {
-        requireRunOwned(runId, currentUser(request));
+        UserId owner = currentUser(request);
+        requireRunOwned(runId, owner);
+        requireDeviceIfPresent(owner, report.deviceId());
         return AgentReportResponse.from(agentRunService.report(
-                runId, report.executor(), report.toReport(),
+                runId, report.executor(), report.deviceId(), report.toReport(),
                 report.sessionId(), report.toTokens(), report.rawResult()));
+    }
+
+    @PostMapping("/runs/{runId}/events")
+    public int events(@PathVariable long runId,
+                      @RequestBody AgentRunEventsRequest events,
+                      HttpServletRequest request) {
+        UserId owner = currentUser(request);
+        requireRunOwned(runId, owner);
+        requireDeviceIfPresent(owner, events.deviceId());
+        return agentRunService.appendEvents(
+                runId, events.executor(), events.deviceId(), events.toEvents());
     }
 
     private static UserId currentUser(HttpServletRequest request) {
@@ -142,5 +185,11 @@ public class DeviceAgentController {
         var run = taskRunRepository.findById(TaskRunId.of(runId))
                 .orElseThrow(() -> new EntityNotFoundException("执行记录不存在：" + runId));
         requireTaskOwned(run.getTaskId(), owner);
+    }
+
+    private void requireDeviceIfPresent(UserId owner, String deviceId) {
+        if (deviceId != null && !deviceId.isBlank()) {
+            presenceService.requireOnline(owner, deviceId);
+        }
     }
 }

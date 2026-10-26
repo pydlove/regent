@@ -70,8 +70,11 @@ public class EnvironmentController {
 
     private static SaveEnvironmentCommand toCommand(EnvironmentRequest request) {
         EnvironmentScope scope = EnvironmentScope.parse(request.scope());
-        ProjectId projectId = request.projectId() == null ? null : ProjectId.of(request.projectId());
-        return new SaveEnvironmentCommand(scope, projectId, request.value(),
+        List<Long> rawProjectIds = request.projectIds() == null || request.projectIds().isEmpty()
+                ? (request.projectId() == null ? List.of() : List.of(request.projectId()))
+                : request.projectIds();
+        return new SaveEnvironmentCommand(scope,
+                rawProjectIds.stream().map(ProjectId::of).toList(), request.value(),
                 request.tags(), request.description(), Boolean.TRUE.equals(request.secret()));
     }
 }

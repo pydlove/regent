@@ -10,6 +10,9 @@ public interface ProjectMapper {
     /** 标识占用检查。**故意不带 deleted = 0** —— 唯一键管的是整张表，删除过的标识也算被占用。 */
     int countByCode(@Param("code") String code);
 
+    int countByOrganizationAndCode(@Param("organizationId") long organizationId,
+                                   @Param("code") String code);
+
     /** 新增。主键由数据库生成，{@code useGeneratedKeys} 回填到 {@link ProjectData#getId()}。 */
     int insert(ProjectData data);
 

@@ -51,6 +51,8 @@ export type CreateTaskInput = {
   prompt: string
   /** 排队优先级，数值越大越先派发；不传按 0 处理 */
   priority?: number
+  /** null 采用项目默认规范；空数组表示本次明确不使用规范 */
+  codeStandardIds?: number[] | null
 }
 
 /**
@@ -74,6 +76,7 @@ export const updateTask = (id: number, input: UpdateTaskInput) =>
 export type CreateTaskContinuationInput = {
   prompt: string
   priority: number
+  codeStandardIds?: number[] | null
 }
 
 /** 基于已有任务创建一个复用其 Codex 会话的新任务。 */

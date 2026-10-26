@@ -4,6 +4,7 @@ import com.pydlove.regent.interfaces.dto.ApiError;
 import com.pydlove.regent.shared.domain.AuthenticationException;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
+import com.pydlove.regent.shared.domain.ForbiddenException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -49,6 +50,12 @@ public class ApiExceptionHandler {
                 .body(ApiError.of("DOMAIN_VIOLATION", e.getMessage()));
     }
 
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<ApiError> forbidden(ForbiddenException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiError.of("FORBIDDEN", e.getMessage()));
+    }
+
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ApiError> authenticationFailed(AuthenticationException e) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -57,12 +64,12 @@ public class ApiExceptionHandler {
 
     /**
      * 上传超过容器限额。不接这一手的话它会掉进兜底分支变成 500「服务端未预期错误」——
-     * 而真正的原因（图片太大）只有用户自己能解决。
+     * 而真正的原因（图片或文档太大）只有用户自己能解决。
      */
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ApiError> uploadTooLarge(MaxUploadSizeExceededException e) {
         return ResponseEntity.badRequest()
-                .body(ApiError.of("UPLOAD_TOO_LARGE", "图片太大，请压缩后再传（单张上限见服务端配置）"));
+                .body(ApiError.of("UPLOAD_TOO_LARGE", "文件太大，请压缩后再传（单文件上限见服务端配置）"));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

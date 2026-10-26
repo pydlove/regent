@@ -102,7 +102,7 @@ export const useBugStore = defineStore('bugs', () => {
     return updated
   }
 
-  const wontFix = async (id: number, reason: string) => {
+  const wontFix = async (id: number, reason?: string) => {
     const updated = await wontFixBug(id, reason)
     await Promise.all([load(), loadOpenCount()])
     return updated

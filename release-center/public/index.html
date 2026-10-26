@@ -30,6 +30,10 @@
             <h2 id="current-version">读取中…</h2>
             <p id="next-version" class="muted"></p>
           </section>
+          <section class="job-history-section">
+            <p class="section-label">最近任务</p>
+            <div id="job-history" class="history-list"></div>
+          </section>
           <section class="history-section">
             <p class="section-label">最近发布</p>
             <div id="release-history" class="history-list"></div>
@@ -59,7 +63,7 @@
               <div>
                 <p class="section-label">中继器与服务器</p>
                 <h2>公网发布与升级</h2>
-                <p>构建并上传最新中继器、静态前端，随后重启服务器服务。</p>
+                <p>只允许从干净工作区构建并上传；完成版本包晋级后会切换为部署指定版本。</p>
               </div>
               <span id="server-status" class="badge neutral">检查中</span>
             </div>
@@ -83,7 +87,7 @@
           <section class="form-panel">
             <label class="field">
               <span>版本号</span>
-              <input id="version" type="text" spellcheck="false" placeholder="feature_V1.0.2_R100B005" />
+              <input id="version" type="text" spellcheck="false" placeholder="Regent_V1.0.3_R100B001" />
             </label>
             <label class="field">
               <span>给 Codex 的补充要求 <em>可选</em></span>
@@ -124,6 +128,10 @@
             <div id="highlights" class="highlight-list"></div>
 
             <div class="release-options">
+              <label class="check-row">
+                <input id="web-only" type="checkbox" />
+                <span>仅发布网页，不触发桌面客户端升级</span>
+              </label>
               <label class="check-row">
                 <input id="deploy" type="checkbox" checked />
                 <span>发布后同步部署公网前端</span>

@@ -20,6 +20,14 @@ public interface EnvironmentEntryMapper {
     List<EnvironmentRow> selectApplicableToOwned(@Param("userId") long userId,
                                                  @Param("projectId") long projectId);
 
+    List<EnvironmentProjectRow> selectProjectLinks(
+            @Param("environmentIds") List<Long> environmentIds);
+
+    void deleteProjectLinks(@Param("environmentId") long environmentId);
+
+    int insertProjectLinks(@Param("environmentId") long environmentId,
+                           @Param("projectIds") List<Long> projectIds);
+
     int countByKey(@Param("projectId") Long projectId,
                    @Param("itemKey") String itemKey,
                    @Param("excludingId") Long excludingId);

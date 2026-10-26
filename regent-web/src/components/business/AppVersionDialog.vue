@@ -7,9 +7,10 @@ import Button from '@/components/ui/button/Button.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
 import Select from '@/components/ui/select/Select.vue'
 import { APP_VERSION, CURRENT_RELEASE, RELEASES } from '@/content/releases'
+import { shortReleaseVersion } from '@/utils/releaseVersion'
 
 const open = ref(false)
-const compactVersion = APP_VERSION.match(/V\d+(?:\.\d+)*/i)?.[0] ?? APP_VERSION
+const compactVersion = APP_VERSION.match(/R\d+B\d+/)?.[0] ?? shortReleaseVersion(APP_VERSION)
 const selectedVersion = ref(APP_VERSION)
 const selectedRelease = computed(
   () => RELEASES.find((release) => release.version === selectedVersion.value) ?? CURRENT_RELEASE,
@@ -23,7 +24,7 @@ const selectedVersionModel = computed({
 const releaseItems = computed(() =>
   RELEASES.map((release) => ({
     value: release.version,
-    label: `${shortVersion(release.version)} · ${release.releasedAt}`,
+    label: `${shortReleaseVersion(release.version)} · ${release.releasedAt}`,
   })),
 )
 
@@ -31,11 +32,6 @@ watch(open, (value) => {
   if (value) selectedVersion.value = APP_VERSION
 })
 
-function shortVersion(version: string): string {
-  const productVersion = version.match(/V\d+(?:\.\d+)*/i)?.[0] ?? version
-  const build = version.match(/(B\d+)$/)?.[1]
-  return build ? `${productVersion} · ${build}` : productVersion
-}
 </script>
 
 <template>
@@ -59,7 +55,7 @@ function shortVersion(version: string): string {
     </template>
 
     <div
-      class="grid grid-rows-[auto_minmax(0,1fr)] gap-4 overflow-hidden sm:grid-cols-[168px_minmax(0,1fr)] sm:grid-rows-1"
+      class="grid grid-rows-[auto_minmax(0,1fr)] gap-4 overflow-hidden sm:grid-cols-[190px_minmax(0,1fr)] sm:grid-rows-1"
       :style="{ height: 'min(500px, calc(100dvh - 220px))' }"
     >
       <aside class="flex min-h-0 min-w-0 flex-col">
@@ -87,7 +83,7 @@ function shortVersion(version: string): string {
           >
             <span class="flex w-full items-center gap-1.5">
               <span class="truncate text-caption font-emphasis text-label">
-                {{ shortVersion(release.version) }}
+                {{ shortReleaseVersion(release.version) }}
               </span>
               <Badge v-if="release.version === APP_VERSION" tone="accent" class="ml-auto shrink-0">
                 当前

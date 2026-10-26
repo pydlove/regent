@@ -14,7 +14,10 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /** {@link DeploymentRepository} 的 MyBatis 实现。 */
@@ -29,19 +32,19 @@ public class MyBatisDeploymentRepository implements DeploymentRepository {
 
     @Override
     public Optional<Deployment> findById(DeploymentId id) {
-        return Optional.ofNullable(mapper.selectById(id.value())).map(DeploymentDataMapper::toDomain);
+        return Optional.ofNullable(mapper.selectById(id.value())).map(this::toDomain);
     }
 
     @Override
     public Optional<Deployment> findByIdOwned(DeploymentId id, UserId ownerId) {
         return Optional.ofNullable(mapper.selectByIdOwned(id.value(), ownerId.value()))
-                .map(DeploymentDataMapper::toDomain);
+                .map(this::toDomain);
     }
 
     @Override
     public Optional<Deployment> findByIdForUpdate(DeploymentId id) {
         return Optional.ofNullable(mapper.selectByIdForUpdate(id.value()))
-                .map(DeploymentDataMapper::toDomain);
+                .map(this::toDomain);
     }
 
     @Override
@@ -51,15 +54,15 @@ public class MyBatisDeploymentRepository implements DeploymentRepository {
 
     @Override
     public List<Deployment> findAll(ProjectId projectId, UserId ownerId) {
-        return mapper.selectAll(projectId == null ? null : projectId.value(),
-                        ownerId == null ? null : ownerId.value()).stream()
-                .map(DeploymentDataMapper::toDomain)
-                .toList();
+        return toDomains(mapper.selectAll(projectId == null ? null : projectId.value(),
+                ownerId == null ? null : ownerId.value()));
     }
 
     @Override
-    public boolean existsByName(ProjectId projectId, String name, DeploymentId excludingId) {
-        return mapper.countByName(projectId.value(), name,
+    public boolean existsByName(java.util.Collection<ProjectId> projectIds,
+                                String name,
+                                DeploymentId excludingId) {
+        return mapper.countByNameInProjects(projectIds.stream().map(ProjectId::value).toList(), name,
                 excludingId == null ? null : excludingId.value()) > 0;
     }
 
@@ -84,11 +87,10 @@ public class MyBatisDeploymentRepository implements DeploymentRepository {
                     throw new DomainException("部署新增失败：" + deployment.getName());
                 }
                 deployment.assignIdentity(DeploymentId.of(data.getId()));
-                return;
-            }
-            if (mapper.update(data) != 1) {
+            } else if (mapper.update(data) != 1) {
                 throw new DomainException("部署更新失败或已被删除：" + deployment.getId());
             }
+            replaceProjectLinks(deployment);
         } catch (DuplicateKeyException e) {
             throw new DomainException("部署保存失败，名称可能重复：" + deployment.getName(), e);
         }
@@ -101,5 +103,43 @@ public class MyBatisDeploymentRepository implements DeploymentRepository {
         if (mapper.softDelete(id.value(), now) != 1) {
             throw new DomainException("部署删除失败或已被删除：" + id);
         }
+    }
+
+    private Deployment toDomain(DeploymentRow row) {
+        return toDomains(List.of(row)).get(0);
+    }
+
+    private List<Deployment> toDomains(List<DeploymentRow> rows) {
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        List<Long> deploymentIds = rows.stream().map(DeploymentRow::getId).toList();
+        Map<Long, List<Long>> projectIdsByDeployment = new LinkedHashMap<>();
+        for (DeploymentProjectRow link : mapper.selectProjectLinks(deploymentIds)) {
+            projectIdsByDeployment
+                    .computeIfAbsent(link.getDeploymentId(), ignored -> new ArrayList<>())
+                    .add(link.getProjectId());
+        }
+        return rows.stream()
+                .map(row -> DeploymentDataMapper.toDomain(row, orderedProjectIds(
+                        row.getProjectId(),
+                        projectIdsByDeployment.getOrDefault(row.getId(), List.of(row.getProjectId())))))
+                .toList();
+    }
+
+    private static List<Long> orderedProjectIds(long primaryProjectId, List<Long> linkedProjectIds) {
+        List<Long> ordered = new ArrayList<>();
+        ordered.add(primaryProjectId);
+        linkedProjectIds.stream()
+                .filter(projectId -> projectId != primaryProjectId)
+                .forEach(ordered::add);
+        return ordered;
+    }
+
+    private void replaceProjectLinks(Deployment deployment) {
+        long deploymentId = deployment.getId().value();
+        mapper.deleteProjectLinks(deploymentId);
+        mapper.insertProjectLinks(deploymentId,
+                deployment.getProjectIds().stream().map(ProjectId::value).toList());
     }
 }

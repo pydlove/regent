@@ -29,6 +29,8 @@ public final class CodexJsonlParser {
     private static final String FIELD_TYPE = "type";
     private static final String FIELD_THREAD_ID = "thread_id";
     private static final String FIELD_USAGE = "usage";
+    private static final String FIELD_MESSAGE = "message";
+    private static final String FIELD_ERROR = "error";
     private static final String FIELD_INPUT_TOKENS = "input_tokens";
     private static final String FIELD_CACHED_INPUT_TOKENS = "cached_input_tokens";
     private static final String FIELD_OUTPUT_TOKENS = "output_tokens";
@@ -42,12 +44,12 @@ public final class CodexJsonlParser {
         }
         JsonNode node = readTree(line).orElse(null);
         if (node == null || !node.isObject()) {
-            return Optional.of(new ParsedEvent(RAW_EVENT, null, null, escaped(line)));
+            return Optional.of(new ParsedEvent(RAW_EVENT, null, null, escaped(line), null));
         }
         String type = node.path(FIELD_TYPE).asText(RAW_EVENT);
         String threadId = node.path(FIELD_THREAD_ID).asText(null);
         TokenUsage usage = readUsage(node);
-        return Optional.of(new ParsedEvent(type, threadId, usage, line));
+        return Optional.of(new ParsedEvent(type, threadId, usage, line, diagnostic(type, node)));
     }
 
     /**
@@ -108,6 +110,32 @@ public final class CodexJsonlParser {
         return value.isMissingNode() || value.isNull() ? null : value.asText();
     }
 
+    /**
+     * Codex 会把模型服务的失败放在 {@code error}/{@code turn.failed} 事件里，而不是 stderr。
+     * 优先取出内层可读原因，避免界面只看到包裹了一层的 JSON。
+     */
+    private String diagnostic(String type, JsonNode node) {
+        String raw;
+        if ("turn.failed".equals(type)) {
+            raw = text(node.path(FIELD_ERROR), FIELD_MESSAGE);
+        } else if ("error".equals(type)) {
+            raw = text(node, FIELD_MESSAGE);
+        } else {
+            return null;
+        }
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        JsonNode nested = readTree(raw).orElse(null);
+        if (nested != null && nested.isObject()) {
+            String readable = text(nested.path(FIELD_ERROR), FIELD_MESSAGE);
+            if (readable != null && !readable.isBlank()) {
+                return readable;
+            }
+        }
+        return raw.strip();
+    }
+
     private static List<String> stringList(JsonNode node) {
         if (!node.isArray()) {
             return List.of();
@@ -155,8 +183,13 @@ public final class CodexJsonlParser {
      * @param threadId  会话 ID，只有 {@code thread.started} 那类事件才带
      * @param usage     token 用量，只有 {@code turn.completed} 带；其余为 null
      * @param payloadJson 存货原文，保证是合法 JSON
+     * @param diagnostic 执行器返回的可读错误原因；非错误事件为 null
      */
-    public record ParsedEvent(String type, String threadId, TokenUsage usage, String payloadJson) {
+    public record ParsedEvent(String type,
+                              String threadId,
+                              TokenUsage usage,
+                              String payloadJson,
+                              String diagnostic) {
     }
 
     /**

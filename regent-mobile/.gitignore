@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.local
+.DS_Store
+android/.gradle/
+android/local.properties
+ios/App/Pods/
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/

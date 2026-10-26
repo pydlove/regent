@@ -173,8 +173,6 @@ const verify = async () => {
 
 const wontFixOpen = ref(false)
 const wontFixReason = ref('')
-const WONTFIX_MIN = 6
-const canWontFixConfirm = computed(() => wontFixReason.value.trim().length >= WONTFIX_MIN)
 
 const openWontFix = () => {
   wontFixReason.value = ''
@@ -183,13 +181,17 @@ const openWontFix = () => {
 
 const confirmWontFix = async () => {
   const bug = selected.value
-  if (!bug || !canWontFixConfirm.value || changingStatus.value) return
+  if (!bug || changingStatus.value) return
 
   changingStatus.value = true
   try {
-    await bugStore.wontFix(bug.id, wontFixReason.value.trim())
+    const reason = wontFixReason.value.trim()
+    await bugStore.wontFix(bug.id, reason || undefined)
     wontFixOpen.value = false
-    toast.success(`Bug #${bug.id} 已标记为不修复`, '理由已经保留在缺陷单里')
+    toast.success(
+      `Bug #${bug.id} 已标记为不修复`,
+      reason ? '理由已经保留在缺陷单里' : '未填写理由，缺陷单已进入终态',
+    )
   } catch (error) {
     toast.warning(`Bug #${bug.id} 无法标记为不修复`, messageOf(error))
   } finally {
@@ -453,7 +455,7 @@ onMounted(() => {
       v-model:open="wontFixOpen"
       layout="form"
       title="标记为不修复？"
-      description="缺陷单不会消失，理由会留在上面。将来的你（或别人）只能靠这句话判断当初为什么放过了它。"
+      description="缺陷单不会消失，原因可以留空；填写后会留在上面，供以后判断当初为什么放过了它。"
     >
       <div class="flex items-center gap-2">
         <span class="tnum text-caption text-label-tertiary">#{{ selected?.id }}</span>
@@ -461,19 +463,19 @@ onMounted(() => {
       </div>
       <p class="mt-1.5 text-body text-label">{{ selected?.title }}</p>
 
-      <Textarea
-        v-model="wontFixReason"
-        class="mt-3"
-        :rows="3"
-        placeholder="例如：这是上游接口的历史遗留行为，改了会连带影响三个月前的对账数据，等下个版本统一处理"
-      />
-      <p v-if="wontFixReason.length > 0 && !canWontFixConfirm" class="mt-1.5 text-caption text-danger">
-        至少 {{ WONTFIX_MIN }} 个字，否则这句话等于没写
-      </p>
+      <label class="mt-3 block text-caption font-emphasis text-label-secondary">
+        不修复原因（选填）
+        <Textarea
+          v-model="wontFixReason"
+          class="mt-1.5"
+          :rows="3"
+          placeholder="例如：这是上游接口的历史遗留行为，改了会连带影响三个月前的对账数据，等下个版本统一处理"
+        />
+      </label>
 
       <template #footer>
         <Button @click="wontFixOpen = false">取消</Button>
-        <Button :disabled="!canWontFixConfirm || changingStatus" @click="confirmWontFix">
+        <Button :disabled="changingStatus" @click="confirmWontFix">
           {{ changingStatus ? '保存中…' : '确认不修复' }}
         </Button>
       </template>

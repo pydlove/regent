@@ -1,18 +1,23 @@
 package com.pydlove.regent.execution.application.command;
 
 import com.pydlove.regent.execution.domain.model.ExecReport;
+import com.pydlove.regent.execution.domain.model.ExecutionDevice;
 import com.pydlove.regent.execution.domain.model.ReportedBug;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.model.Task;
+import com.pydlove.regent.execution.domain.model.TaskDocument;
 import com.pydlove.regent.execution.domain.model.TaskAdjustment;
 import com.pydlove.regent.execution.domain.model.TaskAdjustmentStatus;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
+import com.pydlove.regent.execution.domain.model.TaskRun;
+import com.pydlove.regent.execution.domain.model.TaskRunId;
 import com.pydlove.regent.execution.domain.port.ExecutorContract;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
 import com.pydlove.regent.execution.domain.service.ExecutionConcurrencyGate;
 import com.pydlove.regent.governance.application.command.DecisionRaiseService;
 import com.pydlove.regent.governance.domain.model.Decision;
+import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.model.EnvironmentEntry;
 import com.pydlove.regent.project.domain.model.EnvironmentScope;
@@ -23,8 +28,12 @@ import com.pydlove.regent.support.ExecutionFakes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -38,7 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 外部执行者这条路的守卫。
  *
- * <p>它盯的是三类事：谁被允许领走一条任务（工作区独占、状态可领）、
+ * <p>它盯的是三类事：谁被允许领走一条任务（全局并发、状态可领）、
  * 决策往来是否与内部执行者一字不差（阈值内放行、超阈值挂起、不可逆必须问人），
  * 以及执行者消失之后平台收不收得回来（租约到期判失联）。
  */
@@ -46,6 +55,9 @@ class AgentRunServiceTest {
 
     private static final ProjectId PROJECT = ProjectId.of(1L);
     private static final String AGENT = "codex-desktop@test";
+
+    @TempDir
+    Path tempDir;
 
     private final ExecutionFakes.Tasks tasks = new ExecutionFakes.Tasks();
     private final ExecutionFakes.Runs runs = new ExecutionFakes.Runs();
@@ -56,9 +68,12 @@ class AgentRunServiceTest {
     private final ExecutionFakes.Rules rules = new ExecutionFakes.Rules();
     private final ExecutionFakes.Projects projects = new ExecutionFakes.Projects();
     private final ExecutionFakes.Attachments attachments = new ExecutionFakes.Attachments();
+    private final ExecutionFakes.Documents documents = new ExecutionFakes.Documents();
     private final ExecutionFakes.Environments environments = new ExecutionFakes.Environments();
     private final ExecutionFakes.TaskPlugins plugins = new ExecutionFakes.TaskPlugins();
     private final ExecutionFakes.Branches branches = new ExecutionFakes.Branches();
+    private final ExecutionFakes.Devices devices = new ExecutionFakes.Devices();
+    private final ExecutionFakes.Transactions transactions = new ExecutionFakes.Transactions();
     private final ExecutionConcurrencyGate concurrencyGate = new ExecutionConcurrencyGate(64);
 
     private AgentRunService service;
@@ -66,20 +81,23 @@ class AgentRunServiceTest {
     @BeforeEach
     void setUp() {
         tasks.wire(runs);
-        runs.wire(tasks);
         events.wire(runs);
-        projects.put(ExecutionFakes.Projects.profile(1L, DecisionLevel.L1, true));
+        projects.put(projectProfile(1L));
         service = serviceWithLease(Duration.ofMinutes(15));
     }
 
     private AgentRunService serviceWithLease(Duration lease) {
         DecisionRaiseService decisionRaiseService = new DecisionRaiseService(rules, decisions);
-        return new AgentRunService(tasks, runs, events, attachments, projects, environments, plugins,
+        DeviceRestartRecoveryService restartRecoveryService =
+                new DeviceRestartRecoveryService(tasks, runs, transactions);
+        return new AgentRunService(tasks, runs, devices, events, attachments, documents,
+                projects, environments, plugins,
                 decisions, branches, new BranchProvisioningService(branches),
                 new RunSettlementService(tasks, runs, adjustments, decisions, decisionRaiseService, bugs,
                         taskId -> {
                         }, new ExecutionFakes.Transactions()),
-                contract(), concurrencyGate, lease, "http://127.0.0.1:8787/api/agent/contract");
+                contract(), concurrencyGate, transactions, restartRecoveryService, lease,
+                "http://127.0.0.1:8787/api/agent/contract");
     }
 
     private static ExecutorContract contract() {
@@ -111,7 +129,7 @@ class AgentRunServiceTest {
         assertEquals(7L, work.taskId());
         assertEquals(1, work.attemptNo());
         assertEquals(TaskStatus.RUNNING.name(), tasks.get(7L).getStatus().name());
-        assertEquals("/tmp/regent-project-1", work.workdir());
+        assertEquals(projectPath(1L).toString(), work.workdir());
         assertEquals("main", work.branch());
         assertTrue(work.instruction().startsWith("把这件事做完"), work.instruction());
         assertTrue(work.instruction().contains("上报约定"), "指令末尾必须带上上报约定");
@@ -122,6 +140,37 @@ class AgentRunServiceTest {
         assertEquals(AGENT, runs.get(work.runId()).getAgentName());
         assertFalse(work.images().stream().findAny().isPresent());
         assertTrue(work.plugins().isEmpty());
+    }
+
+    @Test
+    @DisplayName("认领者可以批量追加实时执行事件")
+    void 追加实时执行事件() {
+        tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
+        AgentWorkPackage work = service.claim(AGENT, "sess-live", "p1", null).orElseThrow();
+        TaskRunId runId = TaskRunId.of(work.runId());
+        int before = events.findByRun(runId).size();
+
+        int appended = service.appendEvents(work.runId(), AGENT, List.of(
+                new AgentRunEvent("thread.started", "{\"type\":\"thread.started\"}", null),
+                new AgentRunEvent("item.completed", "{\"type\":\"item.completed\"}", null)));
+
+        assertEquals(2, appended);
+        assertEquals(before + 2, events.findByRun(runId).size());
+        assertEquals(before, events.findByRun(runId).get(before).seq());
+        assertThrows(RuntimeException.class, () -> service.appendEvents(
+                work.runId(), "other-agent", List.of(
+                        new AgentRunEvent("raw", "\"line\"", null))));
+    }
+
+    @Test
+    @DisplayName("设备暂无法执行时任务进入排队而不是停留在待执行")
+    void 设备等待执行位时任务排队() {
+        tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
+
+        Task queued = service.queueForDevice(7L);
+
+        assertEquals(TaskStatus.QUEUED, queued.getStatus());
+        assertEquals(TaskStatus.QUEUED, tasks.get(7L).getStatus());
     }
 
     @Test
@@ -163,6 +212,22 @@ class AgentRunServiceTest {
         assertEquals(2, plugin.revision());
         assertTrue(plugin.content().contains("KafkaReader"));
         assertTrue(work.instruction().contains("不要重新生成已有实现"));
+    }
+
+    @Test
+    @DisplayName("外部执行者工作包同时拿到任务文档")
+    void 认领拿到任务文档() {
+        tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
+        documents.save(TaskDocument.of(
+                TaskId.of(7L), null, "接口说明.pdf", "application/pdf",
+                128, "/tmp/docs/interface.pdf"));
+
+        AgentWorkPackage work = service.claim(AGENT, "sess-doc", "p1", null).orElseThrow();
+
+        assertEquals(1, work.documents().size());
+        assertEquals("接口说明.pdf", work.documents().get(0).filename());
+        assertTrue(work.instruction().contains("## 任务文档"), work.instruction());
+        assertTrue(work.instruction().contains("/tmp/docs/interface.pdf"), work.instruction());
     }
 
     @Test
@@ -211,7 +276,7 @@ class AgentRunServiceTest {
     @Test
     @DisplayName("按项目找活：人给的是项目标识，执行者只该在那个项目里挑")
     void 按项目找活() {
-        projects.put(ExecutionFakes.Projects.profile(2L, DecisionLevel.L1, true));
+        projects.put(projectProfile(2L));
         tasks.add(ExecutionFakes.task(1L, PROJECT, TaskStatus.PENDING));
         tasks.add(ExecutionFakes.task(2L, ProjectId.of(2L), TaskStatus.PENDING));
 
@@ -223,24 +288,24 @@ class AgentRunServiceTest {
     }
 
     @Test
-    @DisplayName("工作区独占：同一个项目上不许两个执行者同时干活")
-    void 工作区独占() {
+    @DisplayName("只受全局并发限制：同一个项目允许多个执行者同时干活")
+    void 同项目可以并发执行() {
         tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
         tasks.add(ExecutionFakes.task(8L, PROJECT, TaskStatus.PENDING));
-        service.claim(AGENT, "sess-1", null, null).orElseThrow();
+        AgentWorkPackage first = service.claim(AGENT, "sess-1", "p1", null).orElseThrow();
+        AgentWorkPackage second = service.claim("another-agent", "sess-2", "p1", null).orElseThrow();
 
-        DomainException e = assertThrows(DomainException.class,
-                () -> service.claim("another-agent", "sess-2", "p1", null));
-        assertTrue(e.getMessage().contains("工作区"), e.getMessage());
-        assertTrue(service.claim("another-agent", "sess-2", null, null).isEmpty(),
-                "不限项目时不该报错：别的项目上可能还有活，跳过这个项目继续找");
+        assertEquals(TaskStatus.RUNNING, tasks.get(7L).getStatus());
+        assertEquals(TaskStatus.RUNNING, tasks.get(8L).getStatus());
+        assertEquals(first.workdir(), second.workdir());
+        assertTrue(service.list("p1", 20).isEmpty());
     }
 
     @Test
     @DisplayName("平台并发上限：其他项目也要排队，任务收场后立即放行")
     void 平台并发上限() {
         concurrencyGate.updateLimit(1);
-        projects.put(ExecutionFakes.Projects.profile(2L, DecisionLevel.L1, true));
+        projects.put(projectProfile(2L));
         tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
         tasks.add(ExecutionFakes.task(8L, ProjectId.of(2L), TaskStatus.PENDING));
 
@@ -261,15 +326,34 @@ class AgentRunServiceTest {
     }
 
     @Test
-    @DisplayName("清单如实标出被占用的项目，而不是把它藏起来")
-    void 清单标出占用() {
+    @DisplayName("平台已满时，已终止任务立即返回不可认领，不能进入排队重试")
+    void 已终止任务不会被误认为容量不足() {
+        concurrencyGate.updateLimit(1);
+        tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
+        service.claim(AGENT, "sess-1", null, null).orElseThrow();
+
+        Task cancelled = ExecutionFakes.task(8L, PROJECT, TaskStatus.PENDING);
+        tasks.add(cancelled);
+        cancelled.dispatch("codex/task-8");
+        cancelled.cancel();
+
+        DomainException error = assertThrows(DomainException.class,
+                () -> service.claim("another-agent", "sess-2", null, 8L));
+
+        assertTrue(error.getMessage().contains("状态：CANCELLED"), error.getMessage());
+        assertFalse(error.getMessage().contains("上限"), error.getMessage());
+    }
+
+    @Test
+    @DisplayName("同项目已有任务运行时，剩余任务仍可认领")
+    void 同项目剩余任务仍可认领() {
         tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
         tasks.add(ExecutionFakes.task(8L, PROJECT, TaskStatus.PENDING));
         service.claim(AGENT, "sess-1", null, null).orElseThrow();
 
         List<?> listed = service.list("p1", 20);
-        assertEquals(1, listed.size(), "另一条待执行任务仍是候选，只是现在不可领");
-        assertFalse(((com.pydlove.regent.execution.application.query.AgentTaskSummary) listed.get(0)).claimable());
+        assertEquals(1, listed.size());
+        assertTrue(((com.pydlove.regent.execution.application.query.AgentTaskSummary) listed.get(0)).claimable());
     }
 
     @Test
@@ -489,9 +573,132 @@ class AgentRunServiceTest {
                 "任务已经判失败，不会自动再被领走");
     }
 
+    @Test
+    @DisplayName("显式指定 RUNNING 任务也不能绕过活跃执行再次认领")
+    void 活跃执行不可重复认领() {
+        Task task = ExecutionFakes.task(7L, PROJECT, TaskStatus.RUNNING);
+        tasks.add(task);
+        runs.save(TaskRun.start(TaskId.of(7L), 1, "main"));
+
+        DomainException error = assertThrows(DomainException.class,
+                () -> service.claim(AGENT, "sess-2", null, 7L));
+
+        assertTrue(error.getMessage().contains("不可认领"), error.getMessage());
+        assertEquals(1, runs.all().size(), "不能创建第二条活跃执行记录");
+    }
+
+    @Test
+    @DisplayName("设备认领后租约绑定设备，其他设备不能续租或上报")
+    void 设备租约绑定认领设备() {
+        devices.add(onlineDevice("device-1", true, Instant.now()));
+        tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
+
+        AgentWorkPackage work = service.claim(
+                AGENT, "sess-device", null, 7L, "device-1").orElseThrow();
+
+        assertEquals("device-1", runs.get(work.runId()).getDeviceId());
+        assertNotNull(runs.get(work.runId()).getLastHeartbeatAt());
+        assertThrows(DomainException.class,
+                () -> service.heartbeat(work.runId(), AGENT, "device-2"));
+        assertThrows(DomainException.class,
+                () -> service.report(work.runId(), AGENT, "device-2",
+                        ExecReport.of("DONE", "冒充上报", List.of(), null, List.of()),
+                        "sess-device", TokenUsage.ZERO, null));
+
+        AgentRunSnapshot snapshot = service.heartbeat(work.runId(), AGENT, "device-1");
+        assertEquals(AgentRunSnapshot.NextAction.KEEP_WORKING, snapshot.nextAction());
+    }
+
+    @Test
+    @DisplayName("设备实例重启恢复时同时释放进程内执行位")
+    void 设备重启释放执行位() {
+        concurrencyGate.updateLimit(1);
+        devices.add(onlineDevice("device-1", true, Instant.now()));
+        tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
+        AgentWorkPackage work = service.claim(
+                AGENT, "sess-device", null, 7L, "device-1").orElseThrow();
+        assertFalse(concurrencyGate.hasAvailableSlot());
+
+        int recovered = service.recover("device-1", "设备代理进程已重启");
+
+        assertEquals(1, recovered);
+        assertEquals(RunStatus.INTERRUPTED, runs.get(work.runId()).getStatus());
+        assertEquals(TaskStatus.QUEUED, tasks.get(7L).getStatus());
+        assertTrue(concurrencyGate.hasAvailableSlot());
+    }
+
+    @Test
+    @DisplayName("设备离线或 Codex 不可用时接单前失败，不创建执行记录")
+    void 设备自检失败不创建执行() {
+        devices.add(onlineDevice("offline", true, Instant.now().minusSeconds(60)));
+        tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
+
+        DomainException offline = assertThrows(DomainException.class,
+                () -> service.claim(AGENT, "sess-offline", null, 7L, "offline"));
+        assertTrue(offline.getMessage().contains("离线"), offline.getMessage());
+        assertTrue(runs.all().isEmpty());
+
+        devices.add(onlineDevice("no-codex", false, Instant.now()));
+        DomainException noCodex = assertThrows(DomainException.class,
+                () -> service.claim(AGENT, "sess-no-codex", null, 7L, "no-codex"));
+        assertTrue(noCodex.getMessage().contains("Codex 不可用"), noCodex.getMessage());
+        assertTrue(runs.all().isEmpty());
+    }
+
+    @Test
+    @DisplayName("项目目录不存在时接单前失败，不消耗执行位")
+    void 项目目录不存在不创建执行() throws Exception {
+        tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
+        Files.delete(projectPath(1L));
+
+        DomainException error = assertThrows(DomainException.class,
+                () -> service.claim(AGENT, "sess-no-dir", null, 7L));
+
+        assertTrue(error.getMessage().contains("项目目录不存在"), error.getMessage());
+        assertTrue(runs.all().isEmpty());
+        assertTrue(concurrencyGate.hasAvailableSlot());
+    }
+
     private AgentWorkPackage claimed() {
         tasks.add(ExecutionFakes.task(7L, PROJECT, TaskStatus.PENDING));
         return service.claim(AGENT, "sess-1", null, null).orElseThrow();
+    }
+
+    private com.pydlove.regent.project.domain.repository.ProjectProfile projectProfile(long id) {
+        try {
+            Files.createDirectories(projectPath(id));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return new com.pydlove.regent.project.domain.repository.ProjectProfile(
+                ProjectId.of(id), "p" + id, "项目 " + id, projectPath(id).toString(),
+                DecisionLevel.L1, true);
+    }
+
+    private Path projectPath(long id) {
+        return tempDir.resolve("project-" + id);
+    }
+
+    private static ExecutionDevice onlineDevice(String deviceId,
+                                                boolean codexAvailable,
+                                                Instant seenAt) {
+        return ExecutionDevice.heartbeat(
+                null,
+                UserId.of(1L),
+                deviceId,
+                "测试设备-" + deviceId,
+                "darwin",
+                "regent-device@" + deviceId,
+                "instance-" + deviceId,
+                new ExecutionDevice.CodexStatus(
+                        codexAvailable,
+                        "/usr/local/bin/codex",
+                        "codex-cli 1.0",
+                        codexAvailable ? "Codex 可执行文件可用" : "Codex 未安装",
+                        seenAt),
+                "R100B002",
+                "R100B002",
+                seenAt);
     }
 
     private static ExecReport report(String status, ExecReport.Decision decision) {

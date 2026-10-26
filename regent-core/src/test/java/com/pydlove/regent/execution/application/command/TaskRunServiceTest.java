@@ -5,6 +5,7 @@ import com.pydlove.regent.execution.domain.model.ExecResult;
 import com.pydlove.regent.execution.domain.model.RunEvent;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.model.Task;
+import com.pydlove.regent.execution.domain.model.TaskDocument;
 import com.pydlove.regent.execution.domain.model.TaskAdjustment;
 import com.pydlove.regent.execution.domain.model.TaskAdjustmentStatus;
 import com.pydlove.regent.execution.domain.model.TaskId;
@@ -56,6 +57,7 @@ class TaskRunServiceTest {
     private final ExecutionFakes.Rules rules = new ExecutionFakes.Rules();
     private final ExecutionFakes.Projects projects = new ExecutionFakes.Projects();
     private final ExecutionFakes.Attachments attachments = new ExecutionFakes.Attachments();
+    private final ExecutionFakes.Documents documents = new ExecutionFakes.Documents();
     private final ExecutionFakes.Environments environments = new ExecutionFakes.Environments();
     private final ExecutionFakes.TaskPlugins plugins = new ExecutionFakes.TaskPlugins();
     private final ExecutionFakes.Executor executor = new ExecutionFakes.Executor();
@@ -68,7 +70,8 @@ class TaskRunServiceTest {
         tasks.wire(runs);
         events.wire(runs);
         projects.put(ExecutionFakes.Projects.profile(1L, DecisionLevel.L1, true));
-        service = new TaskRunService(tasks, runs, events, attachments, projects, environments, plugins,
+        service = new TaskRunService(tasks, runs, events, attachments, documents, projects,
+                environments, plugins,
                 new RunSettlementService(tasks, runs, adjustments, decisions,
                         new DecisionRaiseService(rules, decisions), bugs, taskId -> {
                         }, new ExecutionFakes.Transactions()),
@@ -148,6 +151,23 @@ class TaskRunServiceTest {
 
             assertEquals(RunStatus.FAILED, run.getStatus());
             assertEquals(TaskStatus.FAILED, tasks.get(1L).getStatus());
+        }
+
+        @Test
+        void 执行指令携带只读任务文档() {
+            Task task = claimedTask();
+            TaskDocument document = documents.save(TaskDocument.of(
+                    task.getId(), null, "需求.md", "text/markdown",
+                    8, "/tmp/docs/需求.md"));
+            executor.script(ExecutionFakes.Executor.success("读完了"));
+
+            service.execute(task.getId());
+
+            String prompt = executor.requests.get(0).prompt();
+            assertTrue(prompt.contains("## 任务文档"), prompt);
+            assertTrue(prompt.contains(document.filename()), prompt);
+            assertTrue(prompt.contains(document.storagePath()), prompt);
+            assertTrue(prompt.contains("只读参考资料"), prompt);
         }
 
         @Test
@@ -355,7 +375,10 @@ class TaskRunServiceTest {
             executor.script(ExecutionFakes.Executor.success("修好了"));
             service.execute(TASK);
 
-            assertTrue(executor.requests.get(0).prompt().contains("平台重试"));
+            String prompt = executor.requests.get(0).prompt();
+            assertTrue(prompt.contains("平台重试"), prompt);
+            assertTrue(prompt.contains("把这件事做完"),
+                    "新会话降级时也必须拿得到原始任务要求：" + prompt);
         }
 
         @Test

@@ -1,8 +1,10 @@
 package com.pydlove.regent.project.infrastructure.persistence;
 
 import com.pydlove.regent.identity.domain.model.UserId;
+import com.pydlove.regent.organization.domain.model.OrganizationId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.model.ProjectSummaryStatus;
+import com.pydlove.regent.project.domain.model.ProjectVersionSource;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
@@ -48,9 +50,29 @@ public class MyBatisProjectProfileRepository implements ProjectProfileRepository
 
     @Override
     public List<ProjectProfile> findAll(UserId ownerId) {
-        return projectProfileMapper.selectAllOwned(ownerId.value()).stream()
+        return projectProfileMapper.selectAllOwned(ownerId.value(), null).stream()
                 .map(MyBatisProjectProfileRepository::toProfile)
                 .toList();
+    }
+
+    @Override
+    public List<ProjectProfile> findAll(UserId ownerId, OrganizationId organizationId) {
+        return projectProfileMapper.selectAllOwned(
+                        ownerId.value(), organizationId == null ? null : organizationId.value()).stream()
+                .map(MyBatisProjectProfileRepository::toProfile)
+                .toList();
+    }
+
+    @Override
+    public List<ProjectProfile> findByOrganization(OrganizationId organizationId) {
+        return projectProfileMapper.selectByOrganization(organizationId.value()).stream()
+                .map(MyBatisProjectProfileRepository::toProfile)
+                .toList();
+    }
+
+    @Override
+    public long countByOrganization(OrganizationId organizationId) {
+        return projectProfileMapper.countByOrganization(organizationId.value());
     }
 
     private static ProjectProfile toProfile(ProjectProfileRow row) {
@@ -66,6 +88,9 @@ public class MyBatisProjectProfileRepository implements ProjectProfileRepository
                 row.getSummary(),
                 row.getSummaryError(),
                 row.getSummaryGeneratedAt() == null
-                        ? null : row.getSummaryGeneratedAt().toInstant(ZoneOffset.UTC));
+                        ? null : row.getSummaryGeneratedAt().toInstant(ZoneOffset.UTC),
+                ProjectVersionSource.parse(row.getVersionSource()),
+                row.getFallbackVersion(),
+                row.getOrganizationId() == null ? null : OrganizationId.of(row.getOrganizationId()));
     }
 }

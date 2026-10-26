@@ -26,7 +26,7 @@ public interface DeploymentRepository {
         return findAll(projectId);
     }
 
-    boolean existsByName(ProjectId projectId, String name, DeploymentId excludingId);
+    boolean existsByName(java.util.Collection<ProjectId> projectIds, String name, DeploymentId excludingId);
 
     List<DeploymentId> findIdsByServerId(DeploymentServerId serverId);
 

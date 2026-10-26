@@ -72,7 +72,8 @@ public class AgentController {
 
     @PostMapping("/tasks/claim")
     public ResponseEntity<AgentTaskClaimResponse> claim(@RequestBody AgentClaimRequest request) {
-        return agentRunService.claim(request.executor(), request.sessionId(), request.projectCode(), request.taskId())
+        return agentRunService.claim(request.executor(), request.sessionId(), request.projectCode(),
+                        request.taskId(), request.deviceId())
                 .map(AgentTaskClaimResponse::from)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
@@ -81,13 +82,14 @@ public class AgentController {
     @PostMapping("/runs/{runId}/heartbeat")
     public AgentRunSnapshotResponse heartbeat(@PathVariable long runId,
                                               @RequestBody AgentHeartbeatRequest request) {
-        return AgentRunSnapshotResponse.from(agentRunService.heartbeat(runId, request.executor()));
+        return AgentRunSnapshotResponse.from(
+                agentRunService.heartbeat(runId, request.executor(), request.deviceId()));
     }
 
     @PostMapping("/runs/{runId}/report")
     public AgentReportResponse report(@PathVariable long runId,
                                       @RequestBody AgentReportRequest request) {
-        return AgentReportResponse.from(agentRunService.report(runId, request.executor(),
+        return AgentReportResponse.from(agentRunService.report(runId, request.executor(), request.deviceId(),
                 request.toReport(), request.sessionId(), request.toTokens(), request.rawResult()));
     }
 }

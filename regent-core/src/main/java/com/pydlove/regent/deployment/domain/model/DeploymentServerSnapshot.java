@@ -1,13 +1,10 @@
 package com.pydlove.regent.deployment.domain.model;
 
-import com.pydlove.regent.project.domain.model.ProjectId;
-
 import java.util.Objects;
 
 /** 入队时冻结的服务器连接信息。 */
 public record DeploymentServerSnapshot(
         DeploymentServerId serverId,
-        ProjectId projectId,
         String name,
         String host,
         int port,
@@ -16,7 +13,6 @@ public record DeploymentServerSnapshot(
 
     public DeploymentServerSnapshot {
         Objects.requireNonNull(serverId, "服务器 ID 不能为空");
-        Objects.requireNonNull(projectId, "归属项目不能为空");
         Objects.requireNonNull(name, "服务器名称不能为空");
         Objects.requireNonNull(host, "服务器地址不能为空");
         Objects.requireNonNull(username, "登录用户不能为空");

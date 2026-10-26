@@ -4,6 +4,7 @@ import com.pydlove.regent.deployment.domain.model.DeploymentAuthType;
 import com.pydlove.regent.deployment.domain.model.DeploymentExecutionMode;
 import com.pydlove.regent.deployment.domain.model.DeploymentExecutionRequest;
 import com.pydlove.regent.deployment.domain.model.DeploymentExecutionResult;
+import com.pydlove.regent.deployment.domain.model.DeploymentRunId;
 import com.pydlove.regent.deployment.domain.model.DeploymentRunStatus;
 import com.pydlove.regent.deployment.domain.port.DeploymentExecutor;
 import com.pydlove.regent.deployment.domain.port.DeploymentLogSink;
@@ -25,14 +26,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
 /**
  * 通过本机进程执行部署脚本。
  *
- * <p>远端模式把脚本从 stdin 传给服务器的 {@code bash -s}；项目发布模式则在项目根目录执行
- * 指定的 deploy.sh，由该脚本完成构建、上传和重启。
+ * <p>远端模式先确保目标目录存在，再把脚本从 stdin 传给服务器的 {@code bash -s}；
+ * 项目发布模式则在项目根目录执行指定的 deploy.sh，由该脚本完成构建、上传和重启。
  *
  * <p>远端脚本不会先上传到服务器，也不在命令行里拼接脚本内容。
  * 密码认证借助 SSH 的 askpass 辅助进程：密码放在环境变量里，不出现在 argv、日志或数据库。
@@ -48,6 +51,7 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
 
     private final String sshCommand;
     private final Duration timeout;
+    private final Map<Long, ActiveExecution> activeExecutions = new ConcurrentHashMap<>();
 
     public ProcessDeploymentExecutor(String sshCommand, Duration timeout) {
         this.sshCommand = sshCommand;
@@ -58,9 +62,18 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
     public DeploymentExecutionResult execute(DeploymentExecutionRequest request, DeploymentLogSink sink) {
         Path askpass = null;
         Process process = null;
+        ActiveExecution active = new ActiveExecution(sink);
+        ActiveExecution duplicate = activeExecutions.putIfAbsent(request.runId().value(), active);
+        if (duplicate != null) {
+            return new DeploymentExecutionResult(
+                    DeploymentRunStatus.FAILED, null, "同一部署执行记录已经在运行");
+        }
         boolean projectScript = request.executionMode() == DeploymentExecutionMode.PROJECT_SCRIPT;
         String launchTarget = projectScript ? "项目发布脚本" : "SSH";
         try {
+            if (active.cancelled()) {
+                return interrupted(active, sink);
+            }
             Path script = projectScript ? resolveProjectScript(request) : null;
             List<String> command = projectScript ? projectScriptCommand(request, script) : sshCommand(request);
             ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
@@ -80,6 +93,10 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
             }
 
             process = builder.start();
+            active.attach(process);
+            if (active.cancelled()) {
+                destroyTree(process);
+            }
             OutputPump pump = new OutputPump(process.getInputStream(), sink);
             Thread reader = new Thread(pump, "regent-deploy-output");
             reader.setDaemon(true);
@@ -100,15 +117,21 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
 
             boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
             if (!finished) {
-                process.destroyForcibly();
+                destroyTree(process);
                 process.waitFor(2, TimeUnit.SECONDS);
                 reader.join(2_000);
+                if (active.cancelled()) {
+                    return interrupted(active, sink);
+                }
                 sink.append("[平台] 部署超时（" + timeoutLabel() + "），进程已终止\n");
                 return new DeploymentExecutionResult(
                         DeploymentRunStatus.TIMEOUT, null, "部署超时（" + timeoutLabel() + "）");
             }
 
             reader.join(2_000);
+            if (active.cancelled()) {
+                return interrupted(active, sink);
+            }
             int exitCode = process.exitValue();
             if (exitCode == 0) {
                 return new DeploymentExecutionResult(
@@ -119,7 +142,7 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             if (process != null) {
-                process.destroyForcibly();
+                destroyTree(process);
             }
             sink.append("[平台] 部署被中断\n");
             return new DeploymentExecutionResult(
@@ -129,6 +152,7 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
             return new DeploymentExecutionResult(
                     DeploymentRunStatus.FAILED, null, "无法启动" + launchTarget + "：" + messageOf(e));
         } finally {
+            activeExecutions.remove(request.runId().value(), active);
             if (askpass != null) {
                 try {
                     Files.deleteIfExists(askpass);
@@ -137,6 +161,33 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
                 }
             }
         }
+    }
+
+    @Override
+    public boolean cancel(DeploymentRunId runId) {
+        ActiveExecution active = activeExecutions.get(runId.value());
+        return active != null && active.cancel();
+    }
+
+    private static DeploymentExecutionResult interrupted(ActiveExecution active,
+                                                         DeploymentLogSink sink) {
+        if (active.markInterruptedLogged()) {
+            sink.append("[平台] 已收到停止请求，正在终止部署进程\n");
+        }
+        return new DeploymentExecutionResult(
+                DeploymentRunStatus.INTERRUPTED, null, "用户停止部署");
+    }
+
+    private static void destroyTree(Process process) {
+        try {
+            List<ProcessHandle> descendants = process.descendants().toList();
+            for (int index = descendants.size() - 1; index >= 0; index--) {
+                descendants.get(index).destroyForcibly();
+            }
+        } catch (RuntimeException ignored) {
+            // 进程树可能已退出或当前平台不允许枚举，继续终止主进程
+        }
+        process.destroyForcibly();
     }
 
     private List<String> sshCommand(DeploymentExecutionRequest request) {
@@ -183,7 +234,9 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
 
     private static String remoteCommand(DeploymentExecutionRequest request) {
         StringBuilder command = new StringBuilder();
-        command.append("cd ").append(shellDirectory(request.remoteDirectory())).append(" && env");
+        String directory = shellDirectory(request.remoteDirectory());
+        command.append("mkdir -p ").append(directory)
+                .append(" && cd ").append(directory).append(" && env");
         appendEnvironment(command, "REGENT_DEPLOY_RUN_ID", Long.toString(request.runId().value()));
         appendEnvironment(command, "REGENT_DEPLOY_PROJECT_ID", Long.toString(request.projectId().value()));
         appendEnvironment(command, "REGENT_DEPLOY_HOST", request.host());
@@ -408,6 +461,39 @@ public class ProcessDeploymentExecutor implements DeploymentExecutor {
             } catch (IOException ignored) {
                 // 进程结束时管道关闭是正常路径
             }
+        }
+    }
+
+    private static final class ActiveExecution {
+
+        private final DeploymentLogSink sink;
+        private final AtomicBoolean cancelled = new AtomicBoolean();
+        private final AtomicBoolean interruptionLogged = new AtomicBoolean();
+        private volatile Process process;
+
+        private ActiveExecution(DeploymentLogSink sink) {
+            this.sink = sink;
+        }
+
+        private void attach(Process process) {
+            this.process = process;
+        }
+
+        private boolean cancel() {
+            cancelled.set(true);
+            Process current = process;
+            if (current != null) {
+                destroyTree(current);
+            }
+            return true;
+        }
+
+        private boolean cancelled() {
+            return cancelled.get();
+        }
+
+        private boolean markInterruptedLogged() {
+            return interruptionLogged.compareAndSet(false, true);
         }
     }
 }

@@ -8,6 +8,8 @@ import com.pydlove.regent.support.DeploymentFakes;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class DeploymentServerQueryServiceTest {
@@ -41,5 +43,27 @@ class DeploymentServerQueryServiceTest {
 
         assertEquals(1, service.get(server.getId()).deploymentCount());
         assertEquals(1, service.list(ProjectId.of(7L)).get(0).deploymentCount());
+    }
+
+    @Test
+    @DisplayName("共享服务器会出现在每个关联项目的服务器列表中")
+    void listsSharedServerForEveryAssignedProject() {
+        DeploymentFakes.Servers servers = new DeploymentFakes.Servers();
+        DeploymentFakes.Deployments deployments = new DeploymentFakes.Deployments();
+        DeploymentFakes.Credentials credentials = new DeploymentFakes.Credentials();
+        DeploymentServer server = DeploymentServer.create(
+                List.of(ProjectId.of(7L), ProjectId.of(8L)),
+                "共享服务器",
+                "api.example.com",
+                22,
+                "root",
+                DeploymentAuthType.KEY);
+        servers.save(server);
+        DeploymentServerQueryService service = new DeploymentServerQueryService(
+                servers, deployments, credentials);
+
+        assertEquals(1, service.list(ProjectId.of(7L)).size());
+        assertEquals(1, service.list(ProjectId.of(8L)).size());
+        assertEquals(0, service.list(ProjectId.of(9L)).size());
     }
 }

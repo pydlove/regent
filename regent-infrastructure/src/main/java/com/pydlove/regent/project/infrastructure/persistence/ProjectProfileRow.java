@@ -14,11 +14,14 @@ import java.time.LocalDateTime;
 public class ProjectProfileRow {
 
     private Long id;
+    private Long organizationId;
     private Long ownerId;
     private String code;
     private String name;
     private String path;
     private String defaultDecisionLevel;
+    private String versionSource;
+    private String fallbackVersion;
     private Boolean enabled;
     private String summaryStatus;
     private String summary;

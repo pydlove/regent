@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 public class ProjectData {
 
     private Long id;
+    private Long organizationId;
     private Long ownerId;
     private String code;
     private String name;
@@ -21,6 +22,8 @@ public class ProjectData {
     private String techStack;
     private String verifyMethod;
     private String defaultDecisionLevel;
+    private String versionSource;
+    private String fallbackVersion;
     private Boolean enabled;
     private String summaryStatus;
     private String summary;

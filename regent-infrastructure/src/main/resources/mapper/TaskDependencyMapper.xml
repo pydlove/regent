@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.requirement.infrastructure.persistence.TaskDependencyMapper">
+
+    <select id="selectDependencies" resultType="long">
+        SELECT depends_on_task_id
+        FROM task_dependency
+        WHERE task_id = #{taskId}
+        ORDER BY depends_on_task_id
+    </select>
+
+    <delete id="deleteByTask">
+        DELETE FROM task_dependency WHERE task_id = #{taskId}
+    </delete>
+
+    <insert id="insertDependencies">
+        INSERT INTO task_dependency (task_id, depends_on_task_id, created_at)
+        VALUES
+        <foreach collection="dependsOnTaskIds" item="dependencyId" separator=",">
+            (#{taskId}, #{dependencyId}, UTC_TIMESTAMP(3))
+        </foreach>
+    </insert>
+
+</mapper>

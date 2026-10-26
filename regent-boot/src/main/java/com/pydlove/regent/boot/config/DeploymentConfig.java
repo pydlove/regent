@@ -22,6 +22,7 @@ import com.pydlove.regent.deployment.infrastructure.persistence.DeploymentServer
 import com.pydlove.regent.execution.domain.port.AgentExecutor;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.project.domain.repository.ProjectRepository;
+import com.pydlove.regent.project.application.query.ProjectVersionService;
 import com.pydlove.regent.shared.domain.TransactionRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -154,6 +155,7 @@ public class DeploymentConfig {
             DeploymentRunRepository deploymentRunRepository,
             DeploymentServerRepository serverRepository,
             ProjectProfileRepository projectProfileRepository,
+            ProjectVersionService projectVersionService,
             DeploymentExecutor deploymentExecutor,
             DeploymentServerCredentialStore credentialStore,
             DeploymentLogStore deploymentLogStore,
@@ -164,6 +166,7 @@ public class DeploymentConfig {
                 deploymentRunRepository,
                 serverRepository,
                 projectProfileRepository,
+                projectVersionService,
                 deploymentExecutor,
                 credentialStore,
                 deploymentLogStore,

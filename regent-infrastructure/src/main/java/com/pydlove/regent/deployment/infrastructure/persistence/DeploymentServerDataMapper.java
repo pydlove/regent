@@ -8,6 +8,7 @@ import com.pydlove.regent.project.domain.model.ProjectId;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 
 /** 部署服务器领域对象与数据对象转换。 */
 public final class DeploymentServerDataMapper {
@@ -18,7 +19,6 @@ public final class DeploymentServerDataMapper {
     public static DeploymentServerData toData(DeploymentServer server) {
         DeploymentServerData data = new DeploymentServerData();
         data.setId(server.getId() == null ? null : server.getId().value());
-        data.setProjectId(server.getProjectId().value());
         data.setName(server.getName());
         data.setHost(server.getHost());
         data.setPort(server.getPort());
@@ -30,10 +30,10 @@ public final class DeploymentServerDataMapper {
         return data;
     }
 
-    public static DeploymentServer toDomain(DeploymentServerRow row) {
+    public static DeploymentServer toDomain(DeploymentServerRow row, List<Long> projectIds) {
         return DeploymentServer.restore(
                 DeploymentServerId.of(row.getId()),
-                ProjectId.of(row.getProjectId()),
+                projectIds.stream().map(ProjectId::of).toList(),
                 row.getName(),
                 row.getHost(),
                 row.getPort(),

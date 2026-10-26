@@ -4,6 +4,7 @@ import type { EnvironmentEntry, EnvironmentScope } from '@/types/api'
 export type SaveEnvironmentInput = {
   scope: EnvironmentScope
   projectId: number | null
+  projectIds: number[]
   value: string
   tags: string[]
   description: string

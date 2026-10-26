@@ -18,7 +18,7 @@ import {
 
 const props = defineProps<{
   entry: EnvironmentEntry | null
-  projectName: string
+  projectNames: string[]
 }>()
 
 const emit = defineEmits<{
@@ -48,7 +48,7 @@ const linkable = computed(
     v-model:open="open"
     layout="log"
     :title="entry?.description || '环境详情'"
-    :description="entry?.scope === 'GLOBAL' ? '所有项目可用；项目级同键配置会覆盖它。' : '仅在指定项目执行任务时生效。'"
+    :description="entry?.scope === 'GLOBAL' ? '所有项目可用；项目级同键配置会覆盖它。' : '仅在关联项目执行任务时生效。'"
     :icon="KeyRound"
   >
     <template v-if="entry">
@@ -64,7 +64,7 @@ const linkable = computed(
             {{ scopeLabel }}
           </Badge>
           <span v-if="entry.scope === 'PROJECT'" class="break-all">
-            {{ projectName || `项目 #${entry.projectId}` }}
+            {{ projectNames.length > 0 ? projectNames.join('、') : `项目 #${entry.projectId}` }}
           </span>
         </dd>
       </dl>

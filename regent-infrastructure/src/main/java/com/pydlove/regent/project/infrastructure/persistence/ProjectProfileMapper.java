@@ -15,5 +15,10 @@ public interface ProjectProfileMapper {
 
     List<ProjectProfileRow> selectAll();
 
-    List<ProjectProfileRow> selectAllOwned(@Param("ownerId") long ownerId);
+    List<ProjectProfileRow> selectAllOwned(@Param("ownerId") long ownerId,
+                                           @Param("organizationId") Long organizationId);
+
+    List<ProjectProfileRow> selectByOrganization(@Param("organizationId") long organizationId);
+
+    long countByOrganization(@Param("organizationId") long organizationId);
 }

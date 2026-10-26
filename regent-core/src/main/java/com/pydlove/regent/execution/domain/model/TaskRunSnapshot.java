@@ -16,6 +16,7 @@ public record TaskRunSnapshot(
         TaskId taskId,
         int attemptNo,
         String branchName,
+        String baseRef,
         RunStatus status,
         Integer exitCode,
         TokenUsage tokens,
@@ -25,7 +26,10 @@ public record TaskRunSnapshot(
         List<String> changedFiles,
         String executor,
         String agentName,
+        String deviceId,
         Instant leaseExpiresAt,
+        Instant lastHeartbeatAt,
+        Instant lastEventAt,
         Instant startedAt,
         Instant finishedAt,
         Instant createdAt) {

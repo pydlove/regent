@@ -8,6 +8,7 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
 import {
+  assertReleasePreflight,
   codexPrompt,
   codexSchema,
   nextVersion,
@@ -16,41 +17,51 @@ import {
   normalizeReviewedRelease,
   parseVersion,
   publishArguments,
+  releaseEvidence,
 } from './lib.mjs'
+import { ReleaseStore } from './store.mjs'
 
 const centerDirectory = path.dirname(fileURLToPath(import.meta.url))
 const projectDirectory = path.resolve(centerDirectory, '..')
 const publicDirectory = path.join(centerDirectory, 'public')
 const releasesPath = path.join(projectDirectory, 'regent-web/src/content/releases.json')
 const releaseScript = path.join(projectDirectory, 'scripts/release-version.mjs')
-const runtimeDirectory = path.join(
-  process.env.REGENT_HOME?.trim() || path.join(os.homedir(), '.regent'),
-  'release-center',
-)
+const regentHome = process.env.REGENT_HOME?.trim() || path.join(os.homedir(), '.regent')
+const runtimeDirectory = path.join(regentHome, 'release-center')
 const draftPath = path.join(runtimeDirectory, 'draft.json')
-const lastJobPath = path.join(runtimeDirectory, 'last-job.json')
+const legacyLastJobPath = path.join(runtimeDirectory, 'last-job.json')
+const databasePath = path.join(runtimeDirectory, 'release-center.db')
+const downloadsDirectory = path.join(regentHome, 'downloads')
+const manifestPath = path.join(downloadsDirectory, 'latest.json')
 const port = Number(process.env.REGENT_RELEASE_CENTER_PORT || 12600)
 const host = '127.0.0.1'
-const jobs = new Map()
 let activeJobId = null
 let generating = false
 
 fs.mkdirSync(runtimeDirectory, { recursive: true, mode: 0o700 })
+const store = new ReleaseStore(databasePath)
 
-function persistJob(job) {
-  fs.writeFileSync(lastJobPath, `${JSON.stringify(job, null, 2)}\n`, { mode: 0o600 })
-}
-
-function loadLastJob() {
+function migrateLegacyJob() {
   try {
-    const job = JSON.parse(fs.readFileSync(lastJobPath, 'utf8'))
-    if (job?.id && job?.version) jobs.set(job.id, job)
+    if (!fs.existsSync(legacyLastJobPath)) return
+    const job = JSON.parse(fs.readFileSync(legacyLastJobPath, 'utf8'))
+    if (job?.id && job?.version && !store.getJob(job.id)) store.upsertJob(job)
   } catch {
-    // 还没有历史发布任务。
+    // 旧任务损坏时不影响新任务库启动
   }
 }
 
-loadLastJob()
+migrateLegacyJob()
+const interruptedJobs = store.interruptRunningJobs(
+  '发布中心重启，原执行进程已退出；请检查日志后重试',
+)
+if (interruptedJobs > 0) {
+  console.warn(`发布中心启动恢复：${interruptedJobs} 个执行中任务已标记为中断`)
+}
+
+function persistJob(job) {
+  return store.upsertJob(job)
+}
 
 function releases() {
   return JSON.parse(fs.readFileSync(releasesPath, 'utf8')).releases
@@ -100,7 +111,6 @@ function clearDraft() {
 }
 
 function relayConfiguration() {
-  const regentHome = process.env.REGENT_HOME?.trim() || path.join(os.homedir(), '.regent')
   const envFile = path.join(regentHome, 'relay-connector.env')
   const content = fs.readFileSync(envFile, 'utf8')
   const serverUrl = content.match(/^REGENT_RELAY_SERVER_URL=(.+)$/m)?.[1]?.trim()
@@ -177,6 +187,50 @@ function capture(command, args) {
       else reject(new Error(stderr.trim() || `${command} 退出码 ${code}`))
     })
   })
+}
+
+async function gitTagExists(tagName) {
+  try {
+    await capture('git', ['rev-parse', '--verify', `refs/tags/${tagName}`])
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function recordReleaseEvidence(job, sourceCommit) {
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error(`发布清单不存在：${manifestPath}`)
+  }
+  const manifestContent = fs.readFileSync(manifestPath)
+  const manifest = JSON.parse(manifestContent.toString('utf8'))
+  if (manifest.version !== job.version) {
+    throw new Error(`发布清单版本 ${manifest.version} 与任务版本 ${job.version} 不一致`)
+  }
+  const tagName = job.tagName || job.version
+  const commitSha = await capture('git', ['rev-parse', `refs/tags/${tagName}^{commit}`])
+  const evidence = releaseEvidence({
+    version: job.version,
+    jobId: job.id,
+    sourceCommit,
+    commitSha,
+    tagName,
+    manifest,
+    manifestPath,
+    manifestSha256: crypto.createHash('sha256').update(manifestContent).digest('hex'),
+    createdAt: new Date().toISOString(),
+  })
+  for (const artifact of evidence.artifacts) {
+    const file = path.join(downloadsDirectory, artifact.file)
+    const stats = fs.statSync(file, { throwIfNoEntry: false })
+    if (!stats?.isFile() || stats.size !== artifact.sizeBytes) {
+      throw new Error(`发布产物缺失或大小不一致：${artifact.file}`)
+    }
+  }
+  job.commitSha = commitSha
+  job.tagName = tagName
+  store.saveRelease(evidence)
+  return evidence
 }
 
 function parseCodexOutput(text) {
@@ -263,14 +317,18 @@ function appendJobLog(job, chunk) {
   persistJob(job)
 }
 
-function startPublish(payload) {
+async function startPublish(payload) {
   if (activeJobId) throw new Error('已有发布任务正在执行')
   const parsed = parseVersion(payload.version)
   const content = normalizeReviewedRelease(payload)
   const current = releases()
-  if (current.some((release) => release.version === parsed.version)) {
-    throw new Error(`版本 ${parsed.version} 已存在，请递增构建号`)
-  }
+  const dirty = (await capture('git', ['status', '--porcelain'])) !== ''
+  assertReleasePreflight({
+    dirty,
+    tagExists: await gitTagExists(parsed.version),
+    versionExists: current.some((release) => release.version === parsed.version),
+  })
+  const sourceCommit = await capture('git', ['rev-parse', 'HEAD'])
   const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'regent-release-publish-'))
   const releaseInfoFile = path.join(temporaryDirectory, 'release-info.json')
   fs.writeFileSync(releaseInfoFile, `${JSON.stringify(content, null, 2)}\n`, 'utf8')
@@ -280,51 +338,80 @@ function startPublish(payload) {
       version: parsed.version,
       releaseInfoFile,
       deploy: payload.deploy,
+      webOnly: payload.webOnly,
     }),
   ]
 
   const job = {
     id: crypto.randomUUID(),
     version: parsed.version,
+    kind: 'publish',
+    title: `发布 ${parsed.version}`,
     status: 'running',
+    step: 'publishing',
     logs: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     error: null,
+    tagName: parsed.version,
+    metadata: {
+      sourceCommit,
+      webOnly: payload.webOnly === true,
+      deploy: payload.deploy === true,
+    },
   }
-  jobs.set(job.id, job)
   activeJobId = job.id
   job.logs.push(`开始发布 ${parsed.version}`)
+  job.logs.push(`源提交 ${sourceCommit.slice(0, 8)}，工作区已通过干净检查`)
   persistJob(job)
   const child = spawn(process.execPath, args, {
     cwd: projectDirectory,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: process.env,
   })
+  let settled = false
   child.stdout.on('data', (chunk) => appendJobLog(job, chunk))
   child.stderr.on('data', (chunk) => appendJobLog(job, chunk))
   child.on('error', (error) => {
+    if (settled) return
+    settled = true
     job.status = 'failed'
+    job.step = 'failed'
     job.error = error.message
     job.updatedAt = new Date().toISOString()
     activeJobId = null
     persistJob(job)
     fs.rmSync(temporaryDirectory, { recursive: true, force: true })
   })
-  child.on('close', (code) => {
-    job.status = code === 0 ? 'success' : 'failed'
-    job.error = code === 0 ? null : `发布进程退出码 ${code}`
+  child.on('close', async (code) => {
+    if (settled) return
+    settled = true
+    try {
+      if (code !== 0) throw new Error(`发布进程退出码 ${code}`)
+      await recordReleaseEvidence(job, sourceCommit)
+      job.status = 'success'
+      job.step = 'completed'
+      job.error = null
+      job.logs.push(`发布凭证已写入：${job.tagName} -> ${job.commitSha.slice(0, 8)}`)
+      clearDraft()
+    } catch (error) {
+      job.status = 'failed'
+      job.step = 'evidence'
+      job.error = error.message
+    }
     job.updatedAt = new Date().toISOString()
     activeJobId = null
     persistJob(job)
     fs.rmSync(temporaryDirectory, { recursive: true, force: true })
-    if (code === 0) clearDraft()
   })
   return job
 }
 
-function startServerDeploy() {
+async function startServerDeploy() {
   if (activeJobId) throw new Error('已有发布任务正在执行')
+  if ((await capture('git', ['status', '--porcelain'])) !== '') {
+    throw new Error('工作区有未提交改动，不能直接升级服务器；请先提交并发布版本')
+  }
   const { url, environment } = relayConfiguration()
   const deployScript = path.join(projectDirectory, 'deploy/remote/deploy.sh')
   if (!fs.existsSync(deployScript)) throw new Error('找不到公网部署脚本')
@@ -334,34 +421,70 @@ function startServerDeploy() {
     kind: 'server-deploy',
     title: '发布中继器并升级服务器',
     status: 'running',
+    step: 'deploying',
     logs: [`开始发布 ${url}`],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     error: null,
   }
-  jobs.set(job.id, job)
   activeJobId = job.id
   persistJob(job)
+  store.saveDeployment({
+    id: job.id,
+    jobId: job.id,
+    environment: 'production',
+    targetUrl: url,
+    status: 'running',
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  })
   const child = spawn(deployScript, [], {
     cwd: projectDirectory,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: environment,
   })
+  let settled = false
   child.stdout.on('data', (chunk) => appendJobLog(job, chunk))
   child.stderr.on('data', (chunk) => appendJobLog(job, chunk))
   child.on('error', (error) => {
+    if (settled) return
+    settled = true
     job.status = 'failed'
+    job.step = 'failed'
     job.error = error.message
     job.updatedAt = new Date().toISOString()
     activeJobId = null
     persistJob(job)
+    store.saveDeployment({
+      id: job.id,
+      jobId: job.id,
+      environment: 'production',
+      targetUrl: url,
+      status: 'failed',
+      error: error.message,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+    })
   })
   child.on('close', (code) => {
+    if (settled) return
+    settled = true
     job.status = code === 0 ? 'success' : 'failed'
+    job.step = code === 0 ? 'completed' : 'failed'
     job.error = code === 0 ? null : `服务器发布进程退出码 ${code}`
     job.updatedAt = new Date().toISOString()
     activeJobId = null
     persistJob(job)
+    store.saveDeployment({
+      id: job.id,
+      jobId: job.id,
+      environment: 'production',
+      targetUrl: url,
+      status: job.status,
+      error: job.error,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+    })
   })
   return job
 }
@@ -380,6 +503,9 @@ function localOriginAllowed(request) {
 async function handleApi(request, response, pathname) {
   if (request.method === 'GET' && pathname === '/api/state') {
     const history = releases()
+    const evidenceByVersion = new Map(
+      store.listReleases(30).map((release) => [release.version, release]),
+    )
     const currentVersion = history[0]?.version
     const gitHead = await capture('git', ['rev-parse', '--short', 'HEAD'])
     const dirty = (await capture('git', ['status', '--porcelain'])) !== ''
@@ -387,7 +513,10 @@ async function handleApi(request, response, pathname) {
     sendJson(response, 200, {
       currentVersion,
       suggestedVersion: nextVersion(currentVersion),
-      releases: history.slice(0, 8),
+      releases: history.slice(0, 8).map((release) => ({
+        ...release,
+        evidence: evidenceByVersion.get(release.version) || null,
+      })),
       gitHead,
       dirty,
       busy: Boolean(activeJobId),
@@ -398,16 +527,29 @@ async function handleApi(request, response, pathname) {
     return
   }
 
+  if (request.method === 'GET' && pathname === '/api/jobs') {
+    sendJson(response, 200, store.listJobs(20).map(({ logs, ...job }) => job))
+    return
+  }
+
   if (request.method === 'GET' && pathname.startsWith('/api/jobs/')) {
     const id = pathname.slice('/api/jobs/'.length)
-    const job = id === 'last'
-      ? [...jobs.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
-      : jobs.get(id)
+    const job = id === 'last' ? store.getLastJob() : store.getJob(id)
     if (!job) {
       sendError(response, 404, '发布任务不存在')
       return
     }
     sendJson(response, 200, job)
+    return
+  }
+
+  if (request.method === 'GET' && pathname === '/api/releases') {
+    sendJson(response, 200, store.listReleases(50))
+    return
+  }
+
+  if (request.method === 'GET' && pathname === '/api/deployments') {
+    sendJson(response, 200, store.listDeployments(50))
     return
   }
 
@@ -472,7 +614,7 @@ async function handleApi(request, response, pathname) {
 
   if (pathname === '/api/server/deploy') {
     try {
-      const job = startServerDeploy()
+      const job = await startServerDeploy()
       sendJson(response, 202, { jobId: job.id })
     } catch (error) {
       sendError(response, 400, error.message)
@@ -516,7 +658,7 @@ async function handleApi(request, response, pathname) {
   if (pathname === '/api/publish') {
     try {
       const body = await readBody(request)
-      const job = startPublish(body)
+      const job = await startPublish(body)
       sendJson(response, 202, { jobId: job.id })
     } catch (error) {
       sendError(response, 400, error.message)

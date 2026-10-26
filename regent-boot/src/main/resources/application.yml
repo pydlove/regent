@@ -55,8 +55,8 @@ spring:
   # 超出它由应用服务拒绝并给出人话，超出这里则是 MaxUploadSizeExceededException —— 也映射成 400。
   servlet:
     multipart:
-      max-file-size: 16MB
-      max-request-size: 32MB
+      max-file-size: 32MB
+      max-request-size: 64MB
 
 management:
   endpoints:
@@ -80,6 +80,9 @@ regent:
     remembered-session-ttl: ${REGENT_AUTH_REMEMBERED_SESSION_TTL:PT4320H}
     # 当前设备代理使用独立 Bearer 会话，可单独撤销，不依赖浏览器进程。
     device-session-ttl: ${REGENT_AUTH_DEVICE_SESSION_TTL:PT4320H}
+    # 手机 App 使用独立访问令牌与轮换刷新令牌；浏览器 Cookie 不参与手机认证。
+    mobile-access-ttl: ${REGENT_MOBILE_ACCESS_TTL:PT30M}
+    mobile-refresh-ttl: ${REGENT_MOBILE_REFRESH_TTL:PT720H}
     # 本地 HTTP 开发默认 false；生产由反向代理提供 HTTPS 时必须设成 true。
     cookie-secure: ${REGENT_AUTH_COOKIE_SECURE:false}
     email-code:
@@ -88,11 +91,23 @@ regent:
       resend-cooldown: ${REGENT_EMAIL_CODE_COOLDOWN:PT60S}
       max-per-day: ${REGENT_EMAIL_CODE_MAX_PER_DAY:10}
       home-url: ${REGENT_PUBLIC_URL:http://127.0.0.1:12580}
+  organization:
+    # 邀请邮件里的公开链接。生产默认使用公网域名，自建环境可用 REGENT_PUBLIC_URL 覆盖。
+    invitation-url: ${REGENT_PUBLIC_URL:https://ichuang.top/regent}
+    invitation-ttl: ${REGENT_ORGANIZATION_INVITATION_TTL:P7D}
   attachments:
     # 图片落盘目录。运行时产物不进仓库（TECH_STACK.md 六），与日志、schema、runs 同级
     dir: ${REGENT_ATTACHMENTS_DIR:${regent.home}/attachments}
     # 单张图片上限（字节）。默认 10MB：手机截图、设计稿都够，再大就是该压缩的原图了
     max-bytes: ${REGENT_ATTACHMENT_MAX_BYTES:10485760}
+  documents:
+    # 任务文档单份上限。图片仍由 attachments.max-bytes 单独限制。
+    max-bytes: ${REGENT_DOCUMENT_MAX_BYTES:26214400}
+  code-standards:
+    # 开发规范必须是可读文本；正文会在任务执行时注入，避免设备间路径不可见。
+    max-bytes: ${REGENT_CODE_STANDARD_MAX_BYTES:524288}
+    # 单任务全部规范的正文上限；超限在任务创建或派发前失败关闭。
+    max-prompt-bytes: ${REGENT_CODE_STANDARD_MAX_PROMPT_BYTES:1048576}
   downloads:
     # 无 CDN 的安装包目录。发布时把 latest.json 和安装包放在这里，通过 /api/release/* 下载。
     dir: ${REGENT_DOWNLOADS_DIR:${regent.home}/downloads}
@@ -155,6 +170,11 @@ regent:
     timeout: ${REGENT_TEST_TIMEOUT:PT10M}
     max-output-bytes: ${REGENT_TEST_MAX_OUTPUT_BYTES:262144}
     workers: ${REGENT_TEST_WORKERS:2}
+  review:
+    # 任务收场后的审阅生成与 AI 预审独立于执行池，避免大 diff 占住任务执行位。
+    workers: ${REGENT_REVIEW_WORKERS:2}
+    # AI 审阅超时后自动退回规则预审；代码事实与分析状态仍会落库。
+    timeout: ${REGENT_REVIEW_TIMEOUT:PT2M}
   speech:
     # 新建任务弹框的语音转写。录音由浏览器采集，停止后上传到本机 Whisper 离线处理。
     whisper-command: ${REGENT_WHISPER_COMMAND:whisper}

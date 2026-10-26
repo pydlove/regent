@@ -27,6 +27,31 @@ SERVER_USER="${REGENT_SERVER_USER:-}"
 SERVER_PASSWORD="${REGENT_SERVER_PASSWORD:-}"
 SSH_KEY_PATH="${REGENT_SSH_KEY:-$HOME/.ssh/id_rsa}"
 SSH_PORT="${REGENT_SSH_PORT:-}"
+LOCAL_RELAY_ENV="${HOME}/.regent/relay-connector.env"
+LOCAL_PUBLIC_ENV="${HOME}/.regent/regent-public.env"
+
+# 子路径部署由本机中继配置持久化，避免每次从发布中心部署时又退回根路径构建。
+if [ -f "$LOCAL_PUBLIC_ENV" ]; then
+    set -a
+    source "$LOCAL_PUBLIC_ENV"
+    set +a
+fi
+if [ -z "${REGENT_WEB_BASE_PATH:-}" ] && [ -f "$LOCAL_RELAY_ENV" ]; then
+    REGENT_WEB_BASE_PATH=$(grep -m1 '^REGENT_WEB_BASE_PATH=' "$LOCAL_RELAY_ENV" 2>/dev/null | cut -d= -f2- || true)
+fi
+if [ -z "${REGENT_PUBLIC_URL:-}" ] && [ -f "$LOCAL_RELAY_ENV" ]; then
+    REGENT_PUBLIC_URL=$(grep -m1 '^REGENT_PUBLIC_URL=' "$LOCAL_RELAY_ENV" 2>/dev/null | cut -d= -f2- || true)
+fi
+REGENT_WEB_BASE_PATH="${REGENT_WEB_BASE_PATH:-/}"
+case "$REGENT_WEB_BASE_PATH" in
+    /*) ;;
+    *) REGENT_WEB_BASE_PATH="/$REGENT_WEB_BASE_PATH" ;;
+esac
+case "$REGENT_WEB_BASE_PATH" in
+    */) ;;
+    *) REGENT_WEB_BASE_PATH="$REGENT_WEB_BASE_PATH/" ;;
+esac
+export REGENT_WEB_BASE_PATH
 
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$(dirname "$DEPLOY_DIR")")"
@@ -247,18 +272,27 @@ log_info "1/7 构建中继"
 
 log_info "2/7 构建前端"
 (cd "$PROJECT_DIR/regent-web" && npm ci --registry=https://registry.npmmirror.com --strict-ssl=false && npm run build)
+if [ "$REGENT_WEB_BASE_PATH" != "/" ]; then
+    log_info "构建兼容旧客户端的根路径前端"
+    (cd "$PROJECT_DIR/regent-web" && REGENT_WEB_BASE_PATH=/ npm run build -- --outDir dist-root)
+fi
 
 log_info "3/7 准备服务器目录"
 "${SSH_COMMAND[@]}" \
-    "mkdir -p $REMOTE_BASE/relay $REMOTE_BASE/frontend $REMOTE_BASE/script $REMOTE_BASE/logs $REMOTE_BASE/nginx $REMOTE_BASE/downloads"
+    "mkdir -p $REMOTE_BASE/relay $REMOTE_BASE/frontend $REMOTE_BASE/frontend/dist-root $REMOTE_BASE/script $REMOTE_BASE/logs $REMOTE_BASE/nginx $REMOTE_BASE/downloads"
 
 log_info "4/7 上传中继与静态前端"
 JAR=$(ls -t "$PROJECT_DIR"/regent-relay/target/regent-relay-*.jar | head -1)
 "${SSH_COMMAND[@]}" "systemctl stop regent-relay 2>/dev/null || true"
 rsync -az -e "$RSYNC_SSH" "$JAR" "$REMOTE_HOST:$REMOTE_BASE/relay/regent-relay.jar"
 rsync -az --delete -e "$RSYNC_SSH" "$PROJECT_DIR/regent-web/dist/" "$REMOTE_HOST:$REMOTE_BASE/frontend/dist/"
+if [ "$REGENT_WEB_BASE_PATH" != "/" ]; then
+    rsync -az --delete -e "$RSYNC_SSH" "$PROJECT_DIR/regent-web/dist-root/" "$REMOTE_HOST:$REMOTE_BASE/frontend/dist-root/"
+fi
 rsync -az -e "$RSYNC_SSH" "$DEPLOY_DIR/scripts/" "$REMOTE_HOST:$REMOTE_BASE/script/"
 rsync -az -e "$RSYNC_SSH" "$DEPLOY_DIR/nginx/" "$REMOTE_HOST:$REMOTE_BASE/nginx/"
+"${SSH_COMMAND[@]}" \
+    "sed -i 's#__REMOTE_BASE__#$REMOTE_BASE#g' $REMOTE_BASE/nginx/regent-subpath.conf"
 if [ -f "$HOME/.regent/downloads/latest.json" ]; then
     log_info "上传安装包到公网静态下载目录"
     rsync -az -e "$RSYNC_SSH" "$HOME/.regent/downloads/" "$REMOTE_HOST:$REMOTE_BASE/downloads/"
@@ -279,7 +313,7 @@ if [ -z "$REMOTE_SECRET" ]; then
         'REGENT_RELAY_PORT=8788' \
         "REGENT_RELAY_SHARED_SECRET=$RELAY_SECRET" \
         'REGENT_RELAY_POLL_SECONDS=25' \
-        'REGENT_RELAY_REQUEST_TIMEOUT_SECONDS=40' \
+        'REGENT_RELAY_REQUEST_TIMEOUT_SECONDS=240' \
         'REGENT_RELAY_OFFLINE_SECONDS=45' \
         'REGENT_RELAY_QUEUE_CAPACITY=64' \
         'REGENT_RELAY_MAX_BODY_BYTES=33554432' \
@@ -288,6 +322,9 @@ if [ -z "$REMOTE_SECRET" ]; then
 else
     RELAY_SECRET="$REMOTE_SECRET"
     log_info "服务器已有 relay.env，沿用原密钥"
+    "${SSH_COMMAND[@]}" "grep -q '^REGENT_RELAY_REQUEST_TIMEOUT_SECONDS=' $REMOTE_BASE/relay/relay.env \
+        && sed -i 's/^REGENT_RELAY_REQUEST_TIMEOUT_SECONDS=.*/REGENT_RELAY_REQUEST_TIMEOUT_SECONDS=240/' $REMOTE_BASE/relay/relay.env \
+        || echo 'REGENT_RELAY_REQUEST_TIMEOUT_SECONDS=240' >> $REMOTE_BASE/relay/relay.env"
 fi
 
 log_info "6/7 安装并启动中继，再配对本机连接器"
@@ -313,6 +350,8 @@ else
         REGENT_SERVER_PASSWORD="$SERVER_PASSWORD" \
         REGENT_REMOTE_BASE="$REMOTE_BASE" \
         REGENT_RELAY_SHARED_SECRET="$RELAY_SECRET" \
+        REGENT_WEB_BASE_PATH="$REGENT_WEB_BASE_PATH" \
+        REGENT_PUBLIC_URL="${REGENT_PUBLIC_URL:-}" \
         bash "$PROJECT_DIR/deploy/local/connect-relay.sh"; then
         log_error "本机连接器未上线，公网 API 仍会返回 RELAY_OFFLINE"
         log_error "修复后单独运行 deploy/local/connect-relay.sh，再重试部署"
@@ -396,11 +435,13 @@ REMOTE_NGINX
 
 printf '%s\n' "$NGINX_OUTPUT"
 
+PUBLIC_URL="${REGENT_PUBLIC_URL:-http://$SERVER_IP:18787/}"
+
 cat <<TIP
 
 部署完成。
 
-  访问地址：http://$SERVER_IP:18787
+  访问地址：$PUBLIC_URL
   安装目录：$REMOTE_BASE
   （外网打不开就先检查云厂商安全组是否放行 18787/tcp）
 

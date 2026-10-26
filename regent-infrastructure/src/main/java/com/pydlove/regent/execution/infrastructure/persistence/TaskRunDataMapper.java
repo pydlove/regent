@@ -36,6 +36,7 @@ public final class TaskRunDataMapper {
         data.setId(run.getId() == null ? null : run.getId().value());
         data.setTaskId(run.getTaskId().value());
         data.setAttemptNo(run.getAttemptNo());
+        data.setBaseRef(run.getBaseRef());
         data.setStatus(run.getStatus().name());
         data.setExitCode(run.getExitCode());
         data.setTokenInput(run.getTokens().input());
@@ -44,7 +45,10 @@ public final class TaskRunDataMapper {
         data.setBranchName(run.getBranchName());
         data.setExecutor(run.getExecutor());
         data.setAgentName(run.getAgentName());
+        data.setDeviceId(run.getDeviceId());
         data.setLeaseExpiresAt(toDb(run.getLeaseExpiresAt()));
+        data.setLastHeartbeatAt(toDb(run.getLastHeartbeatAt()));
+        data.setLastEventAt(toDb(run.getLastEventAt()));
         data.setSummary(run.getSummary());
         data.setRawResult(run.getRawResult());
         data.setSchemaValid(run.isSchemaValid());
@@ -61,6 +65,7 @@ public final class TaskRunDataMapper {
                 TaskId.of(data.getTaskId()),
                 data.getAttemptNo(),
                 data.getBranchName(),
+                data.getBaseRef(),
                 RunStatus.valueOf(data.getStatus()),
                 data.getExitCode(),
                 TokenUsage.of(nullToZero(data.getTokenInput()),
@@ -72,7 +77,10 @@ public final class TaskRunDataMapper {
                 fromJson(data.getChangedFiles()),
                 data.getExecutor(),
                 data.getAgentName(),
+                data.getDeviceId(),
                 fromDb(data.getLeaseExpiresAt()),
+                fromDb(data.getLastHeartbeatAt()),
+                fromDb(data.getLastEventAt()),
                 fromDb(data.getStartedAt()),
                 fromDb(data.getFinishedAt()),
                 fromDb(data.getCreatedAt())));

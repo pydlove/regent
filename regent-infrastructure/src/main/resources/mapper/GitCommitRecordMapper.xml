@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.gitcommit.infrastructure.persistence.GitCommitRecordMapper">
+
+    <sql id="columns">
+        id, project_id, task_id, task_run_id, review_snapshot_id, review_decision_id,
+        operator_id, project_name, task_title, repository_path, ticket, commit_message,
+        branch_name, base_ref, commit_sha, file_paths_json, status, failure_reason,
+        output_summary, started_at, finished_at, created_at, updated_at
+    </sql>
+
+    <select id="selectById"
+            resultType="com.pydlove.regent.gitcommit.infrastructure.persistence.GitCommitRecordData">
+        SELECT <include refid="columns"/>
+        FROM git_commit_record
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectSucceededBySnapshot"
+            resultType="com.pydlove.regent.gitcommit.infrastructure.persistence.GitCommitRecordData">
+        SELECT <include refid="columns"/>
+        FROM git_commit_record
+        WHERE review_snapshot_id = #{snapshotId}
+          AND status = 'SUCCEEDED'
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectRunningBySnapshot"
+            resultType="com.pydlove.regent.gitcommit.infrastructure.persistence.GitCommitRecordData">
+        SELECT <include refid="columns"/>
+        FROM git_commit_record
+        WHERE review_snapshot_id = #{snapshotId}
+          AND status = 'RUNNING'
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO git_commit_record (
+            project_id, task_id, task_run_id, review_snapshot_id, review_decision_id,
+            operator_id, project_name, task_title, repository_path, ticket, commit_message,
+            branch_name, base_ref, commit_sha, file_paths_json, status, failure_reason,
+            output_summary, started_at, finished_at, created_at, updated_at
+        ) VALUES (
+            #{projectId}, #{taskId}, #{taskRunId}, #{reviewSnapshotId}, #{reviewDecisionId},
+            #{operatorId}, #{projectName}, #{taskTitle}, #{repositoryPath}, #{ticket},
+            #{commitMessage}, #{branchName}, #{baseRef}, #{commitSha},
+            CAST(#{filePathsJson} AS JSON), #{status}, #{failureReason}, #{outputSummary},
+            #{startedAt}, #{finishedAt}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="update">
+        UPDATE git_commit_record
+        SET branch_name = #{branchName},
+            commit_sha = #{commitSha},
+            status = #{status},
+            failure_reason = #{failureReason},
+            output_summary = #{outputSummary},
+            finished_at = #{finishedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+          AND status = 'RUNNING'
+    </update>
+
+</mapper>

@@ -13,6 +13,7 @@ import com.pydlove.regent.execution.application.query.TaskQueryService;
 import com.pydlove.regent.execution.application.query.TokenUsageRange;
 import com.pydlove.regent.execution.application.query.TaskRunQueryService;
 import com.pydlove.regent.execution.domain.model.Task;
+import com.pydlove.regent.execution.domain.model.CodeStandardId;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.execution.domain.repository.TaskListItemPage;
@@ -187,7 +188,8 @@ public class TaskController {
         Task task = taskCommandService.createManual(new CreateTaskCommand(
                 ProjectId.of(request.projectId()),
                 request.prompt(),
-                request.priority() == null ? 0 : request.priority()));
+                request.priority() == null ? 0 : request.priority(),
+                standardIds(request.codeStandardIds())));
         return TaskDetailResponse.from(task);
     }
 
@@ -205,7 +207,8 @@ public class TaskController {
         Task task = taskCommandService.createContinuation(new CreateTaskContinuationCommand(
                 TaskId.of(id),
                 request.prompt(),
-                request.priority() == null ? 0 : request.priority()));
+                request.priority() == null ? 0 : request.priority(),
+                standardIds(request.codeStandardIds())));
         return TaskDetailResponse.from(task);
     }
 
@@ -319,6 +322,14 @@ public class TaskController {
 
     private static ProjectId projectId(Long value) {
         return value == null ? null : ProjectId.of(value);
+    }
+
+    private static List<CodeStandardId> standardIds(List<Long> values) {
+        if (values == null) return null;
+        if (values.contains(null)) {
+            throw new IllegalArgumentException("开发规范 ID 不能为空");
+        }
+        return values.stream().map(CodeStandardId::of).toList();
     }
 
     private static UserId currentUser(HttpServletRequest request) {

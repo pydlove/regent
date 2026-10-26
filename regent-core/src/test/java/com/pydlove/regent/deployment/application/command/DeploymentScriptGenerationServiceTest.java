@@ -198,11 +198,11 @@ class DeploymentScriptGenerationServiceTest {
 
         @Override
         public List<DeploymentServer> findAll(ProjectId projectId) {
-            return server.getProjectId().equals(projectId) ? List.of(server) : List.of();
+            return server.belongsTo(projectId) ? List.of(server) : List.of();
         }
 
         @Override
-        public boolean existsByName(ProjectId projectId, String name,
+        public boolean existsByName(java.util.Collection<ProjectId> projectIds, String name,
                                     DeploymentServerId excludingId) {
             return false;
         }

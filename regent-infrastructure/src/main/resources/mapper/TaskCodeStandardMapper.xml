@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.execution.infrastructure.persistence.TaskCodeStandardMapper">
+    <sql id="columns">
+        id, task_id, standard_id, standard_version_id, standard_name, version_no,
+        filename, content_type, size_bytes, content_hash, storage_path,
+        source_project_id, created_at
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO task_code_standard
+            (task_id, standard_id, standard_version_id, standard_name, version_no,
+             filename, content_type, size_bytes, content_hash, storage_path,
+             source_project_id, created_at)
+        VALUES
+            (#{taskId}, #{standardId}, #{standardVersionId}, #{standardName}, #{versionNo},
+             #{filename}, #{contentType}, #{sizeBytes}, #{contentHash}, #{storagePath},
+             #{sourceProjectId}, #{createdAt})
+    </insert>
+
+    <select id="selectByTask" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskCodeStandardData">
+        SELECT <include refid="columns"/>
+        FROM task_code_standard
+        WHERE task_id = #{taskId}
+        ORDER BY id
+    </select>
+
+    <select id="selectByIdOwned" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskCodeStandardData">
+        SELECT s.id, s.task_id, s.standard_id, s.standard_version_id, s.standard_name,
+               s.version_no, s.filename, s.content_type, s.size_bytes, s.content_hash,
+               s.storage_path, s.source_project_id, s.created_at
+        FROM task_code_standard s
+        JOIN task t ON t.id = s.task_id
+        JOIN project p ON p.id = t.project_id
+        WHERE s.id = #{id}
+          AND t.deleted = 0
+          AND (
+              p.owner_id = #{ownerId}
+              OR EXISTS (
+                  SELECT 1 FROM project_member pm
+                  WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+              )
+          )
+    </select>
+</mapper>

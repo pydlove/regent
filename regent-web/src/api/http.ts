@@ -1,5 +1,11 @@
 import type { ApiErrorBody } from '@/types/api'
 
+// Node 原生测试也会直接加载这个文件，不能在模块顶层假设 Vite 的 import.meta.env 一定存在。
+const rawBase = (import.meta as ImportMeta & { env?: { BASE_URL?: string } }).env?.BASE_URL || '/'
+const API_BASE_PATH = rawBase === '/'
+  ? ''
+  : `/${rawBase.replace(/^\/+|\/+$/g, '')}`
+
 /*
  * 唯一的 HTTP 出口。所有请求都从这里走，好处是错误处理只有一份：
  * 后端 400 时返回的是 {code, message}，界面要展示的正是 message ——
@@ -21,6 +27,12 @@ export class ApiError extends Error {
 
 const DEFAULT_TIMEOUT_MS = 15_000
 const UPLOAD_TIMEOUT_MS = 60_000
+
+export type DownloadedFile = {
+  blob: Blob
+  filename: string | null
+  headers: Headers
+}
 
 /**
  * 所有 JSON 请求都要有明确的墙钟上限。
@@ -63,6 +75,37 @@ async function toApiError(response: Response): Promise<ApiError> {
   }
 }
 
+export function filenameFromContentDisposition(value: string | null): string | null {
+  if (!value) return null
+  const encoded = /filename\*\s*=\s*([^;]+)/i.exec(value)?.[1]?.trim()
+  if (encoded) {
+    const payload = encoded.replace(/^["']|["']$/g, '')
+    const separator = payload.indexOf("''")
+    const raw = separator >= 0 ? payload.slice(separator + 2) : payload
+    try {
+      return decodeURIComponent(raw)
+    } catch {
+      return raw
+    }
+  }
+  const plain = /filename\s*=\s*(?:"([^"]*)"|([^;]*))/i.exec(value)
+  return (plain?.[1] ?? plain?.[2] ?? '').trim() || null
+}
+
+async function toDownloadedFile(
+  response: Response,
+  fallbackFilename: string,
+): Promise<DownloadedFile> {
+  const filename = filenameFromContentDisposition(
+    response.headers.get('Content-Disposition'),
+  ) ?? fallbackFilename
+  return {
+    blob: await response.blob(),
+    filename,
+    headers: response.headers,
+  }
+}
+
 async function throwApiError(path: string, response: Response): Promise<never> {
   const error = await toApiError(response)
   if (
@@ -78,7 +121,7 @@ async function throwApiError(path: string, response: Response): Promise<never> {
 type QueryValue = string | number | undefined | null
 
 function withQuery(path: string, params?: Record<string, QueryValue>): string {
-  if (!params) return `/api${path}`
+  if (!params) return apiUrl(path)
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null && value !== '') {
@@ -86,7 +129,33 @@ function withQuery(path: string, params?: Record<string, QueryValue>): string {
     }
   }
   const query = search.toString()
-  return query ? `/api${path}?${query}` : `/api${path}`
+  return query ? `${apiUrl(path)}?${query}` : apiUrl(path)
+}
+
+export function apiUrl(path: string): string {
+  const normalized = path.startsWith('/') ? path : `/${path}`
+  return `${API_BASE_PATH}/api${normalized}`
+}
+
+export function resolveApiResourceUrl(
+  value: string | null | undefined,
+  apiBasePath: string,
+): string | null {
+  if (!value) return value ?? null
+  if (/^(?:[a-z][a-z\d+.-]*:)?\/\//i.test(value) || /^(?:data|blob):/i.test(value)) {
+    return value
+  }
+  const apiPath = value.startsWith('/api/')
+    ? value.slice(4)
+    : value.startsWith('api/')
+      ? `/${value.slice(4)}`
+      : value
+  const normalized = apiPath.startsWith('/') ? apiPath : `/${apiPath}`
+  return `${apiBasePath}/api${normalized}`
+}
+
+export function apiResourceUrl(path: string): string {
+  return resolveApiResourceUrl(path, API_BASE_PATH) ?? ''
 }
 
 export async function get<T>(path: string, params?: Record<string, QueryValue>): Promise<T> {
@@ -98,7 +167,7 @@ export async function get<T>(path: string, params?: Record<string, QueryValue>):
 }
 
 export async function post<T>(path: string): Promise<T> {
-  const response = await fetchWithTimeout(`/api${path}`, {
+  const response = await fetchWithTimeout(apiUrl(path), {
     method: 'POST',
     headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/json' },
   })
@@ -108,7 +177,7 @@ export async function post<T>(path: string): Promise<T> {
 
 /** 无响应体的 POST。用于登出这类只改变 Cookie、没有业务数据返回的命令。 */
 export async function postNoContent(path: string): Promise<void> {
-  const response = await fetchWithTimeout(`/api${path}`, {
+  const response = await fetchWithTimeout(apiUrl(path), {
     method: 'POST',
     headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/json' },
   })
@@ -123,7 +192,7 @@ export async function postNoContent(path: string): Promise<void> {
  * （后者会覆盖默认值），合成一个参数后调用点很容易在两者之间飘。
  */
 export async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetchWithTimeout(`/api${path}`, {
+  const response = await fetchWithTimeout(apiUrl(path), {
     method: 'POST',
     headers: {
       ...RELAY_REQUEST_HEADER,
@@ -142,7 +211,7 @@ export async function postJsonWithTimeout<T>(
   body: unknown,
   timeoutMs: number,
 ): Promise<T> {
-  const response = await fetchWithTimeout(`/api${path}`, {
+  const response = await fetchWithTimeout(apiUrl(path), {
     method: 'POST',
     headers: {
       ...RELAY_REQUEST_HEADER,
@@ -157,7 +226,7 @@ export async function postJsonWithTimeout<T>(
 
 /** 带 JSON 请求体、但成功响应没有响应体的 POST。 */
 export async function postJsonNoContent(path: string, body: unknown): Promise<void> {
-  const response = await fetchWithTimeout(`/api${path}`, {
+  const response = await fetchWithTimeout(apiUrl(path), {
     method: 'POST',
     headers: {
       ...RELAY_REQUEST_HEADER,
@@ -171,7 +240,7 @@ export async function postJsonNoContent(path: string, body: unknown): Promise<vo
 
 /** Multipart 上传。Content-Type 必须交给浏览器生成，才能带上 boundary。 */
 export async function postForm<T>(path: string, body: FormData): Promise<T> {
-  const response = await fetchWithTimeout(`/api${path}`, {
+  const response = await fetchWithTimeout(apiUrl(path), {
     method: 'POST',
     headers: {
       ...RELAY_REQUEST_HEADER,
@@ -183,10 +252,52 @@ export async function postForm<T>(path: string, body: FormData): Promise<T> {
   return (await response.json()) as T
 }
 
+export async function getFile(
+  path: string,
+  fallbackFilename: string,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<DownloadedFile> {
+  const response = await fetchWithTimeout(apiUrl(path), {
+    headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/octet-stream' },
+  }, timeoutMs)
+  if (!response.ok) await throwApiError(path, response)
+  return toDownloadedFile(response, fallbackFilename)
+}
+
+export async function postFormFile(
+  path: string,
+  body: FormData,
+  fallbackFilename: string,
+  timeoutMs = UPLOAD_TIMEOUT_MS,
+): Promise<DownloadedFile> {
+  const response = await fetchWithTimeout(apiUrl(path), {
+    method: 'POST',
+    headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/octet-stream' },
+    body,
+  }, timeoutMs)
+  if (!response.ok) await throwApiError(path, response)
+  return toDownloadedFile(response, fallbackFilename)
+}
+
 /** 带 JSON 请求体的 PUT：用于整体替换一组可编辑字段。 */
 export async function putJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetchWithTimeout(`/api${path}`, {
+  const response = await fetchWithTimeout(apiUrl(path), {
     method: 'PUT',
+    headers: {
+      ...RELAY_REQUEST_HEADER,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body ?? {}),
+  })
+  if (!response.ok) await throwApiError(path, response)
+  return (await response.json()) as T
+}
+
+/** 带 JSON 请求体的 PATCH：用于局部状态迁移。 */
+export async function patchJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetchWithTimeout(apiUrl(path), {
+    method: 'PATCH',
     headers: {
       ...RELAY_REQUEST_HEADER,
       Accept: 'application/json',
@@ -200,7 +311,7 @@ export async function putJson<T>(path: string, body: unknown): Promise<T> {
 
 /** 无响应体的 DELETE。204 是删除接口的正常返回，不能按 JSON 解析。 */
 export async function deleteRequest(path: string): Promise<void> {
-  const response = await fetchWithTimeout(`/api${path}`, {
+  const response = await fetchWithTimeout(apiUrl(path), {
     method: 'DELETE',
     headers: { ...RELAY_REQUEST_HEADER, Accept: 'application/json' },
   })

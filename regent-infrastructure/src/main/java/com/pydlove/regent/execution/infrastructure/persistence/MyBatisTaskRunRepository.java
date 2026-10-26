@@ -5,7 +5,6 @@ import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskRunId;
 import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
 import com.pydlove.regent.identity.domain.model.UserId;
-import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.shared.domain.DomainException;
 import org.springframework.stereotype.Repository;
 
@@ -58,11 +57,6 @@ public class MyBatisTaskRunRepository implements TaskRunRepository {
     }
 
     @Override
-    public boolean hasActiveLease(ProjectId projectId, Instant now) {
-        return taskRunMapper.countActiveLeasesByProject(projectId.value(), TaskRun.EXECUTOR_AGENT, toDb(now)) > 0;
-    }
-
-    @Override
     public List<TaskRun> findExpiredLeases(Instant now) {
         return taskRunMapper.selectExpiredLeases(TaskRun.EXECUTOR_AGENT, toDb(now)).stream()
                 .map(TaskRunDataMapper::toDomain)
@@ -72,6 +66,13 @@ public class MyBatisTaskRunRepository implements TaskRunRepository {
     @Override
     public List<TaskRun> findActiveLeases(Instant now) {
         return taskRunMapper.selectActiveLeases(TaskRun.EXECUTOR_AGENT, toDb(now)).stream()
+                .map(TaskRunDataMapper::toDomain)
+                .toList();
+    }
+
+    @Override
+    public List<TaskRun> findRunningByDevice(String deviceId) {
+        return taskRunMapper.selectRunningByDevice(deviceId).stream()
                 .map(TaskRunDataMapper::toDomain)
                 .toList();
     }
@@ -91,9 +92,20 @@ public class MyBatisTaskRunRepository implements TaskRunRepository {
     }
 
     @Override
-    public void renewLease(TaskRunId runId, Instant leaseExpiresAt) {
-        if (taskRunMapper.updateLease(runId.value(), toDb(leaseExpiresAt)) == 0) {
+    public void renewLease(TaskRunId runId,
+                           String deviceId,
+                           Instant leaseExpiresAt,
+                           Instant lastHeartbeatAt) {
+        if (taskRunMapper.updateLease(runId.value(), deviceId,
+                toDb(leaseExpiresAt), toDb(lastHeartbeatAt)) == 0) {
             throw new DomainException("续租失败，执行记录不存在：" + runId);
+        }
+    }
+
+    @Override
+    public void touchLastEvent(TaskRunId runId, Instant occurredAt) {
+        if (occurredAt != null) {
+            taskRunMapper.updateLastEvent(runId.value(), toDb(occurredAt));
         }
     }
 

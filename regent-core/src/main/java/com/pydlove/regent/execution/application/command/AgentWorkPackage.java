@@ -20,6 +20,7 @@ import java.util.List;
  * @param instruction       本次指令，末尾已经带上平台的上报约定
  * @param sessionId         平台记录的续跑钥匙（执行者报的会话 ID）；为空表示这次是新会话
  * @param images            任务附件的绝对路径，按顺序挂给模型
+ * @param documents         任务文档的绝对路径与元数据，内容由执行器按需读取
  * @param plugins           任务绑定的固定版本插件；内容同时已写入 instruction
  * @param environment       本次执行生效的环境信息；项目级同键值已覆盖全局值
  * @param decisionThreshold 项目级自动决策阈值：生效等级高于它就必须挂起等人
@@ -39,6 +40,7 @@ public record AgentWorkPackage(
         String instruction,
         String sessionId,
         List<Image> images,
+        List<Document> documents,
         List<Plugin> plugins,
         List<EnvironmentVariable> environment,
         String decisionThreshold,
@@ -48,12 +50,17 @@ public record AgentWorkPackage(
 
     public AgentWorkPackage {
         images = images == null ? List.of() : List.copyOf(images);
+        documents = documents == null ? List.of() : List.copyOf(documents);
         plugins = plugins == null ? List.of() : List.copyOf(plugins);
         environment = environment == null ? List.of() : List.copyOf(environment);
     }
 
     /** 一张任务附件。给路径不给人读的名字：执行器要的是能挂上去的绝对路径。 */
     public record Image(long id, String filename, String path) {
+    }
+
+    /** 任务文档。执行器需要路径读取内容，文件名与类型只用于选择解析方式。 */
+    public record Document(long id, String filename, String contentType, long sizeBytes, String path) {
     }
 
     /** 插件版本快照。content 给外部执行器直接使用，revision 与 sha256 用于追溯。 */

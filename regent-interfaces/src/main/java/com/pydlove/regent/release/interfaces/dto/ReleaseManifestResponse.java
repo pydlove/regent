@@ -6,8 +6,11 @@ import java.util.Map;
 public record ReleaseManifestResponse(
         String version,
         String releaseCode,
+        String clientReleaseCode,
+        boolean webOnly,
         String releasedAt,
         String minShellVersion,
         String notes,
+        ReleaseRuntimeResponse runtime,
         Map<String, ReleaseAssetResponse> downloads) {
 }

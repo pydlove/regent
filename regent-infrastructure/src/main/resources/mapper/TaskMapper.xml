@@ -43,7 +43,13 @@
             AND t.title LIKE CONCAT('%', #{keyword}, '%')
         </if>
         <if test="ownerId != null">
-            AND p.owner_id = #{ownerId}
+            AND (
+                p.owner_id = #{ownerId}
+                OR EXISTS (
+                    SELECT 1 FROM project_member pm
+                    WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+                )
+            )
         </if>
     </sql>
 
@@ -62,7 +68,13 @@
         JOIN project p ON p.id = t.project_id
         WHERE t.id = #{id}
           AND t.deleted = 0
-          AND p.owner_id = #{ownerId}
+          AND (
+              p.owner_id = #{ownerId}
+              OR EXISTS (
+                  SELECT 1 FROM project_member pm
+                  WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+              )
+          )
           AND p.deleted = 0
     </select>
 
@@ -79,6 +91,14 @@
         FROM task t
         WHERE t.deleted = 0
           AND t.status = 'RUNNING'
+        ORDER BY t.id
+    </select>
+
+    <select id="selectByRequirement" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskData">
+        SELECT <include refid="columns"/>
+        FROM task t
+        WHERE t.requirement_id = #{requirementId}
+          AND t.deleted = 0
         ORDER BY t.id
     </select>
 
@@ -129,7 +149,13 @@
             AND t.project_id = #{projectId}
         </if>
         <if test="ownerId != null">
-            AND p.owner_id = #{ownerId}
+            AND (
+                p.owner_id = #{ownerId}
+                OR EXISTS (
+                    SELECT 1 FROM project_member pm
+                    WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+                )
+            )
         </if>
         GROUP BY t.status
     </select>
@@ -148,7 +174,13 @@
             AND t.project_id = #{projectId}
         </if>
         <if test="ownerId != null">
-            AND p.owner_id = #{ownerId}
+            AND (
+                p.owner_id = #{ownerId}
+                OR EXISTS (
+                    SELECT 1 FROM project_member pm
+                    WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+                )
+            )
         </if>
     </select>
 
@@ -175,7 +207,13 @@
             AND t.project_id = #{projectId}
         </if>
         <if test="ownerId != null">
-            AND p.owner_id = #{ownerId}
+            AND (
+                p.owner_id = #{ownerId}
+                OR EXISTS (
+                    SELECT 1 FROM project_member pm
+                    WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+                )
+            )
         </if>
         GROUP BY day
         ORDER BY day
@@ -202,7 +240,13 @@
             AND t.project_id = #{projectId}
         </if>
         <if test="ownerId != null">
-            AND p.owner_id = #{ownerId}
+            AND (
+                p.owner_id = #{ownerId}
+                OR EXISTS (
+                    SELECT 1 FROM project_member pm
+                    WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+                )
+            )
         </if>
         GROUP BY bucket_start
         ORDER BY bucket_start
@@ -229,7 +273,13 @@
           AND t.project_id = #{projectId}
         </if>
         <if test="ownerId != null">
-          AND p.owner_id = #{ownerId}
+          AND (
+              p.owner_id = #{ownerId}
+              OR EXISTS (
+                  SELECT 1 FROM project_member pm
+                  WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+              )
+          )
         </if>
         GROUP BY day
         ORDER BY day
@@ -245,6 +295,14 @@
     -->
     <sql id="dispatchableWhere">
         t.deleted = 0
+        AND NOT EXISTS (
+            SELECT 1
+            FROM task_dependency td
+            JOIN task dependency ON dependency.id = td.depends_on_task_id
+            WHERE td.task_id = t.id
+              AND dependency.deleted = 0
+              AND dependency.status != 'DONE'
+        )
         AND (t.status IN ('PENDING', 'QUEUED')
         OR (t.status = 'RUNNING'
         AND t.codex_thread_id IS NOT NULL
@@ -300,6 +358,39 @@
         JOIN project p ON p.id = t.project_id AND p.enabled = 1 AND p.deleted = 0
         WHERE t.deleted = 0
           AND t.status = 'QUEUED'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM task_dependency td
+              JOIN task dependency ON dependency.id = td.depends_on_task_id
+              WHERE td.task_id = t.id
+                AND dependency.deleted = 0
+                AND dependency.status != 'DONE'
+          )
+        ORDER BY t.priority DESC, t.id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectQueuedOwned" resultType="com.pydlove.regent.execution.infrastructure.persistence.TaskData">
+        SELECT <include refid="dispatchableColumns"/>
+        FROM task t
+        JOIN project p ON p.id = t.project_id AND p.enabled = 1 AND p.deleted = 0
+        WHERE t.deleted = 0
+          AND t.status = 'QUEUED'
+          AND (
+              p.owner_id = #{ownerId}
+              OR EXISTS (
+                  SELECT 1 FROM project_member pm
+                  WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+              )
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM task_dependency td
+              JOIN task dependency ON dependency.id = td.depends_on_task_id
+              WHERE td.task_id = t.id
+                AND dependency.deleted = 0
+                AND dependency.status != 'DONE'
+          )
         ORDER BY t.priority DESC, t.id ASC
         LIMIT #{limit}
     </select>

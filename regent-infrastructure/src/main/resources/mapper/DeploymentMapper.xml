@@ -21,7 +21,19 @@
         FROM deployment
         WHERE id = #{id}
           AND deleted = 0
-          AND project_id IN (SELECT id FROM project WHERE owner_id = #{ownerId})
+          AND EXISTS (
+            SELECT 1
+            FROM deployment_project dp
+            JOIN project p ON p.id = dp.project_id
+            WHERE dp.deployment_id = deployment.id
+              AND (
+                p.owner_id = #{ownerId}
+                OR EXISTS (
+                  SELECT 1 FROM project_member pm
+                  WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+                )
+              )
+          )
     </select>
 
     <select id="selectByIdForUpdate"
@@ -38,24 +50,67 @@
         FROM deployment
         WHERE deleted = 0
         <if test="projectId != null">
-            AND project_id = #{projectId}
+            AND EXISTS (
+              SELECT 1 FROM deployment_project dp
+              WHERE dp.deployment_id = deployment.id
+                AND dp.project_id = #{projectId}
+            )
         </if>
         <if test="ownerId != null">
-            AND project_id IN (SELECT id FROM project WHERE owner_id = #{ownerId})
+            AND EXISTS (
+              SELECT 1
+              FROM deployment_project dp
+              JOIN project p ON p.id = dp.project_id
+              WHERE dp.deployment_id = deployment.id
+                AND (
+                  p.owner_id = #{ownerId}
+                  OR EXISTS (
+                    SELECT 1 FROM project_member pm
+                    WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+                  )
+                )
+            )
         </if>
-        ORDER BY updated_at DESC, id DESC
+        ORDER BY created_at DESC, id DESC
     </select>
 
-    <select id="countByName" resultType="int">
-        SELECT COUNT(*)
+    <select id="selectProjectLinks"
+            resultType="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentProjectRow">
+        SELECT deployment_id, project_id
+        FROM deployment_project
+        WHERE deployment_id IN
+        <foreach collection="deploymentIds" item="deploymentId" open="(" separator="," close=")">
+            #{deploymentId}
+        </foreach>
+        ORDER BY deployment_id, project_id
+    </select>
+
+    <select id="countByNameInProjects" resultType="int">
+        SELECT COUNT(DISTINCT deployment.id)
         FROM deployment
-        WHERE project_id = #{projectId}
-          AND name = #{name}
+        JOIN deployment_project dp ON dp.deployment_id = deployment.id
+        WHERE dp.project_id IN
+        <foreach collection="projectIds" item="projectId" open="(" separator="," close=")">
+            #{projectId}
+        </foreach>
+          AND deployment.name = #{name}
           AND deleted = 0
         <if test="excludingId != null">
-            AND id != #{excludingId}
+            AND deployment.id != #{excludingId}
         </if>
     </select>
+
+    <delete id="deleteProjectLinks">
+        DELETE FROM deployment_project WHERE deployment_id = #{deploymentId}
+    </delete>
+
+    <insert id="insertProjectLinks">
+        INSERT INTO deployment_project (deployment_id, project_id, created_at)
+        VALUES
+        <foreach collection="projectIds" item="projectId" separator=",">
+            (#{deploymentId}, #{projectId}, UTC_TIMESTAMP(3))
+        </foreach>
+    </insert>
 
     <select id="countByServerId" resultType="int">
         SELECT COUNT(*)
@@ -87,6 +142,7 @@
     <update id="update">
         UPDATE deployment
         SET name = #{name},
+            project_id = #{projectId},
             server_id = #{serverId},
             remote_directory = #{remoteDirectory},
             script_filename = #{scriptFilename},

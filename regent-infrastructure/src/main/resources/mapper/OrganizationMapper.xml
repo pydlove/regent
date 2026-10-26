@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.organization.infrastructure.persistence.OrganizationMapper">
+
+    <sql id="columns">
+        id, code, name, description, status, created_by, created_at, updated_at
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO organization
+            (code, name, description, status, created_by, created_at, updated_at, deleted)
+        VALUES
+            (#{code}, #{name}, #{description}, #{status}, #{createdBy}, #{createdAt}, #{updatedAt}, 0)
+    </insert>
+
+    <update id="update">
+        UPDATE organization
+        SET name = #{name},
+            description = #{description},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+          AND deleted = 0
+    </update>
+
+    <select id="selectById"
+            resultType="com.pydlove.regent.organization.infrastructure.persistence.OrganizationData">
+        SELECT <include refid="columns"/>
+        FROM organization
+        WHERE id = #{id}
+          AND deleted = 0
+    </select>
+
+    <select id="selectByCode"
+            resultType="com.pydlove.regent.organization.infrastructure.persistence.OrganizationData">
+        SELECT <include refid="columns"/>
+        FROM organization
+        WHERE code = #{code}
+          AND deleted = 0
+    </select>
+
+    <select id="selectByIds"
+            resultType="com.pydlove.regent.organization.infrastructure.persistence.OrganizationData">
+        SELECT <include refid="columns"/>
+        FROM organization
+        WHERE deleted = 0
+          AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+        ORDER BY name, id
+    </select>
+
+</mapper>

@@ -1,5 +1,6 @@
 package com.pydlove.regent.project.application.command;
 
+import com.pydlove.regent.project.domain.model.ProjectVersionSource;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 
 /**
@@ -11,6 +12,8 @@ import com.pydlove.regent.shared.kernel.DecisionLevel;
  * @param techStack            技术栈描述，可空
  * @param verifyMethod         验证命令，可空
  * @param defaultDecisionLevel 项目级自动决策阈值；生效等级高于它就必须由人拍板
+ * @param versionSource        项目版本来源
+ * @param fallbackVersion      Git Tag 不可用或手动模式使用的版本
  */
 public record RegisterProjectCommand(
         String code,
@@ -18,5 +21,17 @@ public record RegisterProjectCommand(
         String path,
         String techStack,
         String verifyMethod,
-        DecisionLevel defaultDecisionLevel) {
+        DecisionLevel defaultDecisionLevel,
+        ProjectVersionSource versionSource,
+        String fallbackVersion) {
+
+    public RegisterProjectCommand(String code,
+                                  String name,
+                                  String path,
+                                  String techStack,
+                                  String verifyMethod,
+                                  DecisionLevel defaultDecisionLevel) {
+        this(code, name, path, techStack, verifyMethod, defaultDecisionLevel,
+                ProjectVersionSource.GIT_TAG, null);
+    }
 }

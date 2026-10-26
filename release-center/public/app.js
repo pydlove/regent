@@ -3,6 +3,7 @@ const elements = {
   currentVersion: document.querySelector('#current-version'),
   nextVersion: document.querySelector('#next-version'),
   history: document.querySelector('#release-history'),
+  jobHistory: document.querySelector('#job-history'),
   version: document.querySelector('#version'),
   instruction: document.querySelector('#instruction'),
   generateButton: document.querySelector('#generate-button'),
@@ -20,6 +21,7 @@ const elements = {
   summary: document.querySelector('#summary'),
   highlights: document.querySelector('#highlights'),
   addHighlight: document.querySelector('#add-highlight'),
+  webOnly: document.querySelector('#web-only'),
   deploy: document.querySelector('#deploy'),
   confirmReview: document.querySelector('#confirm-review'),
   publishBlocker: document.querySelector('#publish-blocker'),
@@ -33,6 +35,7 @@ const elements = {
 let previewVersion = ''
 let pollTimer = null
 let draftStale = false
+let workspaceDirty = false
 let draftSaveTimer = null
 
 const STALE_DRAFT_WARNING = '这份发布预览生成后代码有更新，请确认当前内容仍覆盖最新改动。'
@@ -60,6 +63,8 @@ function updateConfirmState() {
   let blocker = ''
   if (previewVersion && elements.highlights.children.length === 0) {
     blocker = '至少保留一个更新项后才能发布。'
+  } else if (previewVersion && workspaceDirty) {
+    blocker = '工作区有未提交改动，正式发布前必须先提交代码。'
   } else if (previewVersion && !elements.confirmReview.checked) {
     blocker = '勾选“我已核对”后才能确认发布。'
   } else if (previewVersion && draftStale) {
@@ -70,8 +75,13 @@ function updateConfirmState() {
 }
 
 function updateWorkspaceWarning() {
-  elements.workspaceWarning.textContent = draftStale ? STALE_DRAFT_WARNING : ''
-  elements.workspaceWarning.hidden = !draftStale
+  const warning = workspaceDirty
+    ? '当前工作区有未提交改动。正式发布会创建不可变发布凭证，必须先提交代码。'
+    : draftStale
+      ? STALE_DRAFT_WARNING
+      : ''
+  elements.workspaceWarning.textContent = warning
+  elements.workspaceWarning.hidden = !warning
 }
 
 function highlightRow(item = { title: '', description: '' }) {
@@ -149,6 +159,7 @@ async function persistDraft() {
       body: JSON.stringify({
         version: previewVersion,
         ...content,
+        webOnly: elements.webOnly.checked,
         deploy: elements.deploy.checked,
       }),
     })
@@ -188,8 +199,48 @@ async function request(path, options) {
 
 function applyWorkspaceState(state) {
   draftStale = state.draftStale === true
+  workspaceDirty = state.dirty === true
   updateWorkspaceWarning()
   updateConfirmState()
+}
+
+function statusLabel(status) {
+  return status === 'running'
+    ? '执行中'
+    : status === 'success'
+      ? '完成'
+      : status === 'interrupted'
+        ? '已中断'
+        : '失败'
+}
+
+async function loadJobHistory() {
+  try {
+    const jobs = await request('/api/jobs')
+    elements.jobHistory.replaceChildren()
+    for (const job of jobs.slice(0, 6)) {
+      const item = document.createElement('button')
+      item.type = 'button'
+      item.className = 'history-item history-button'
+      item.dataset.status = job.status
+      const title = document.createElement('span')
+      title.textContent = job.title || job.version
+      const meta = document.createElement('small')
+      meta.textContent = `${statusLabel(job.status)} · ${new Date(job.updatedAt).toLocaleString('zh-CN')}`
+      item.append(title, meta)
+      item.addEventListener('click', async () => {
+        try {
+          renderJob(await request(`/api/jobs/${encodeURIComponent(job.id)}`))
+          elements.jobPanel.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        } catch (error) {
+          showError(error.message)
+        }
+      })
+      elements.jobHistory.append(item)
+    }
+  } catch (error) {
+    console.warn(`任务历史读取失败：${error.message}`)
+  }
 }
 
 async function loadState() {
@@ -206,12 +257,16 @@ async function loadState() {
     const version = document.createElement('span')
     version.textContent = release.version
     const date = document.createElement('small')
-    date.textContent = release.releasedAt
+    const evidence = release.evidence
+    date.textContent = evidence?.commitSha
+      ? `${release.releasedAt} · ${evidence.commitSha.slice(0, 8)}`
+      : release.releasedAt
     item.append(version, date)
     elements.history.append(item)
   }
   if (state.draft) {
     elements.version.value = state.draft.version
+    elements.webOnly.checked = state.draft.webOnly === true
     elements.deploy.checked = state.draft.deploy !== false
     renderPreview(state.draft, { focus: false })
   } else {
@@ -220,6 +275,7 @@ async function loadState() {
     elements.confirmReview.checked = false
   }
   updateConfirmState()
+  await loadJobHistory()
   try {
     const lastJob = await request('/api/jobs/last')
     if (lastJob?.status && lastJob.status !== 'running') renderJob(lastJob)
@@ -254,7 +310,7 @@ async function loadServerStatus() {
 }
 
 async function deployServer() {
-  if (!window.confirm('确认重新构建并发布中继器、升级服务器前端并重启服务？')) return
+  if (!window.confirm('确认从当前已提交代码重新构建中继器、升级服务器前端并重启服务？')) return
   showError('')
   elements.serverDeploy.disabled = true
   try {
@@ -302,7 +358,9 @@ function renderJob(job) {
     ? '执行中'
     : job.status === 'success'
       ? '发布完成'
-      : '发布失败'
+      : job.status === 'interrupted'
+        ? '执行中断'
+        : '发布失败'
   elements.jobLog.textContent = job.logs.join('\n')
   elements.jobLog.scrollTop = elements.jobLog.scrollHeight
 }
@@ -325,6 +383,7 @@ async function pollJob(jobId) {
     } else {
       showError(job.error || '发布失败，请查看执行日志')
     }
+    await loadJobHistory()
     elements.serverDeploy.disabled = false
   } catch (error) {
     elements.serverDeploy.disabled = false
@@ -343,6 +402,7 @@ async function publish() {
       body: JSON.stringify({
         version: previewVersion,
         ...content,
+        webOnly: elements.webOnly.checked,
         deploy: elements.deploy.checked,
       }),
     })
@@ -369,6 +429,7 @@ elements.summary.addEventListener('input', () => {
   scheduleDraftSave()
 })
 elements.deploy.addEventListener('change', scheduleDraftSave)
+elements.webOnly.addEventListener('change', scheduleDraftSave)
 elements.version.addEventListener('input', () => {
   if (previewVersion && elements.version.value.trim() !== previewVersion) {
     elements.preview.hidden = true

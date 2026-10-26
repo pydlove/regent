@@ -18,6 +18,7 @@ target/
 # ---------- Node（regent-web） ----------
 node_modules/
 dist/
+dist-root/
 .pnpm-store/
 
 # ---------- 运行时产物 ----------
@@ -25,6 +26,7 @@ dist/
 logs/
 *.log
 LOG_PATH_UNDEFINED
+.codex-harness/
 
 # ---------- 本地配置与密钥（严禁入库） ----------
 application-local.yml
@@ -33,6 +35,7 @@ application-*-local.yml
 application-test.yml
 *.local.yml
 *.pem
+!regent-desktop/runtime-public-key.pem
 *.key
 *.keystore
 *.dmg

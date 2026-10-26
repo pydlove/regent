@@ -4,6 +4,7 @@ import com.pydlove.regent.project.domain.model.Project;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.model.ProjectSummaryStatus;
 import com.pydlove.regent.identity.domain.model.UserId;
+import com.pydlove.regent.organization.domain.model.OrganizationId;
 
 import java.util.List;
 import java.util.Optional;
@@ -23,6 +24,10 @@ public interface ProjectRepository {
      * 只会得到一串数据库报错。数据库的唯一键仍然是最终防线，查与插之间的竞态由它兜底。
      */
     boolean existsByCode(String code);
+
+    default boolean existsByOrganizationAndCode(OrganizationId organizationId, String code) {
+        return existsByCode(code);
+    }
 
     /** 新增项目，insert 后由实现回填主键（{@code Project.assignIdentity}）。 */
     void save(Project project);

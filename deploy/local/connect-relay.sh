@@ -11,6 +11,12 @@
 export LC_CTYPE=UTF-8
 source "$(dirname "$0")/_common.sh"
 
+if [ -f "${HOME}/.regent/regent-public.env" ]; then
+    set -a
+    source "${HOME}/.regent/regent-public.env"
+    set +a
+fi
+
 SERVER_IP="${REGENT_SERVER_IP:-}"
 SSH_PORT="${REGENT_SSH_PORT:-}"
 SERVER_USER="${REGENT_SERVER_USER:-}"
@@ -19,6 +25,8 @@ SSH_KEY="${REGENT_SSH_KEY:-}"
 PUBLIC_PORT="${REGENT_RELAY_PUBLIC_PORT:-18787}"
 REMOTE_BASE="${REGENT_REMOTE_BASE:-/root/app/regent-relay}"
 SECRET="${REGENT_RELAY_SHARED_SECRET:-}"
+WEB_BASE_PATH="${REGENT_WEB_BASE_PATH:-}"
+PUBLIC_URL="${REGENT_PUBLIC_URL:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -128,6 +136,8 @@ CONNECTIONS="${REGENT_RELAY_CONNECTIONS:-4}"
 
 mkdir -p "$RUNTIME_DIR"
 if [ -f "$RELAY_ENV_FILE" ]; then
+    [ -n "$WEB_BASE_PATH" ] || WEB_BASE_PATH=$(grep -m1 '^REGENT_WEB_BASE_PATH=' "$RELAY_ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+    [ -n "$PUBLIC_URL" ] || PUBLIC_URL=$(grep -m1 '^REGENT_PUBLIC_URL=' "$RELAY_ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
     BACKUP="$RELAY_ENV_FILE.bak.$(date +%Y%m%d%H%M%S)"
     cp "$RELAY_ENV_FILE" "$BACKUP"
     info "已备份原连接器配置：$BACKUP"
@@ -141,6 +151,12 @@ REGENT_RELAY_LOCAL_URL=$LOCAL_URL
 REGENT_RELAY_SHARED_SECRET=$SECRET
 REGENT_RELAY_CONNECTIONS=$CONNECTIONS
 EOF
+if [ -n "$WEB_BASE_PATH" ]; then
+    printf 'REGENT_WEB_BASE_PATH=%s\n' "$WEB_BASE_PATH" >> "$RELAY_ENV_FILE"
+fi
+if [ -n "$PUBLIC_URL" ]; then
+    printf 'REGENT_PUBLIC_URL=%s\n' "$PUBLIC_URL" >> "$RELAY_ENV_FILE"
+fi
 info "已写入 $RELAY_ENV_FILE"
 
 # 已在运行的连接器持有旧配置，必须重启才会重新握手

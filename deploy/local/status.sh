@@ -35,5 +35,12 @@ else
         warn "公网中继连接器  未运行（未配对，先跑 deploy/local/connect-relay.sh）"
     fi
 fi
+if device_agent_loaded; then
+    info "设备代理  launchd 托管中"
+elif pid=$(listen_pid "$DEVICE_AGENT_PORT") && [ -n "$pid" ]; then
+    info "设备代理  运行中 (PID: $pid，端口 $DEVICE_AGENT_PORT)"
+else
+    warn "设备代理  未运行（跑 deploy/local/device-agent.sh install）"
+fi
 echo "----------------------------------------"
 printf '%b\n' "${DIM}日志目录 ${LOG_DIR}${NC}"

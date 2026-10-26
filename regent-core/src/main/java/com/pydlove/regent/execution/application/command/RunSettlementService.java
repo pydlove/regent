@@ -27,6 +27,9 @@ import com.pydlove.regent.governance.domain.model.DecisionId;
 import com.pydlove.regent.governance.domain.model.ResolvedBy;
 import com.pydlove.regent.governance.domain.repository.DecisionRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
+import com.pydlove.regent.review.domain.model.ReviewTaskId;
+import com.pydlove.regent.review.domain.model.ReviewTaskRunId;
+import com.pydlove.regent.review.domain.port.ReviewSnapshotScheduler;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.domain.TransactionRunner;
 import com.pydlove.regent.testing.domain.port.TestCaseExecutionScheduler;
@@ -66,6 +69,7 @@ public class RunSettlementService {
     private final DecisionRaiseService decisionRaiseService;
     private final BugRepository bugRepository;
     private final TestCaseExecutionScheduler testCaseExecutionScheduler;
+    private final ReviewSnapshotScheduler reviewSnapshotScheduler;
     private final TransactionRunner transactionRunner;
 
     public RunSettlementService(TaskRepository taskRepository,
@@ -76,6 +80,21 @@ public class RunSettlementService {
                                 BugRepository bugRepository,
                                 TestCaseExecutionScheduler testCaseExecutionScheduler,
                                 TransactionRunner transactionRunner) {
+        this(taskRepository, taskRunRepository, adjustmentRepository, decisionRepository,
+                decisionRaiseService, bugRepository, testCaseExecutionScheduler,
+                (taskId, runId) -> {
+                }, transactionRunner);
+    }
+
+    public RunSettlementService(TaskRepository taskRepository,
+                                TaskRunRepository taskRunRepository,
+                                TaskAdjustmentRepository adjustmentRepository,
+                                DecisionRepository decisionRepository,
+                                DecisionRaiseService decisionRaiseService,
+                                BugRepository bugRepository,
+                                TestCaseExecutionScheduler testCaseExecutionScheduler,
+                                ReviewSnapshotScheduler reviewSnapshotScheduler,
+                                TransactionRunner transactionRunner) {
         this.taskRepository = taskRepository;
         this.taskRunRepository = taskRunRepository;
         this.adjustmentRepository = adjustmentRepository;
@@ -83,6 +102,7 @@ public class RunSettlementService {
         this.decisionRaiseService = decisionRaiseService;
         this.bugRepository = bugRepository;
         this.testCaseExecutionScheduler = testCaseExecutionScheduler;
+        this.reviewSnapshotScheduler = reviewSnapshotScheduler;
         this.transactionRunner = transactionRunner;
     }
 
@@ -104,12 +124,33 @@ public class RunSettlementService {
                     + task.getPrompt();
         }
         if (previous == null || previous.getStatus() != RunStatus.BLOCKED) {
-            return RETRY_INSTRUCTION;
+            return retryInstruction(task, previous);
         }
         Decision decision = decisionRepository.findLatestResolvedByTask(task.getId())
                 .orElseThrow(() -> new EntityNotFoundException(
                         "任务停在待续跑上，但找不到已决议的决策：" + task.getId()));
         return continuationPrompt(decision);
+    }
+
+    /**
+     * 重试指令必须能独立成立：某些执行器在恢复旧会话时会因上下文不兼容而拒绝请求，
+     * 此时平台需要无缝切到新会话，不能只给一句“接着上一轮”却让模型看不到任务要求。
+     */
+    private String retryInstruction(Task task, TaskRun previous) {
+        StringBuilder prompt = new StringBuilder(RETRY_INSTRUCTION)
+                .append("\n\n## 当前任务要求\n")
+                .append(task.getPrompt());
+        if (task.isContinuation()) {
+            task.getContinuedFromTaskId()
+                    .flatMap(taskRepository::findById)
+                    .ifPresent(parent -> prompt.append("\n\n## 来源任务要求\n")
+                            .append(parent.getTitle()).append('\n')
+                            .append(parent.getPrompt()));
+        }
+        if (previous != null && previous.getSummary() != null && !previous.getSummary().isBlank()) {
+            prompt.append("\n\n## 上一轮结果\n").append(previous.getSummary());
+        }
+        return prompt.toString();
     }
 
     /** 把决策结论翻译成执行器看得懂的指令。措辞里保留「谁拍的板」，模型据此知道这是终局结论。 */
@@ -228,6 +269,12 @@ public class RunSettlementService {
                 markBugFixed(fresh);
                 transactionRunner.afterCompletion(
                         () -> testCaseExecutionScheduler.scheduleAfterTaskCompleted(run.getTaskId()),
+                        () -> {
+                        });
+                transactionRunner.afterCompletion(
+                        () -> reviewSnapshotScheduler.scheduleAfterTaskCompleted(
+                                ReviewTaskId.of(run.getTaskId().value()),
+                                ReviewTaskRunId.of(run.getId().value())),
                         () -> {
                         });
             } else if (run.getStatus() != RunStatus.INTERRUPTED) {

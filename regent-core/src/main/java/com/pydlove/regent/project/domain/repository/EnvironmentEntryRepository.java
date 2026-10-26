@@ -36,9 +36,27 @@ public interface EnvironmentEntryRepository {
 
     boolean existsByKey(EnvironmentScope scope, ProjectId projectId, String key, EnvironmentId excludingId);
 
+    default boolean existsByKey(EnvironmentScope scope,
+                                List<ProjectId> projectIds,
+                                String key,
+                                EnvironmentId excludingId) {
+        return existsByKey(scope, projectIds == null || projectIds.isEmpty() ? null : projectIds.get(0),
+                key, excludingId);
+    }
+
     default boolean existsByKey(UserId userId, EnvironmentScope scope, ProjectId projectId,
                                 String key, EnvironmentId excludingId) {
         return existsByKey(scope, projectId, key, excludingId);
+    }
+
+    default boolean existsByKey(UserId userId,
+                                EnvironmentScope scope,
+                                List<ProjectId> projectIds,
+                                String key,
+                                EnvironmentId excludingId) {
+        return existsByKey(userId, scope,
+                projectIds == null || projectIds.isEmpty() ? null : projectIds.get(0),
+                key, excludingId);
     }
 
     void save(EnvironmentEntry entry);

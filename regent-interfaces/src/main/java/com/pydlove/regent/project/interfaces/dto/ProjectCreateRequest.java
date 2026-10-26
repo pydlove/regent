@@ -10,8 +10,15 @@ package com.pydlove.regent.project.interfaces.dto;
  * 数据库列上的 DEFAULT 'L1' 是兜底，不是给正常请求走的路径。
  */
 public record ProjectCreateRequest(
+        Long organizationId,
         String code,
         String name,
         String path,
-        String defaultDecisionLevel) {
+        String defaultDecisionLevel,
+        String versionSource,
+        String fallbackVersion) {
+
+    public ProjectCreateRequest(String code, String name, String path, String defaultDecisionLevel) {
+        this(null, code, name, path, defaultDecisionLevel, "GIT_TAG", null);
+    }
 }

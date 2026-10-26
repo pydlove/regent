@@ -30,7 +30,9 @@ import {
   type SaveDeploymentInput,
 } from '@/api/deployments'
 import { listDeploymentServers } from '@/api/deploymentServers'
+import { selectedFilePath } from '@/api/deviceAgent'
 import Button from '@/components/ui/button/Button.vue'
+import Checkbox from '@/components/ui/checkbox/Checkbox.vue'
 import DeploymentServerDialog from '@/components/business/DeploymentServerDialog.vue'
 import DirectoryPickerDialog from '@/components/business/DirectoryPickerDialog.vue'
 import Dialog from '@/components/ui/dialog/Dialog.vue'
@@ -56,7 +58,9 @@ import type {
 } from '@/types/api'
 import { inferDeploymentDirectory } from '@/utils/deploymentDirectory'
 import { resolveDeploymentServerSelection } from '@/utils/deploymentServerSelection'
+import { isProjectReleaseScript } from '@/utils/deploymentScriptMode'
 import { formatBytes } from '@/utils/format'
+import { resolveProjectScriptPath } from '@/utils/projectScriptPath'
 
 const MAX_SCRIPT_BYTES = 512 * 1024
 
@@ -69,7 +73,7 @@ const emit = defineEmits<{ saved: [deployment: DeploymentDetail] }>()
 const open = defineModel<boolean>('open', { default: false })
 const toast = useToast()
 
-const projectId = ref('')
+const selectedProjectIds = ref<number[]>([])
 const serverId = ref('')
 const allServers = ref<DeploymentServer[]>([])
 const name = ref('')
@@ -79,6 +83,7 @@ let lastAutoFilledDirectory: string | null = null
 const workspacePath = ref('')
 const executionMode = ref<DeploymentExecutionMode>('REMOTE_SCRIPT')
 const projectScriptPath = ref('')
+const selectedScriptFilePath = ref<string | null>(null)
 const scriptFilename = ref<string | null>(null)
 const scriptContent = ref<string | null>(null)
 const scriptValidation = ref<DeploymentScriptValidation | null>(null)
@@ -100,20 +105,16 @@ const editingServer = ref<DeploymentServer | null>(null)
 let copiedTemplateTimer: number | undefined
 let initializing = false
 
-const projectItems = computed(() =>
-  props.projects.map((project) => ({
-    value: String(project.id),
-    label: project.enabled ? project.name : `${project.name}（已暂停）`,
-  })),
+const primaryProjectId = computed(() => selectedProjectIds.value[0] ?? null)
+const selectedProject = computed(
+  () => props.projects.find((project) => project.id === primaryProjectId.value) ?? null,
 )
 const servers = computed(() => {
-  const selectedProjectId = Number(projectId.value)
-  if (!Number.isSafeInteger(selectedProjectId) || selectedProjectId <= 0) return []
-  return allServers.value.filter((server) => server.projectId === selectedProjectId)
+  if (selectedProjectIds.value.length === 0) return []
+  return allServers.value.filter((server) =>
+    selectedProjectIds.value.every((projectId) => server.projectIds.includes(projectId)),
+  )
 })
-const selectedProject = computed(
-  () => props.projects.find((project) => String(project.id) === projectId.value) ?? null,
-)
 const serverItems = computed(() =>
   servers.value.map((server) => ({
     value: String(server.id),
@@ -171,7 +172,7 @@ watch(remoteDirectory, (value) => {
 const scriptSize = computed(() => new Blob([scriptContent.value ?? '']).size)
 const canGenerateScript = computed(
   () =>
-    projectId.value !== '' &&
+    selectedProjectIds.value.length > 0 &&
     serverId.value !== '' &&
     workspacePath.value.trim().length > 0 &&
     remoteDirectory.value.trim().length > 0 &&
@@ -183,7 +184,7 @@ const canGenerateScript = computed(
 )
 const canSave = computed(
   () =>
-    projectId.value !== '' &&
+    selectedProjectIds.value.length > 0 &&
     serverId.value !== '' &&
     name.value.trim().length > 0 &&
     remoteDirectory.value.trim().length > 0 &&
@@ -206,7 +207,7 @@ const remoteDirectoryNotice = computed(() => {
 })
 
 const generateHint = computed(() => {
-  if (projectId.value === '') return '先选择所属项目'
+  if (selectedProjectIds.value.length === 0) return '先选择所属项目'
   if (workspacePath.value.trim() === '') return '先选择项目文件夹'
   if (serverId.value === '') return '先选择部署服务器'
   if (remoteDirectory.value.trim() === '') return '先填写远程目录'
@@ -229,16 +230,21 @@ watch(open, async (opened) => {
   loading.value = props.deployment !== null
   saving.value = false
   error.value = null
-  const requestedProjectId = props.deployment?.projectId ?? props.defaultProjectId
-  projectId.value =
-    requestedProjectId === null
-      ? String(props.projects[0]?.id ?? '')
-      : String(requestedProjectId)
+  const requestedProjectIds =
+    props.deployment?.projectIds && props.deployment.projectIds.length > 0
+      ? props.deployment.projectIds
+      : props.defaultProjectId !== null
+        ? [props.defaultProjectId]
+        : props.projects[0]
+          ? [props.projects[0].id]
+          : []
+  selectedProjectIds.value = [...requestedProjectIds]
   workspacePath.value = selectedProject.value?.path ?? ''
   serverId.value =
     props.deployment?.serverId === undefined ? '' : String(props.deployment.serverId)
   executionMode.value = props.deployment?.executionMode ?? 'REMOTE_SCRIPT'
   projectScriptPath.value = props.deployment?.projectScriptPath ?? ''
+  selectedScriptFilePath.value = null
   name.value = props.deployment?.name ?? ''
   remoteDirectory.value = props.deployment?.remoteDirectory ?? ''
   remoteDirectoryAutoFilled.value = false
@@ -246,12 +252,14 @@ watch(open, async (opened) => {
   scriptFilename.value = props.deployment?.scriptFilename ?? null
   scriptContent.value = null
   scriptValidation.value = null
-  await loadServers(requestedProjectId)
+  await loadServers(primaryProjectId.value)
   applyServerDefaultDirectory()
   initializing = false
   if (!props.deployment) return
   try {
     const detail = await getDeployment(props.deployment.id)
+    selectedProjectIds.value = [...detail.projectIds]
+    workspacePath.value = selectedProject.value?.path ?? workspacePath.value
     serverId.value = String(detail.serverId)
     executionMode.value = detail.executionMode
     projectScriptPath.value = detail.projectScriptPath ?? ''
@@ -291,8 +299,8 @@ const loadServers = async (requestedProjectId: number | null) => {
       props.projects,
       allServers.value,
     )
-    if (selection.projectId !== null) {
-      projectId.value = String(selection.projectId)
+    if (selectedProjectIds.value.length === 0 && selection.projectId !== null) {
+      selectedProjectIds.value = [selection.projectId]
       workspacePath.value = selectedProject.value?.path ?? ''
     }
     selectAvailableServer()
@@ -305,13 +313,13 @@ const loadServers = async (requestedProjectId: number | null) => {
   }
 }
 
-watch(projectId, () => {
+watch(selectedProjectIds, () => {
   if (open.value && !initializing) {
     workspacePath.value = selectedProject.value?.path ?? ''
     selectAvailableServer()
     applyServerDefaultDirectory()
   }
-})
+}, { deep: true })
 
 watch(serverId, () => {
   if (open.value && !initializing) applyServerDefaultDirectory()
@@ -320,11 +328,17 @@ watch(serverId, () => {
 watch(
   () => props.projects.map((project) => project.id).join(','),
   () => {
-    if (!open.value || initializing || projectId.value !== '' || !props.projects[0]) return
-    projectId.value = String(props.projects[0].id)
+    if (!open.value || initializing || selectedProjectIds.value.length > 0 || !props.projects[0]) return
+    selectedProjectIds.value = [props.projects[0].id]
     workspacePath.value = selectedProject.value?.path ?? ''
   },
 )
+
+const toggleProject = (projectId: number) => {
+  selectedProjectIds.value = selectedProjectIds.value.includes(projectId)
+    ? selectedProjectIds.value.filter((id) => id !== projectId)
+    : [...selectedProjectIds.value, projectId]
+}
 
 const openNewServer = () => {
   editingServer.value = null
@@ -338,8 +352,8 @@ const editSelectedServer = () => {
 }
 
 const onServerSaved = async (server: DeploymentServer) => {
-  if (String(server.projectId) === projectId.value) {
-    allServers.value = await listDeploymentServers()
+  allServers.value = await listDeploymentServers()
+  if (selectedProjectIds.value.every((projectId) => server.projectIds.includes(projectId))) {
     selectAvailableServer()
     serverId.value = String(server.id)
   }
@@ -349,6 +363,27 @@ const onWorkspacePicked = (path: string) => {
   workspacePath.value = path
   directoryPickerOpen.value = false
 }
+
+const syncProjectScriptPath = () => {
+  if (!scriptFilename.value) return
+  projectScriptPath.value = resolveProjectScriptPath(
+    scriptFilename.value,
+    selectedScriptFilePath.value,
+    workspacePath.value,
+  )
+}
+
+watch(workspacePath, () => {
+  if (!initializing && executionMode.value === 'PROJECT_SCRIPT' && selectedScriptFilePath.value) {
+    syncProjectScriptPath()
+  }
+})
+
+watch(executionMode, (mode) => {
+  if (mode === 'PROJECT_SCRIPT' && scriptFilename.value && !projectScriptPath.value.trim()) {
+    syncProjectScriptPath()
+  }
+})
 
 const importFile = async (event: Event) => {
   const input = event.target as HTMLInputElement
@@ -364,18 +399,22 @@ const importFile = async (event: Event) => {
   }
   try {
     const content = await file.text()
+    const localPath = selectedFilePath(file)
+    selectedScriptFilePath.value = localPath
     scriptContent.value = content
     scriptFilename.value = file.name
     if (
       executionMode.value === 'REMOTE_SCRIPT' &&
-      content.includes('deploy-local.sh') &&
-      content.includes('REGENT_SERVER_IP')
+      isProjectReleaseScript(content)
     ) {
       executionMode.value = 'PROJECT_SCRIPT'
-      if (!projectScriptPath.value.trim()) {
-        projectScriptPath.value = 'deploy/remote/deploy.sh'
-      }
-      toast.success('已识别为本机完整发布脚本', projectScriptPath.value)
+    }
+    if (executionMode.value === 'PROJECT_SCRIPT') {
+      syncProjectScriptPath()
+      toast.success(
+        '已同步项目脚本路径',
+        projectScriptPath.value || '请确认脚本位于项目目录中',
+      )
     }
     if (!name.value.trim()) name.value = file.name.replace(/\.[^.]+$/, '')
     const inferredDirectory = inferDeploymentDirectory(content)
@@ -400,8 +439,10 @@ const importFile = async (event: Event) => {
 
 const removeScript = () => {
   scriptFilename.value = null
+  selectedScriptFilePath.value = null
   scriptContent.value = null
   scriptValidation.value = null
+  if (executionMode.value === 'PROJECT_SCRIPT') projectScriptPath.value = ''
 }
 
 const validateScript = async () => {
@@ -432,7 +473,7 @@ const generateScript = async () => {
   try {
     const generated = await generateDeploymentScript({
       requestId: generationRequestId,
-      projectId: Number(projectId.value),
+      projectId: primaryProjectId.value ?? 0,
       serverId: Number(serverId.value),
       workspacePath: workspacePath.value.trim(),
       remoteDirectory: remoteDirectory.value.trim(),
@@ -443,7 +484,9 @@ const generateScript = async () => {
       return
     }
     scriptFilename.value = generated.scriptFilename
+    selectedScriptFilePath.value = null
     scriptContent.value = generated.scriptContent
+    if (executionMode.value === 'PROJECT_SCRIPT') syncProjectScriptPath()
     await validateScript()
     if (scriptValidation.value?.valid) {
       toast.success('Codex 已生成部署脚本', generated.scriptFilename)
@@ -538,7 +581,8 @@ const save = async () => {
   saving.value = true
   error.value = null
   const input: SaveDeploymentInput = {
-    projectId: Number(projectId.value),
+    projectId: primaryProjectId.value ?? 0,
+    projectIds: [...selectedProjectIds.value],
     serverId: Number(serverId.value),
     name: name.value.trim(),
     remoteDirectory: remoteDirectory.value.trim(),
@@ -701,7 +745,7 @@ const save = async () => {
         v-if="executionMode === 'PROJECT_SCRIPT'"
         label="项目脚本路径"
         required
-        hint="相对归属项目根目录，例如 deploy/remote/deploy.sh；上传内容必须与文件一致"
+        hint="相对归属项目根目录；上传或替换脚本后会自动更新，内容必须与项目目录中的文件一致"
       >
         <Input
           v-model="projectScriptPath"
@@ -713,20 +757,28 @@ const save = async () => {
       <DialogField
         label="归属项目"
         required
-        hint="部署列表按顶栏选中的项目查询；创建后不能改归属"
+        :hint="`可多选，当前已选 ${selectedProjectIds.length} 个；首个项目作为脚本生成和执行的主项目`"
       >
-        <Select
-          v-model="projectId"
-          :items="projectItems"
-          :disabled="deployment !== null"
-          placeholder="选择项目"
-          class="w-full"
-        />
+        <div
+          class="scroll-area max-h-40 w-full overflow-y-auto rounded-panel border border-separator-soft bg-content p-1.5"
+        >
+          <Checkbox
+            v-for="project in projects"
+            :key="project.id"
+            :model-value="selectedProjectIds.includes(project.id)"
+            :label="project.enabled ? project.name : `${project.name}（已暂停）`"
+            class="w-full rounded-control px-2 py-1.5 hover:bg-hover"
+            @update:model-value="toggleProject(project.id)"
+          />
+          <p v-if="projects.length === 0" class="px-2 py-1.5 text-caption text-label-tertiary">
+            暂无项目，请先创建项目
+          </p>
+        </div>
       </DialogField>
 
       <DialogField
         label="项目文件夹"
-        hint="AI 生成时读取这个目录，优先参考其中的 deploy / script 脚本；必须位于所选项目工作区内"
+        hint="AI 生成时读取主项目下的这个目录，优先参考其中的 deploy / script 脚本"
       >
         <div class="flex gap-2">
           <Input
@@ -735,7 +787,7 @@ const save = async () => {
             placeholder="选择项目工作区或子目录"
           />
           <Button
-            :disabled="projectId === ''"
+            :disabled="selectedProjectIds.length === 0"
             @click="directoryPickerOpen = true"
           >
             <Icon :as="FolderOpen" size="inline" />选择目录
@@ -754,7 +806,7 @@ const save = async () => {
       <DialogField
         label="服务器"
         required
-        hint="服务器连接信息由项目级服务器资源统一维护，可被多个部署脚本复用"
+        hint="只显示同时归属全部已选项目的服务器；连接信息可在服务器资源中复用"
       >
         <div class="flex gap-2">
           <div class="min-w-0 flex-1">
@@ -780,7 +832,7 @@ const save = async () => {
           {{ selectedServer.username }}@{{ selectedServer.host }}:{{ selectedServer.port }}
         </p>
         <p v-else class="mt-1 text-caption text-warning">
-          当前项目还没有服务器，请切换上方项目或先新建一台。
+          没有同时归属全部已选项目的服务器，请调整项目或先新建一台。
         </p>
       </DialogField>
 
@@ -918,13 +970,13 @@ const save = async () => {
     v-model:open="serverDialogOpen"
     :server="editingServer"
     :projects="projects"
-    :default-project-id="projectId === '' ? null : Number(projectId)"
+    :default-project-id="primaryProjectId"
     @saved="onServerSaved"
   />
 
   <DirectoryPickerDialog
     v-model:open="directoryPickerOpen"
-    :initial="workspacePath || selectedProject?.path"
+    :initial="workspacePath || selectedProject?.path || undefined"
     @picked="onWorkspacePicked"
   />
 </template>

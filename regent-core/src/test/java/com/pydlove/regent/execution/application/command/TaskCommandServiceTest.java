@@ -4,6 +4,10 @@ import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskSource;
 import com.pydlove.regent.execution.domain.model.TaskStatus;
+import com.pydlove.regent.governance.domain.model.Decision;
+import com.pydlove.regent.governance.domain.model.DecisionRaise;
+import com.pydlove.regent.governance.domain.model.DecisionStatus;
+import com.pydlove.regent.governance.domain.model.ResolvedBy;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
@@ -25,7 +29,10 @@ class TaskCommandServiceTest {
 
     private final ExecutionFakes.Tasks tasks = new ExecutionFakes.Tasks();
     private final ExecutionFakes.Projects projects = new ExecutionFakes.Projects();
-    private final TaskCommandService service = new TaskCommandService(tasks, projects);
+    private final ExecutionFakes.Decisions decisions = new ExecutionFakes.Decisions();
+    private final ExecutionFakes.Transactions transactions = new ExecutionFakes.Transactions();
+    private final TaskCommandService service =
+            new TaskCommandService(tasks, projects, decisions, transactions);
 
     private Task create(String prompt) {
         projects.put(ExecutionFakes.Projects.profile(3L, DecisionLevel.L1, true));
@@ -167,7 +174,7 @@ class TaskCommandServiceTest {
     @DisplayName("已终止任务可以重新执行并写回仓储")
     void retriesCancelledTask() {
         Task task = create("终止后需要重新执行");
-        task.cancel();
+        service.cancel(task.getId());
 
         Task retried = service.retry(task.getId());
 
@@ -190,7 +197,7 @@ class TaskCommandServiceTest {
     @DisplayName("已终止任务可以删除并从仓储移除")
     void deletesCancelledTask() {
         Task task = create("删除已经终止的任务");
-        task.cancel();
+        service.cancel(task.getId());
 
         service.delete(task.getId());
 
@@ -225,5 +232,36 @@ class TaskCommandServiceTest {
                 result.failures().stream().map(TaskDeleteBatchResult.Failure::taskId).toList());
         assertNull(tasks.get(pending.getId().value()));
         assertEquals(running, tasks.get(running.getId().value()));
+    }
+
+    @Test
+    @DisplayName("终止阻塞任务时关闭该任务全部待批决策并留痕")
+    void closesPendingDecisionsWhenCancellingTask() {
+        Task task = create("等待决策时终止");
+        task.queue();
+        task.dispatch(null);
+        Decision current = Decision.raise(new DecisionRaise(
+                task.getId(), ProjectId.of(3L), DecisionLevel.L1, DecisionLevel.L2, null,
+                "当前决策", List.of("继续", "终止"), "继续", true, "当前任务"));
+        decisions.save(current);
+        task.block(current.getId());
+        tasks.save(task);
+        Decision stale = Decision.raise(new DecisionRaise(
+                task.getId(), ProjectId.of(3L), DecisionLevel.L1, DecisionLevel.L2, null,
+                "残留决策", List.of("继续"), "继续", true, "当前任务"));
+        decisions.save(stale);
+        int taskSavesBefore = tasks.saves;
+
+        Task cancelled = service.cancel(task.getId());
+
+        assertEquals(TaskStatus.CANCELLED, cancelled.getStatus());
+        assertTrue(cancelled.getBlockingDecisionId().isEmpty());
+        assertEquals(DecisionStatus.REJECTED, current.getStatus());
+        assertEquals(DecisionStatus.REJECTED, stale.getStatus());
+        assertEquals(ResolvedBy.HUMAN, current.getResolvedBy().orElseThrow());
+        assertTrue(current.getResolutionNote().orElseThrow().contains("任务已终止"));
+        assertTrue(stale.getResolutionNote().orElseThrow().contains("任务已终止"));
+        assertEquals(taskSavesBefore + 1, tasks.saves);
+        assertEquals(1, transactions.transactions);
     }
 }

@@ -50,7 +50,8 @@ class BugFixDispatchServiceTest {
         events.wire(runs);
         projects.put(ExecutionFakes.Projects.profile(1L, DecisionLevel.L1, true));
         DecisionRaiseService decisionRaiseService = new DecisionRaiseService(rules, decisions);
-        TaskRunService runService = new TaskRunService(tasks, runs, events, attachments, projects,
+        TaskRunService runService = new TaskRunService(tasks, runs, events, attachments,
+                new ExecutionFakes.Documents(), projects,
                 new ExecutionFakes.Environments(),
                 new ExecutionFakes.TaskPlugins(),
                 new RunSettlementService(tasks, runs, adjustments, decisions, decisionRaiseService, bugs,

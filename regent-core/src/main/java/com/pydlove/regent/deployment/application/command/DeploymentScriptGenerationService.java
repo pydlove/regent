@@ -86,10 +86,13 @@ public class DeploymentScriptGenerationService {
         DeploymentServer server = serverRepository.findById(command.serverId())
                 .orElseThrow(() -> new EntityNotFoundException(
                         "部署服务器不存在：" + command.serverId().value()));
-        if (!server.getProjectId().equals(project.getId())) {
-            throw new DomainException("部署与服务器必须属于同一项目");
+        if (!server.belongsTo(project.getId())) {
+            throw new DomainException("所选服务器未归属该部署项目");
         }
 
+        if (!project.hasWorkspace()) {
+            throw new DomainException("项目尚未绑定本机代码目录，不能生成部署脚本");
+        }
         Path projectRoot = realDirectory(project.getPath(), "项目目录");
         Path workspace = command.workspacePath() == null || command.workspacePath().isBlank()
                 ? projectRoot

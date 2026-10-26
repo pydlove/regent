@@ -7,6 +7,7 @@ import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.shared.domain.DomainException;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 /** 决策单聚合仓储的 MyBatis 实现。 */
@@ -23,6 +24,13 @@ public class MyBatisDecisionRepository implements DecisionRepository {
     public Optional<Decision> findById(DecisionId id) {
         return Optional.ofNullable(decisionMapper.selectById(id.value()))
                 .map(DecisionDataMapper::toDomain);
+    }
+
+    @Override
+    public List<Decision> findPendingByTaskForUpdate(TaskId taskId) {
+        return decisionMapper.selectPendingByTaskForUpdate(taskId.value()).stream()
+                .map(DecisionDataMapper::toDomain)
+                .toList();
     }
 
     @Override

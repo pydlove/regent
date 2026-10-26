@@ -33,6 +33,7 @@ export const useAuthStore = defineStore('auth', () => {
   const initialized = ref(false)
   const submitting = ref(false)
   const sendingCode = ref(false)
+  let currentUserRefresh: Promise<boolean> | null = null
 
   const isAuthenticated = computed(() => user.value !== null)
 
@@ -73,6 +74,28 @@ export const useAuthStore = defineStore('auth', () => {
     } finally {
       submitting.value = false
     }
+  }
+
+  const refreshCurrentUser = async (): Promise<boolean> => {
+    if (!user.value) return false
+    if (currentUserRefresh) return currentUserRefresh
+    currentUserRefresh = (async () => {
+      try {
+        user.value = await getCurrentUser()
+        initialized.value = true
+        return true
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          user.value = null
+          initialized.value = true
+          return false
+        }
+        return true
+      } finally {
+        currentUserRefresh = null
+      }
+    })()
+    return currentUserRefresh
   }
 
   const sendRegistrationCode = async (email: string): Promise<void> => {
@@ -122,6 +145,7 @@ export const useAuthStore = defineStore('auth', () => {
     sendingCode,
     isAuthenticated,
     loadCurrentUser,
+    refreshCurrentUser,
     login,
     sendRegistrationCode,
     register,

@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.execution.infrastructure.persistence.ExecutionControlTowerMapper">
+
+    <select id="selectEntries"
+            resultType="com.pydlove.regent.execution.infrastructure.persistence.ExecutionControlTowerRowData">
+        SELECT tower.*
+        FROM (
+            SELECT
+                'TASK' AS execution_type,
+                t.id AS business_id,
+                tr.id AS run_id,
+                tr.attempt_no,
+                t.project_id,
+                p.name AS project_name,
+                t.title AS name,
+                t.status AS business_status,
+                tr.status AS run_status,
+                tr.executor,
+                tr.agent_name,
+                tr.exit_code,
+                tr.summary,
+                COALESCE(tr.started_at, t.started_at) AS started_at,
+                COALESCE(tr.finished_at, t.finished_at) AS finished_at,
+                t.updated_at,
+                tr.lease_expires_at,
+                latest_event.last_event_at
+            FROM task t
+            JOIN project p ON p.id = t.project_id AND p.deleted = 0
+            LEFT JOIN task_run tr ON tr.id = (
+                SELECT r.id
+                FROM task_run r
+                WHERE r.task_id = t.id
+                ORDER BY r.attempt_no DESC, r.id DESC
+                LIMIT 1
+            )
+            LEFT JOIN (
+                SELECT task_run_id, MAX(occurred_at) AS last_event_at
+                FROM run_event
+                GROUP BY task_run_id
+            ) latest_event ON latest_event.task_run_id = tr.id
+            WHERE t.deleted = 0
+              AND (
+                  p.owner_id = #{ownerId}
+                  OR EXISTS (
+                      SELECT 1 FROM project_member pm
+                      WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+                  )
+              )
+              AND (
+                t.status IN ('PENDING', 'QUEUED', 'RUNNING', 'BLOCKED')
+                OR (t.status = 'FAILED' AND t.updated_at >= DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 7 DAY))
+              )
+              <if test="projectId != null">
+                AND t.project_id = #{projectId}
+              </if>
+
+            UNION ALL
+
+            SELECT
+                'DEPLOYMENT' AS execution_type,
+                d.id AS business_id,
+                dr.id AS run_id,
+                NULL AS attempt_no,
+                d.project_id,
+                p.name AS project_name,
+                d.name AS name,
+                dr.status AS business_status,
+                dr.status AS run_status,
+                'deployment-executor' AS executor,
+                NULL AS agent_name,
+                dr.exit_code,
+                dr.summary,
+                dr.started_at,
+                dr.finished_at,
+                d.updated_at,
+                NULL AS lease_expires_at,
+                COALESCE(dr.finished_at, dr.started_at, dr.queued_at, d.updated_at) AS last_event_at
+            FROM deployment d
+            JOIN project p ON p.id = d.project_id AND p.deleted = 0
+            LEFT JOIN deployment_run dr ON dr.id = (
+                SELECT r.id
+                FROM deployment_run r
+                WHERE r.deployment_id = d.id
+                ORDER BY r.id DESC
+                LIMIT 1
+            )
+            WHERE d.deleted = 0
+              AND (
+                  p.owner_id = #{ownerId}
+                  OR EXISTS (
+                      SELECT 1 FROM project_member pm
+                      WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+                  )
+              )
+              AND (
+                dr.status IN ('QUEUED', 'RUNNING')
+                OR (dr.status IN ('FAILED', 'TIMEOUT', 'INTERRUPTED')
+                    AND d.updated_at >= DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 7 DAY))
+              )
+              <if test="projectId != null">
+                AND d.project_id = #{projectId}
+              </if>
+        ) tower
+        ORDER BY
+            CASE
+                WHEN business_status = 'RUNNING' THEN 0
+                WHEN business_status = 'QUEUED' THEN 1
+                WHEN business_status = 'BLOCKED' THEN 2
+                WHEN business_status = 'FAILED' THEN 3
+                ELSE 4
+            END,
+            updated_at DESC,
+            run_id DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

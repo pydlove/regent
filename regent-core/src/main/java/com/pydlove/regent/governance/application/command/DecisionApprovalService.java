@@ -14,6 +14,7 @@ import com.pydlove.regent.shared.domain.TransactionRunner;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -85,6 +86,12 @@ public class DecisionApprovalService {
                 task.resume();
             }
         } else {
+            List<Decision> otherPending = List.of();
+            if (task.getStatus() == TaskStatus.BLOCKED) {
+                otherPending = decisionRepository.findPendingByTaskForUpdate(task.getId()).stream()
+                        .filter(candidate -> !candidate.getId().equals(decision.getId()))
+                        .toList();
+            }
             decision.reject(command.choice(), command.note());
             // 任务已经不在这条决策上（比如被人工直接终止了）时只留决策记录：硬要给一个终态任务
             // 判终止只会抛异常，把一次正常的人工否决变成 500，而决策单会永远停在待批。
@@ -94,7 +101,9 @@ public class DecisionApprovalService {
                 } else {
                     task.cancel();
                 }
+                otherPending.forEach(Decision::closeByTaskCancellation);
             }
+            otherPending.forEach(decisionRepository::save);
         }
 
         // 状态没动就不写任务：空 UPDATE 会把 updated_at 刷新一遍，而那一列的含义是

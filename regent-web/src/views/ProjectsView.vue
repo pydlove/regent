@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   BookOpenText,
+  Code2,
   ChevronLeft,
   ListChecks,
   Pencil,
@@ -13,10 +14,11 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/http'
-import { getProjectGitBranch, regenerateProjectSummary } from '@/api/projects'
+import { getProjectGitBranch, getProjectVersion, regenerateProjectSummary } from '@/api/projects'
 import { listTasks } from '@/api/tasks'
 import DecisionLevelBadge from '@/components/business/DecisionLevelBadge.vue'
 import ProjectSummaryDialog from '@/components/business/ProjectSummaryDialog.vue'
+import CodeEditorDialog from '@/components/business/CodeEditorDialog.vue'
 import TaskStatusBadge from '@/components/business/TaskStatusBadge.vue'
 import Button from '@/components/ui/button/Button.vue'
 import EmptyState from '@/components/ui/empty-state/EmptyState.vue'
@@ -33,12 +35,12 @@ import { useProjectDialog } from '@/composables/useProjectDialog'
 import { useToast } from '@/composables/useToast'
 import { useExecutionRuntimeStore } from '@/stores/useExecutionRuntimeStore'
 import { useTaskStore } from '@/stores/useTaskStore'
-import type { Project, TaskSummary } from '@/types/api'
+import type { Project, ProjectVersion, TaskSummary } from '@/types/api'
 
 /*
  * 项目管理。
  *
- * 这一页负责看清项目画像（路径、阈值、是否暂停）、编辑可维护字段，并查看每个项目的
+ * 这一页负责看清研发项目（名称、是否暂停）、编辑可维护字段，并查看每个项目的
  * 任务规模与最近记录。删除仍未提供独立入口。
  *
  * 列表不分页：项目是平台里数量最少的东西（个位数），分页是照猫画虎。
@@ -57,13 +59,11 @@ const {
 
 const columns: TableColumn[] = [
   { key: 'name', label: '项目名称', width: '280px' },
-  { key: 'code', label: '标识', width: '108px', hideBelow: 'lg' },
-  { key: 'path', label: '工作区路径', width: '160px', hideBelow: '2xl' },
   { key: 'gitBranch', label: 'Git 分支', width: '128px', hideBelow: '2xl' },
   { key: 'level', label: '自动决策', width: '128px', hideBelow: 'md' },
   { key: 'status', label: '状态', width: '76px' },
   { key: 'tasks', label: '任务', align: 'right', width: '52px' },
-  { key: 'actions', label: '', align: 'right', width: '44px' },
+  { key: 'actions', label: '', align: 'right', width: '76px' },
 ]
 
 const loading = ref(false)
@@ -78,16 +78,10 @@ const filteredProjects = computed(() => {
   const query = keyword.value.trim().toLocaleLowerCase('zh-CN')
   if (!query) return store.projects
   return store.projects.filter((project) =>
-    [project.name, project.code, project.path, project.defaultDecisionLevel]
+    [project.name, project.defaultDecisionLevel]
       .some((value) => value.toLocaleLowerCase('zh-CN').includes(query)),
   )
 })
-const projectCountLabel = computed(() =>
-  keyword.value.trim()
-    ? `${filteredProjects.value.length} / ${store.projects.length}`
-    : String(store.projects.length),
-)
-
 /**
  * 每个项目下的任务总数。
  *
@@ -100,9 +94,13 @@ const taskCounts = ref<Record<number, number>>({})
 /** 选中项目的最近任务。只给选中的那一个拉列表，不给每一行拉 */
 const projectTasks = ref<TaskSummary[]>([])
 const projectBranches = ref<Record<number, string | null>>({})
+const selectedVersion = ref<ProjectVersion | null>(null)
+const versionLoading = ref(false)
 let branchRequestSequence = 0
+let versionRequestSequence = 0
 const summaryRegeneratingId = ref<number | null>(null)
 const summaryDialogOpen = ref(false)
+const codeEditorOpen = ref(false)
 let summaryPollTimer: number | null = null
 
 const summaryStatusLabel = (project: Project | null) => {
@@ -149,9 +147,27 @@ const loadProjectTasks = async () => {
   }
 }
 
+const loadSelectedVersion = async () => {
+  const id = selectedId.value
+  const requestSequence = ++versionRequestSequence
+  selectedVersion.value = null
+  versionLoading.value = false
+  const project = store.projects.find((item) => item.id === id)
+  if (id === null || !project?.path) return
+  versionLoading.value = true
+  try {
+    const result = await getProjectVersion(id)
+    if (requestSequence === versionRequestSequence) selectedVersion.value = result
+  } catch {
+    if (requestSequence === versionRequestSequence) selectedVersion.value = null
+  } finally {
+    if (requestSequence === versionRequestSequence) versionLoading.value = false
+  }
+}
+
 const loadProjectBranches = async () => {
   const requestSequence = ++branchRequestSequence
-  const projects = store.projects
+  const projects = store.projects.filter((project) => project.path)
   projectBranches.value = {}
   const branches = await Promise.all(
     projects.map(async (project) => {
@@ -189,6 +205,7 @@ const load = async () => {
       selectedId.value = store.projects[0]?.id ?? null
     }
     await Promise.all([loadProjectTasks(), loadProjectBranches()])
+    await loadSelectedVersion()
     scheduleSummaryPolling()
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : '无法连接后端，请确认服务已启动（默认 127.0.0.1:8787）'
@@ -202,6 +219,7 @@ onBeforeUnmount(stopSummaryPolling)
 watch(selectedId, () => {
   summaryDialogOpen.value = false
   void loadProjectTasks()
+  void loadSelectedVersion()
 })
 
 /** 注册成功后：整页刷新，并把新项目选中 —— 刚建的东西应该立刻是焦点 */
@@ -234,13 +252,19 @@ const openInTasks = (project = selected.value) => {
   void router.push('/tasks')
 }
 
+const openProjectCode = (project = selected.value) => {
+  if (!project?.path) return
+  selectedId.value = project.id
+  codeEditorOpen.value = true
+}
+
 const regenerateSummary = async () => {
   if (!selected.value || selected.value.summaryStatus === 'GENERATING') return
   if (!executionRuntime.status) await executionRuntime.check()
   if (executionRuntime.status && !executionRuntime.status.available) {
     openCodexInstallDialog()
     toast.warning(
-      'Codex 未就绪，无法生成项目资料',
+      'Codex 未就绪，无法生成项目摘要',
       '请先到「设置 → 执行」安装或配置 Codex，再重新生成',
     )
     return
@@ -251,10 +275,10 @@ const regenerateSummary = async () => {
     await regenerateProjectSummary(project.id)
     await store.loadProjects()
     scheduleSummaryPolling()
-    toast.success(`「${project.name}」开始生成项目资料`, 'Codex 以只读方式分析工作区，不会改动文件')
+    toast.success(`「${project.name}」开始生成项目摘要`, 'Codex 以只读方式分析工作区，不会改动文件')
   } catch (e) {
     toast.failure(
-      '无法启动项目资料生成',
+      '无法启动项目摘要生成',
       e instanceof ApiError ? e.message : '请确认后端与 Codex 可用',
     )
   } finally {
@@ -269,7 +293,6 @@ const regenerateSummary = async () => {
       <ListToolbar>
         <template #title>
           <h1 class="text-body font-emphasis text-label">项目</h1>
-          <span class="tnum text-body text-label-tertiary">{{ projectCountLabel }}</span>
         </template>
         <template #filters>
           <div class="relative min-w-0 flex-1 sm:w-52 sm:flex-none">
@@ -281,7 +304,7 @@ const regenerateSummary = async () => {
             <Input
               v-model="keyword"
               size="lg"
-              placeholder="搜索项目名称、标识或路径"
+              placeholder="搜索项目名称"
               aria-label="搜索项目"
               class="pl-7 pr-7"
             />
@@ -303,7 +326,7 @@ const regenerateSummary = async () => {
             </IconButton>
           </Tooltip>
           <Button variant="primary" size="lg" @click="openProjectDialog()">
-            <Icon :as="Plus" size="inline" />注册项目
+            <Icon :as="Plus" size="inline" />新建项目
           </Button>
         </template>
       </ListToolbar>
@@ -345,15 +368,26 @@ const regenerateSummary = async () => {
             >
               {{ taskCounts[row.id as number] ?? '—' }}
             </span>
-            <Tooltip v-else-if="column.key === 'actions'" content="编辑项目">
-              <IconButton
-                label="编辑项目"
-                size="sm"
-                @click.stop="openEditDialog(row as Project)"
-              >
-                <Icon :as="Pencil" size="inline" />
-              </IconButton>
-            </Tooltip>
+            <div v-else-if="column.key === 'actions'" class="flex justify-end gap-1">
+              <Tooltip v-if="row.path" content="打开项目代码">
+                <IconButton
+                  label="打开项目代码"
+                  size="sm"
+                  @click.stop="openProjectCode(row as Project)"
+                >
+                  <Icon :as="Code2" size="inline" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip content="编辑项目">
+                <IconButton
+                  label="编辑项目"
+                  size="sm"
+                  @click.stop="openEditDialog(row as Project)"
+                >
+                  <Icon :as="Pencil" size="inline" />
+                </IconButton>
+              </Tooltip>
+            </div>
           </template>
         </Table>
 
@@ -365,13 +399,13 @@ const regenerateSummary = async () => {
         <EmptyState v-else-if="error" title="加载失败" :description="error" />
         <EmptyState
           v-else-if="store.projects.length === 0"
-          title="还没有注册任何项目"
-          description="项目决定 codex 在哪个目录跑。注册一个，任务才有地方挂 —— 路径必须是本机已存在的目录。"
+          title="还没有研发项目"
+          description="新建项目后即可从立项开始，走完需求、设计、研发、测试和发布流程。"
         />
         <EmptyState
           v-else-if="filteredProjects.length === 0"
           title="没有匹配的项目"
-          description="换个名称、标识或路径关键词再试。"
+          description="换个项目名称关键词再试。"
         >
           <Button @click="keyword = ''">清除搜索</Button>
         </EmptyState>
@@ -396,7 +430,6 @@ const regenerateSummary = async () => {
           <Icon :as="ChevronLeft" size="inline" />返回列表
         </button>
         <div class="flex items-center gap-2">
-          <span class="text-caption text-label-tertiary">{{ selected.code }}</span>
           <StatusDot
             class="ml-auto"
             :dot="selected.enabled ? 'bg-success' : 'bg-neutral'"
@@ -413,13 +446,27 @@ const regenerateSummary = async () => {
           </Button>
         </div>
 
-        <p class="mt-3 text-caption text-label-secondary">工作区路径</p>
-        <p class="mt-1 break-all rounded-panel border border-separator-soft bg-content px-2 py-1.5 font-mono text-caption text-label">
-          {{ selected.path }}
-        </p>
+        <template v-if="selected.path">
+          <p class="mt-3 text-caption text-label-secondary">本机代码目录</p>
+          <p class="mt-1 break-all rounded-panel border border-separator-soft bg-content px-2 py-1.5 font-mono text-caption text-label">
+            {{ selected.path }}
+          </p>
+          <Button class="mt-2" size="sm" block @click="openProjectCode(selected)">
+            <Icon :as="Code2" size="inline" />打开项目代码
+          </Button>
+        </template>
+        <div
+          v-else
+          class="mt-3 rounded-panel border border-dashed border-separator bg-content px-3 py-2.5"
+        >
+          <p class="text-caption font-emphasis text-label-secondary">尚未绑定代码目录</p>
+          <p class="mt-1 text-caption text-label-tertiary">
+            研发流程可以直接使用；任务派发和项目摘要将在开发成员绑定本机工作区后启用。
+          </p>
+        </div>
 
         <dl class="mt-4 space-y-2">
-          <div class="flex items-center gap-2">
+          <div v-if="selected.path" class="flex items-center gap-2">
             <dt class="whitespace-nowrap text-caption text-label-secondary">自动决策</dt>
             <dd class="ml-auto"><DecisionLevelBadge :level="selected.defaultDecisionLevel" /></dd>
           </div>
@@ -427,6 +474,23 @@ const regenerateSummary = async () => {
             <dt class="whitespace-nowrap text-caption text-label-secondary">Git 分支</dt>
             <dd class="min-w-0 break-all text-right font-mono text-caption text-label">
               {{ projectBranches[selected.id] }}
+            </dd>
+          </div>
+          <div v-if="selected.path" class="flex items-start gap-2">
+            <dt class="whitespace-nowrap text-caption text-label-secondary">发布版本</dt>
+            <dd class="min-w-0 text-right">
+              <span v-if="versionLoading" class="text-caption text-label-tertiary">解析中…</span>
+              <template v-else-if="selectedVersion?.available">
+                <span class="block font-mono text-caption font-emphasis text-label">
+                  {{ selectedVersion.version }}
+                </span>
+                <span class="mt-0.5 block text-caption text-label-tertiary">
+                  {{ selectedVersion.message }}
+                </span>
+              </template>
+              <span v-else class="text-caption text-warning">
+                {{ selectedVersion?.message ?? '未解析到版本' }}
+              </span>
             </dd>
           </div>
           <div class="flex items-center gap-2">
@@ -437,14 +501,14 @@ const regenerateSummary = async () => {
           </div>
         </dl>
 
-        <p class="mt-3 text-caption text-label-tertiary">
+        <p v-if="selected.path" class="mt-3 text-caption text-label-tertiary">
           生效等级高于「{{ selected.defaultDecisionLevel }}」的决策一律升级人工。暂停的项目不再派发新任务，
           但录入不受影响。
         </p>
 
-        <div class="mt-4 border-t border-separator pt-3">
+        <div v-if="selected.path" class="mt-4 border-t border-separator pt-3">
           <div class="flex items-center gap-2">
-            <p class="text-caption font-emphasis text-label-secondary">项目资料</p>
+            <p class="text-caption font-emphasis text-label-secondary">项目摘要</p>
             <StatusDot
               class="ml-auto"
               :dot="selected.summaryStatus === 'GENERATING'
@@ -463,13 +527,13 @@ const regenerateSummary = async () => {
             Codex 正在只读分析工作区，完成后会自动刷新。
           </p>
           <p v-if="selected.summaryStatus === 'FAILED'" class="mt-2 text-caption text-danger">
-            {{ selected.summaryError || '项目资料生成失败' }}
+            {{ selected.summaryError || '项目摘要生成失败' }}
           </p>
           <p
             v-if="!selected.summary && selected.summaryStatus === 'NOT_GENERATED'"
             class="mt-2 text-caption text-label-tertiary"
           >
-            尚未生成项目资料。Codex 会读项目结构与说明，只生成总结，不改文件。
+            尚未生成项目摘要。Codex 会读项目结构与说明，只生成总结，不改文件。
           </p>
           <p
             v-if="selected.summaryGeneratedAt"
@@ -544,5 +608,10 @@ const regenerateSummary = async () => {
     </aside>
 
     <ProjectSummaryDialog v-model:open="summaryDialogOpen" :project="selected" />
+    <CodeEditorDialog
+      v-if="selected"
+      v-model:open="codeEditorOpen"
+      :project-id="selected.id"
+    />
   </div>
 </template>

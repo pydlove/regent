@@ -29,6 +29,8 @@ withDefaults(
     size?: DialogVariantProps['size']
     /** compact 把最大高度收敛到视口的 80% */
     maxHeight?: DialogVariantProps['maxHeight']
+    /** fixed 使用稳定的日志弹框高度，内容只在内部区域滚动 */
+    height?: DialogVariantProps['height']
     fullscreen?: boolean
     icon?: DialogIcon
     iconTone?: DialogIconProps['tone']
@@ -38,6 +40,7 @@ withDefaults(
     layout: 'alert',
     size: 'regular',
     maxHeight: 'default',
+    height: 'auto',
     fullscreen: false,
     icon: undefined,
     iconTone: 'default',
@@ -67,16 +70,23 @@ const { zIndex } = useOverlayLayer(open)
           :layout="layout"
           :size="size"
           :max-height="maxHeight"
+          :height="height"
           :fullscreen="fullscreen"
           :icon="icon"
           :icon-tone="iconTone"
           @close="open = false"
         >
           <template #header>
-            <DialogTitle :class="dialogTitleClass">{{ title }}</DialogTitle>
-            <DialogDescription v-if="description" :class="dialogDescriptionClass">
-              {{ description }}
-            </DialogDescription>
+            <div class="flex items-center gap-3">
+              <slot name="header-leading" />
+              <div class="min-w-0 flex-1">
+                <DialogTitle :class="dialogTitleClass">{{ title }}</DialogTitle>
+                <DialogDescription v-if="description" :class="dialogDescriptionClass">
+                  {{ description }}
+                </DialogDescription>
+              </div>
+              <slot name="header-action" />
+            </div>
           </template>
           <slot />
           <template #footer>

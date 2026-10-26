@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,11 +49,12 @@ class DeploymentCommandServiceTest {
     }
 
     @Test
-    @DisplayName("部署创建后固定归属所选项目")
+    @DisplayName("部署创建后记录完整的项目归属")
     void createsDeploymentWithOwnerProject() {
         Deployment deployment = service.create(command(7L, "生产 API"));
 
         assertEquals(ProjectId.of(7L), deployment.getProjectId());
+        assertEquals(List.of(ProjectId.of(7L)), deployment.getProjectIds());
         assertEquals("生产 API", deployment.getName());
     }
 
@@ -64,12 +66,26 @@ class DeploymentCommandServiceTest {
     }
 
     @Test
-    @DisplayName("编辑部署时不能变更归属项目")
-    void rejectsProjectChangeOnUpdate() {
+    @DisplayName("编辑部署时可以增加或调整归属项目")
+    void updatesProjectMembership() {
+        projects.put(profile(8L, "other"));
+        DeploymentServer shared = servers.put(DeploymentServer.create(
+                List.<ProjectId>of(ProjectId.of(7L), ProjectId.of(8L)),
+                "共享服务器", "shared.example.com", 22,
+                "root", DeploymentAuthType.KEY));
         Deployment deployment = service.create(command(7L, "生产 API"));
+        Collection<ProjectId> projectIds = List.of(ProjectId.of(7L), ProjectId.of(8L));
 
-        assertThrows(DomainException.class,
-                () -> service.update(deployment.getId(), command(8L, "生产 API")));
+        service.update(deployment.getId(), new SaveDeploymentCommand(
+                List.copyOf(projectIds),
+                shared.getId(),
+                "生产 API",
+                "/opt/app",
+                "deploy.sh",
+                validScript("ok")));
+
+        assertEquals(List.of(ProjectId.of(7L), ProjectId.of(8L)), deployment.getProjectIds());
+        assertEquals(shared.getId(), deployment.getServerId());
     }
 
     @Test
@@ -88,6 +104,21 @@ class DeploymentCommandServiceTest {
                 validScript("ok"));
 
         assertThrows(DomainException.class, () -> service.create(command));
+    }
+
+    @Test
+    @DisplayName("部署可以使用同时归属本项目的共享服务器")
+    void acceptsSharedServerAssignedToProject() {
+        projects.put(profile(8L, "other"));
+        DeploymentServer shared = servers.put(DeploymentServer.create(
+                java.util.List.of(ProjectId.of(7L), ProjectId.of(8L)),
+                "共享服务器", "shared.example.com", 22,
+                "root", DeploymentAuthType.KEY));
+
+        Deployment deployment = service.create(command(
+                7L, "共享部署", shared.getId()));
+
+        assertEquals(shared.getId(), deployment.getServerId());
     }
 
     @Test

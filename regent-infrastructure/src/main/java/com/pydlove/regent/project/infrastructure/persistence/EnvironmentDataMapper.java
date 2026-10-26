@@ -34,15 +34,18 @@ public final class EnvironmentDataMapper {
     }
 
     public static EnvironmentEntry toEntry(EnvironmentRow row) {
-        EnvironmentScope scope = row.getProjectId() == null
+        return toEntry(row, row.getProjectId() == null ? List.of() : List.of(row.getProjectId()));
+    }
+
+    public static EnvironmentEntry toEntry(EnvironmentRow row, List<Long> projectIds) {
+        EnvironmentScope scope = projectIds.isEmpty()
                 ? EnvironmentScope.GLOBAL
                 : EnvironmentScope.PROJECT;
-        ProjectId projectId = row.getProjectId() == null ? null : ProjectId.of(row.getProjectId());
         return EnvironmentEntry.restore(
                 EnvironmentId.of(row.getId()),
                 row.getUserId() == null ? null : UserId.of(row.getUserId()),
                 scope,
-                projectId,
+                projectIds.stream().map(ProjectId::of).toList(),
                 row.getItemKey(),
                 row.getItemValue(),
                 parseTags(row.getTags()),

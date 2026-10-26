@@ -11,6 +11,7 @@ import type {
 
 export type SaveDeploymentInput = {
   projectId: number
+  projectIds: number[]
   serverId: number
   name: string
   remoteDirectory: string
@@ -59,8 +60,11 @@ export const updateDeployment = (id: number, input: SaveDeploymentInput) =>
 
 export const deleteDeployment = (id: number) => deleteRequest(`/deployments/${id}`)
 
-export const runDeployment = (id: number) =>
-  postJson<DeploymentRunSummary>(`/deployments/${id}/run`, {})
+export const runDeployment = (id: number, projectId: number, taskId: number | null = null) =>
+  postJson<DeploymentRunSummary>(`/deployments/${id}/run`, { projectId, taskId })
+
+export const stopDeployment = (id: number) =>
+  postJson<DeploymentRunSummary>(`/deployments/${id}/stop`, {})
 
 export const listDeploymentRuns = (id: number, limit = 30) =>
   get<DeploymentRunSummary[]>(`/deployments/${id}/runs`, { limit })

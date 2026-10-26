@@ -17,9 +17,16 @@ public interface DeploymentMapper {
     List<DeploymentRow> selectAll(@Param("projectId") Long projectId,
                                   @Param("ownerId") Long ownerId);
 
-    int countByName(@Param("projectId") long projectId,
+    List<DeploymentProjectRow> selectProjectLinks(@Param("deploymentIds") List<Long> deploymentIds);
+
+    int countByNameInProjects(@Param("projectIds") List<Long> projectIds,
                     @Param("name") String name,
                     @Param("excludingId") Long excludingId);
+
+    void deleteProjectLinks(@Param("deploymentId") long deploymentId);
+
+    int insertProjectLinks(@Param("deploymentId") long deploymentId,
+                           @Param("projectIds") List<Long> projectIds);
 
     int countByServerId(@Param("serverId") long serverId);
 

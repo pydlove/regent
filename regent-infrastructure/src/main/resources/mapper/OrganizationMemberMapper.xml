@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.organization.infrastructure.persistence.OrganizationMemberMapper">
+
+    <sql id="columns">
+        id, organization_id, user_id, role_code, joined_at
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO organization_member
+            (organization_id, user_id, role_code, status, joined_at, created_at)
+        VALUES
+            (#{organizationId}, #{userId}, #{roleCode}, 'ACTIVE', #{joinedAt}, UTC_TIMESTAMP(3))
+    </insert>
+
+    <select id="selectByOrganization"
+            resultType="com.pydlove.regent.organization.infrastructure.persistence.OrganizationMemberData">
+        SELECT <include refid="columns"/>
+        FROM organization_member
+        WHERE organization_id = #{organizationId}
+          AND status = 'ACTIVE'
+        ORDER BY joined_at, id
+    </select>
+
+    <select id="selectByUser"
+            resultType="com.pydlove.regent.organization.infrastructure.persistence.OrganizationMemberData">
+        SELECT <include refid="columns"/>
+        FROM organization_member
+        WHERE user_id = #{userId}
+          AND status = 'ACTIVE'
+        ORDER BY organization_id, id
+    </select>
+
+    <select id="selectRoles" resultType="string">
+        SELECT role_code
+        FROM organization_member
+        WHERE organization_id = #{organizationId}
+          AND user_id = #{userId}
+          AND status = 'ACTIVE'
+        ORDER BY id
+    </select>
+
+    <select id="countRole" resultType="int">
+        SELECT COUNT(*)
+        FROM organization_member
+        WHERE organization_id = #{organizationId}
+          AND user_id = #{userId}
+          AND role_code = #{roleCode}
+          AND status = 'ACTIVE'
+    </select>
+
+    <select id="countDistinctUsers" resultType="int">
+        SELECT COUNT(DISTINCT user_id)
+        FROM organization_member
+        WHERE organization_id = #{organizationId}
+          AND status = 'ACTIVE'
+    </select>
+
+    <select id="countByRole" resultType="int">
+        SELECT COUNT(*)
+        FROM organization_member
+        WHERE organization_id = #{organizationId}
+          AND role_code = #{roleCode}
+          AND status = 'ACTIVE'
+    </select>
+
+    <delete id="deleteRole">
+        DELETE FROM organization_member
+        WHERE organization_id = #{organizationId}
+          AND user_id = #{userId}
+          AND role_code = #{roleCode}
+    </delete>
+
+    <delete id="deleteMember">
+        DELETE FROM organization_member
+        WHERE organization_id = #{organizationId}
+          AND user_id = #{userId}
+    </delete>
+
+</mapper>

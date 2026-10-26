@@ -3,7 +3,9 @@
 <mapper namespace="com.pydlove.regent.deployment.infrastructure.persistence.DeploymentRunMapper">
 
     <sql id="runColumns">
-        id, deployment_id, project_id, deployment_name, host, port, ssh_username, auth_type,
+        id, deployment_id, project_id, task_id, review_snapshot_id, review_decision_id,
+        project_version, version_source,
+        deployment_name, host, port, ssh_username, auth_type,
         remote_directory, script_filename, script_content, script_hash, execution_mode,
         project_script_path, status, exit_code, summary, queued_at, started_at, finished_at, created_at
     </sql>
@@ -20,7 +22,15 @@
         SELECT <include refid="runColumns"/>
         FROM deployment_run
         WHERE id = #{id}
-          AND project_id IN (SELECT id FROM project WHERE owner_id = #{ownerId})
+          AND project_id IN (
+            SELECT p.id
+            FROM project p
+            WHERE p.owner_id = #{ownerId}
+               OR EXISTS (
+                   SELECT 1 FROM project_member pm
+                   WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+               )
+          )
     </select>
 
     <select id="selectByDeployment"
@@ -64,11 +74,15 @@
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO deployment_run (
-            deployment_id, project_id, deployment_name, host, port, ssh_username, auth_type,
+            deployment_id, project_id, task_id, review_snapshot_id, review_decision_id,
+            project_version, version_source,
+            deployment_name, host, port, ssh_username, auth_type,
             remote_directory, script_filename, script_content, script_hash, execution_mode,
             project_script_path, status, exit_code, summary, queued_at, started_at, finished_at, created_at
         ) VALUES (
-            #{deploymentId}, #{projectId}, #{deploymentName}, #{host}, #{port}, #{sshUsername}, #{authType},
+            #{deploymentId}, #{projectId}, #{taskId}, #{reviewSnapshotId}, #{reviewDecisionId},
+            #{projectVersion}, #{versionSource},
+            #{deploymentName}, #{host}, #{port}, #{sshUsername}, #{authType},
             #{remoteDirectory}, #{scriptFilename}, #{scriptContent}, #{scriptHash}, #{executionMode},
             #{projectScriptPath}, #{status}, #{exitCode}, #{summary}, #{queuedAt}, #{startedAt},
             #{finishedAt}, #{createdAt}

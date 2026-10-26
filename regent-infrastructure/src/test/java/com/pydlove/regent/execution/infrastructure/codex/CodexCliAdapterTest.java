@@ -287,6 +287,56 @@ class CodexCliAdapterTest {
     }
 
     @Test
+    @DisplayName("模型错误只出现在 JSONL 事件里时，也要写进摘要")
+    void JSONL错误事件进入摘要() throws IOException {
+        写脚本("""
+                printf '%s\\n' '{"type":"error","message":"{\\"error\\":{\\"message\\":\\"assistant tool_calls 缺少 tool messages\\"}}"}'
+                exit 1
+                """);
+
+        ExecResult result = adapter().execute(请求(null), (type, payload) -> {
+        });
+
+        assertEquals(RunStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("tool_calls 缺少 tool messages"), result.summary());
+    }
+
+    @Test
+    @DisplayName("缺失 rollout 的续跑会话也属于可降级错误")
+    void 缺失rollout可降级() {
+        assertTrue(CodexCliAdapter.resumeContextInvalid(
+                "Error: thread/resume failed: no rollout found for thread id th-broken"));
+        assertFalse(CodexCliAdapter.resumeContextInvalid("HTTP 503 服务暂不可用"));
+    }
+
+    @Test
+    @DisplayName("续跑会话上下文损坏：自动改用新会话并完成")
+    void 损坏会话自动降级() throws IOException {
+        Path firstCall = workspace.resolve("first-call");
+        写脚本("""
+                if [ ! -f "%s" ]; then
+                  touch "%s"
+                  printf '%%s\\n' '{"type":"error","message":"{\\"error\\":{\\"message\\":\\"assistant tool_calls must be followed by tool messages\\"}}"}'
+                  exit 1
+                fi
+                %s
+                %s
+                exit 0
+                """.formatted(firstCall, firstCall, 回放(DONE_REPORT), 事件流));
+
+        List<String> events = new ArrayList<>();
+        ExecResult result = adapter().execute(请求("th-broken"), (type, payload) -> events.add(type));
+
+        assertEquals(RunStatus.SUCCESS, result.status(), result.summary());
+        assertEquals("th-1", result.threadId());
+        List<String> calls = 假执行器收到的(argsFile);
+        assertEquals(2, calls.size(), calls.toString());
+        assertTrue(calls.get(0).contains("exec resume th-broken"), calls.get(0));
+        assertFalse(calls.get(1).contains("resume"), "降级后的第二次调用必须新建会话：" + calls.get(1));
+        assertTrue(events.contains("error"), "第一次失败的真实错误仍要保留在事件流：" + events);
+    }
+
+    @Test
     @DisplayName("末条消息不是约定结构：判失败，但原文留下来复盘")
     void 出参读不懂() throws IOException {
         写脚本(回放("这是一段自由发挥的散文，没有 JSON") + "exit 0");

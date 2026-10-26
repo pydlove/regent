@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProjectSummaryGenerationServiceTest {
@@ -66,6 +67,18 @@ class ProjectSummaryGenerationServiceTest {
         assertEquals(1, recovered);
         assertEquals(ProjectSummaryStatus.FAILED, stored.getSummaryStatus());
         assertTrue(stored.getSummaryError().contains("平台重启"), stored.getSummaryError());
+    }
+
+    @Test
+    @DisplayName("未绑定本机工作区时不启动项目资料生成")
+    void rejectsGenerationWithoutWorkspace() {
+        Project withoutWorkspace = projects.create("business_project", null);
+
+        assertThrows(com.pydlove.regent.shared.domain.DomainException.class,
+                () -> service(request -> "不应被调用").schedule(withoutWorkspace.getId()));
+
+        Project stored = projects.findById(withoutWorkspace.getId()).orElseThrow();
+        assertEquals(ProjectSummaryStatus.NOT_GENERATED, stored.getSummaryStatus());
     }
 
     private ProjectSummaryGenerationService service(ProjectSummaryGenerator generator) {

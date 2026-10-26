@@ -27,9 +27,12 @@ public class ProjectUpdateService {
                 ? projectRepository.findById(id)
                 : projectRepository.findByIdOwned(id, ownerId))
                 .orElseThrow(() -> new EntityNotFoundException("项目不存在：" + id.value()));
-        ProjectDirectoryValidator.requireExistingDirectory(command.path());
+        if (command.path() != null && !command.path().isBlank()) {
+            ProjectDirectoryValidator.requireExistingDirectory(command.path());
+        }
         project.updateDetails(command.name(), command.path(),
-                command.defaultDecisionLevel(), command.enabled());
+                command.defaultDecisionLevel(), command.versionSource(),
+                command.fallbackVersion(), command.enabled());
         projectRepository.updateDetails(project);
         return project;
     }

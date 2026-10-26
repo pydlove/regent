@@ -9,7 +9,6 @@ import java.time.LocalDateTime;
 public class DeploymentServerRow {
 
     private Long id;
-    private Long projectId;
     private String name;
     private String host;
     private Integer port;

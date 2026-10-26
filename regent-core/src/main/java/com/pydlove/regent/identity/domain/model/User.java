@@ -5,13 +5,14 @@ import com.pydlove.regent.shared.domain.DomainException;
 import java.time.Instant;
 import java.util.Objects;
 
-/** 平台用户。密码只保存编码后的哈希，聚合本身不提供修改凭据的入口。 */
+/** 平台用户。密码只保存编码后的哈希，修改密码必须经过领域方法。 */
 public class User {
 
     private UserId id;
     private final Email email;
     private final Username username;
-    private final PasswordHash passwordHash;
+    private PasswordHash passwordHash;
+    private boolean mustChangePassword;
     private DisplayName displayName;
     private UserAvatar avatar;
     private final Instant createdAt;
@@ -21,6 +22,7 @@ public class User {
                  Username username,
                  DisplayName displayName,
                  PasswordHash passwordHash,
+                 boolean mustChangePassword,
                  UserAvatar avatar,
                  Instant createdAt) {
         this.id = id;
@@ -28,6 +30,7 @@ public class User {
         this.username = Objects.requireNonNull(username, "用户名");
         this.displayName = Objects.requireNonNull(displayName, "显示名称");
         this.passwordHash = Objects.requireNonNull(passwordHash, "密码哈希");
+        this.mustChangePassword = mustChangePassword;
         this.avatar = avatar;
         if (createdAt == null) {
             throw new DomainException("用户创建时间不能为空");
@@ -46,6 +49,24 @@ public class User {
                 checkedUsername,
                 DisplayName.of(checkedUsername.value()),
                 passwordHash,
+                false,
+                null,
+                now);
+    }
+
+    /** 管理员手动创建账号时使用：初始密码只用于首次登录。 */
+    public static User registerTemporary(Email email,
+                                         Username username,
+                                         DisplayName displayName,
+                                         PasswordHash passwordHash,
+                                         Instant now) {
+        return new User(
+                null,
+                Objects.requireNonNull(email, "账号邮箱"),
+                Objects.requireNonNull(username, "用户名"),
+                Objects.requireNonNull(displayName, "显示名称"),
+                passwordHash,
+                true,
                 null,
                 now);
     }
@@ -60,7 +81,22 @@ public class User {
         if (id == null) {
             throw new DomainException("已持久化用户必须有 ID");
         }
-        return new User(id, email, username, displayName, passwordHash, avatar, createdAt);
+        return restore(id, email, username, displayName, passwordHash, false, avatar, createdAt);
+    }
+
+    public static User restore(UserId id,
+                               Email email,
+                               Username username,
+                               DisplayName displayName,
+                               PasswordHash passwordHash,
+                               boolean mustChangePassword,
+                               UserAvatar avatar,
+                               Instant createdAt) {
+        if (id == null) {
+            throw new DomainException("已持久化用户必须有 ID");
+        }
+        return new User(id, email, username, displayName, passwordHash,
+                mustChangePassword, avatar, createdAt);
     }
 
     public void assignIdentity(UserId assigned) {
@@ -90,6 +126,10 @@ public class User {
         return passwordHash;
     }
 
+    public boolean mustChangePassword() {
+        return mustChangePassword;
+    }
+
     public UserAvatar getAvatar() {
         return avatar;
     }
@@ -104,5 +144,16 @@ public class User {
 
     public void changeAvatar(UserAvatar avatar) {
         this.avatar = Objects.requireNonNull(avatar, "头像");
+    }
+
+    public void changePassword(PasswordHash nextPasswordHash) {
+        this.passwordHash = Objects.requireNonNull(nextPasswordHash, "新密码哈希");
+        this.mustChangePassword = false;
+    }
+
+    /** 管理员重置密码后必须重新进入首次登录改密流程。 */
+    public void resetTemporaryPassword(PasswordHash nextPasswordHash) {
+        this.passwordHash = Objects.requireNonNull(nextPasswordHash, "新密码哈希");
+        this.mustChangePassword = true;
     }
 }

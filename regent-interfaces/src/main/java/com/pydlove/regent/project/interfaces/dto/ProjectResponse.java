@@ -13,10 +13,13 @@ import java.time.Instant;
  */
 public record ProjectResponse(
         long id,
+        Long organizationId,
         String code,
         String name,
         String path,
         String defaultDecisionLevel,
+        String versionSource,
+        String fallbackVersion,
         boolean enabled,
         String summaryStatus,
         String summary,
@@ -26,10 +29,13 @@ public record ProjectResponse(
     public static ProjectResponse from(ProjectProfile profile) {
         return new ProjectResponse(
                 profile.id().value(),
+                profile.organizationId() == null ? null : profile.organizationId().value(),
                 profile.code(),
                 profile.name(),
                 profile.path(),
                 profile.defaultDecisionLevel().name(),
+                profile.versionSource().name(),
+                profile.fallbackVersion(),
                 profile.enabled(),
                 profile.summaryStatus().name(),
                 profile.summary(),

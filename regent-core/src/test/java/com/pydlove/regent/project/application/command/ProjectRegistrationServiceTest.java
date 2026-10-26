@@ -20,6 +20,7 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -121,6 +122,26 @@ class ProjectRegistrationServiceTest {
 
         assertThrows(DomainException.class, () -> service.register(command("app_audit", file.toString())));
         assertTrue(projects.saved.isEmpty());
+    }
+
+    @Test
+    @DisplayName("研发项目不填标识和目录也能创建，标识自动生成且不触发资料生成")
+    void registersBusinessProjectWithoutWorkspace() {
+        List<ProjectId> scheduled = new ArrayList<>();
+        TransactionRunner direct = new TransactionRunner() {
+            @Override
+            public <T> T inTransaction(Supplier<T> action) {
+                return action.get();
+            }
+        };
+        ProjectRegistrationService orchestrating = new ProjectRegistrationService(
+                projects, scheduled::add, direct);
+
+        Project project = orchestrating.register(command("", null));
+
+        assertTrue(project.getCode().startsWith("project_"));
+        assertNull(project.getPath());
+        assertTrue(scheduled.isEmpty());
     }
 
     @Test

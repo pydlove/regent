@@ -59,7 +59,7 @@ class ProjectControllerTest {
             }
         };
         mockMvc = MockMvcBuilders.standaloneSetup(new ProjectController(
-                profiles, null, updateService, null, null, null))
+                profiles, null, updateService, null, null, null, null))
                 .addInterceptors(TestCurrentUser.interceptor())
                 .build();
     }

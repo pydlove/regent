@@ -43,6 +43,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -193,6 +194,18 @@ class AuthServiceTest {
 
         assertEquals("legacy-user", grant.user().username());
         assertEquals(null, grant.user().email());
+    }
+
+    @Test
+    @DisplayName("单独校验账号密码不会创建浏览器会话")
+    void verifiesCredentialsWithoutOpeningBrowserSession() {
+        register("alice@example.com");
+
+        var user = service.authenticateCredentials(
+                new LoginCommand("alice@example.com", "safe-pass-123", false));
+
+        assertEquals("alice", user.username());
+        assertNull(sessions.saved);
     }
 
     @Test

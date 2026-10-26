@@ -1,4 +1,4 @@
-import { ApiError, get } from '@/api/http'
+import { ApiError, apiUrl, get } from '@/api/http'
 import type { ApiErrorBody, BugAttachment, TaskAttachment } from '@/types/api'
 
 /*
@@ -38,7 +38,7 @@ export function uploadTaskAttachment(
   file: File,
   options: UploadOptions = {},
 ): Promise<TaskAttachment> {
-  return uploadImage(`/api/tasks/${taskId}/attachments`, file, options)
+  return uploadImage(apiUrl(`/tasks/${taskId}/attachments`), file, options)
 }
 
 export function uploadBugAttachment(
@@ -46,7 +46,7 @@ export function uploadBugAttachment(
   file: File,
   options: UploadOptions = {},
 ): Promise<BugAttachment> {
-  return uploadImage(`/api/bugs/${bugId}/attachments`, file, options)
+  return uploadImage(apiUrl(`/bugs/${bugId}/attachments`), file, options)
 }
 
 function uploadImage<T>(

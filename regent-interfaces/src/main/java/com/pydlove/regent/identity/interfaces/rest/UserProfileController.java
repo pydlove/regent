@@ -13,6 +13,7 @@ import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -60,7 +61,15 @@ public class UserProfileController {
     @GetMapping("/avatar")
     public ResponseEntity<byte[]> avatar(HttpServletRequest servletRequest) {
         AuthenticatedUser current = currentUser(servletRequest);
-        UserAvatarContent avatar = profileService.loadAvatar(UserId.of(current.id()));
+        return avatarResponse(profileService.loadAvatar(UserId.of(current.id())));
+    }
+
+    @GetMapping("/avatar/{userId}")
+    public ResponseEntity<byte[]> memberAvatar(@PathVariable long userId) {
+        return avatarResponse(profileService.loadAvatar(UserId.of(userId)));
+    }
+
+    private static ResponseEntity<byte[]> avatarResponse(UserAvatarContent avatar) {
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(avatar.contentType()))
                 .cacheControl(AVATAR_CACHE)

@@ -1,5 +1,7 @@
 package com.pydlove.regent.execution.interfaces.dto;
 
+import java.util.List;
+
 /**
  * 人工录入任务的请求体。
  *
@@ -12,5 +14,10 @@ package com.pydlove.regent.execution.interfaces.dto;
 public record TaskCreateRequest(
         Long projectId,
         String prompt,
-        Integer priority) {
+        Integer priority,
+        List<Long> codeStandardIds) {
+
+    public TaskCreateRequest(Long projectId, String prompt, Integer priority) {
+        this(projectId, prompt, priority, null);
+    }
 }

@@ -40,5 +40,7 @@ export const markBugFixed = (bugId: number) => post<Bug>(`/bugs/${bugId}/mark-fi
 
 export const verifyBug = (bugId: number) => post<Bug>(`/bugs/${bugId}/verify`)
 
-export const wontFixBug = (bugId: number, reason: string) =>
-  postJson<Bug>(`/bugs/${bugId}/wont-fix`, { reason })
+export const wontFixBug = (bugId: number, reason?: string) => {
+  const normalized = reason?.trim()
+  return postJson<Bug>(`/bugs/${bugId}/wont-fix`, normalized ? { reason: normalized } : {})
+}

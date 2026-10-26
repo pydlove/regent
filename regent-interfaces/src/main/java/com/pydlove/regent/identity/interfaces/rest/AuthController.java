@@ -4,8 +4,10 @@ import com.pydlove.regent.identity.application.command.AuthService;
 import com.pydlove.regent.identity.application.command.LoginCommand;
 import com.pydlove.regent.identity.application.command.RegisterEmailCommand;
 import com.pydlove.regent.identity.application.query.AuthSessionGrant;
+import com.pydlove.regent.identity.application.query.AuthenticatedUser;
 import com.pydlove.regent.identity.application.query.CurrentAuthSession;
 import com.pydlove.regent.identity.interfaces.dto.AuthUserResponse;
+import com.pydlove.regent.identity.interfaces.dto.ChangePasswordRequest;
 import com.pydlove.regent.identity.interfaces.dto.DeviceSessionResponse;
 import com.pydlove.regent.identity.interfaces.dto.LoginRequest;
 import com.pydlove.regent.identity.interfaces.dto.RegisterRequest;
@@ -82,6 +84,22 @@ public class AuthController {
                     Duration.between(Instant.now(), current.expiresAt())).toString());
         }
         return AuthUserResponse.from(current.user());
+    }
+
+    @PostMapping("/change-password")
+    public AuthUserResponse changePassword(@RequestBody ChangePasswordRequest request,
+                                           HttpServletRequest servletRequest) {
+        if (request.newPassword() == null || request.confirmPassword() == null) {
+            throw new com.pydlove.regent.shared.domain.DomainException("新密码不能为空");
+        }
+        if (!request.newPassword().equals(request.confirmPassword())) {
+            throw new com.pydlove.regent.shared.domain.DomainException("两次输入的新密码不一致");
+        }
+        AuthenticatedUser current = AuthSessionInterceptor.currentUser(servletRequest);
+        return AuthUserResponse.from(authService.changePassword(
+                com.pydlove.regent.identity.domain.model.UserId.of(current.id()),
+                request.currentPassword(),
+                request.newPassword()));
     }
 
     /** 已登录页面为当前设备的本机代理换取长期 Bearer 会话。 */

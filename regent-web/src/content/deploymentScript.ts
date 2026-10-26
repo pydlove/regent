@@ -16,7 +16,7 @@ export const DEPLOYMENT_SCRIPT_VARIABLES: DeploymentScriptVariable[] = [
 
 export const DEPLOYMENT_SCRIPT_RULES = [
   '第一行使用 bash shebang，并启用 set -Eeuo pipefail；缺少失败退出或未定义变量保护会被拒绝。',
-  '平台通过 SSH 连接服务器，并先 cd 到部署配置的远程目录；脚本里不要写死 cd /...，需要读取路径时使用 $REGENT_DEPLOY_DIRECTORY。',
+  '平台通过 SSH 连接服务器，自动创建并进入部署配置的远程目录；脚本里不要写死 cd /...，需要读取路径时使用 $REGENT_DEPLOY_DIRECTORY。',
   '平台以无参数方式执行上传后的脚本，必须直接进入远端部署逻辑。若需要兼容本地手工发布，ssh / scp / sftp 只能封装在 run_local() 中，并且仅由显式 -H/--host 触发；平台不会传 -H。',
   '脚本终端是非交互式的。不要等待 read -p 或 sudo 输入；需要 sudo 时必须使用 sudo -n，并提前配置 NOPASSWD。',
   '已有 deploy / script 脚本可作为服务名、构建产物、备份和重启步骤的业务参考；连接信息与远程路径仍必须改写为平台契约。',

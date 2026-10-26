@@ -9,7 +9,6 @@ import java.time.LocalDateTime;
 public class DeploymentServerData {
 
     private Long id;
-    private Long projectId;
     private String name;
     private String host;
     private Integer port;

@@ -1,5 +1,5 @@
 import { get, postJson } from '@/api/http'
-import type { PlanDetail, PlanRunSummary, PlanSummary } from '@/types/api'
+import type { PlanDetail, PlanRunDetail, PlanRunSummary, PlanSummary } from '@/types/api'
 
 export type CreatePlanInput = {
   name: string
@@ -11,6 +11,8 @@ export type CreatePlanInput = {
 export const listPlans = () => get<PlanSummary[]>('/plans')
 
 export const getPlan = (id: number) => get<PlanDetail>(`/plans/${id}`)
+
+export const getPlanRun = (id: number) => get<PlanRunDetail>(`/plan-runs/${id}`)
 
 export const createPlan = (input: CreatePlanInput) => postJson<PlanSummary>('/plans', input)
 

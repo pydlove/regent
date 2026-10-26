@@ -2,6 +2,8 @@ package com.pydlove.regent.governance.infrastructure.persistence;
 
 import org.apache.ibatis.annotations.Param;
 
+import java.util.List;
+
 /**
  * 决策单写侧的 MyBatis 映射接口。SQL 全部在 {@code mapper/DecisionMapper.xml}。
  *
@@ -15,6 +17,8 @@ public interface DecisionMapper {
 
     /** 任务最近一条已决议的决策 —— 断点续跑的指令来源于它。 */
     DecisionData selectLatestResolvedByTask(@Param("taskId") long taskId);
+
+    List<DecisionData> selectPendingByTaskForUpdate(@Param("taskId") long taskId);
 
     int insert(DecisionData data);
 

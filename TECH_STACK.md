@@ -37,11 +37,12 @@
 | 邮件 | `spring-boot-starter-mail` | — | JavaMailSender |
 | 推送 | Spring `RestClient` | — | Server酱 / PushPlus / 飞书 / 钉钉 webhook |
 | 前端 | Vue 3 + Vite + TS + Tailwind CSS + reka-ui + Pinia | 见 `FRONTEND.md` | 对标 macOS 观感，**刻意不用 Element Plus** |
+| 手机 App | Capacitor 8 + Vue 3 + TypeScript | Capacitor 8.5.3 | iOS 15+ / Android 9+，原生安全存储、生物识别与系统推送入口 |
 | 测试 | JUnit 5 + Mockito + Spring Boot Test | — | Testcontainers 需 Docker，本机没有，不采用 |
 | 测试执行 | `maven-surefire-plugin` | **3.5.4，必须显式钉版本** | `api_parent` 未管理 surefire；Maven 默认 2.12.4 无法执行 JUnit 5，测试会被静默跳过且构建仍然「成功」 |
 | 质量 | maven-surefire / maven-scm / 父 POM 插件链 | — | 复用父 POM 既有插件配置 |
 | 守护 | 复用 `py-deploy` 的 start/stop/status 模式 | — | `java -jar` + 开机自启 |
-| 公网中继 | JDK `HttpServer` + `HttpClient` | Java 17 | 独立模块 `regent-relay`，无第三方运行时依赖；服务器无状态，本机主动长轮询 |
+| 公网中继 | JDK `HttpServer` + `HttpClient` | Java 17 | 独立模块 `regent-relay`，无第三方运行时依赖；除 V1.0.5 的最小 presence 快照外不保存状态，本机主动长轮询 |
 
 ---
 
@@ -115,7 +116,7 @@ spring:
 
 | 表 | 职责 |
 |---|---|
-| `project` | 项目注册表：路径、技术栈、验证方式、决策等级覆盖 |
+| `project` | 研发项目主体：组织、名称、可选工作区绑定、技术栈、验证方式、决策等级覆盖 |
 | `requirement` | 需求：原始描述、状态、所属项目 |
 | `task` | 任务：由需求拆解或 Bug 派生，含 `codex_thread_id` |
 | `task_run` | 每次执行的记录：开始/结束、退出码、token 消耗、分支名 |
@@ -145,9 +146,15 @@ spring:
 | 部署配置与执行记录 | `V24__deployment.sql` | 初始保存部署 SSH 配置、部署脚本与执行快照；后续由 V28 抽取服务器，密码不进入部署快照 |
 | 部署归属项目 | `V25__deployment_project.sql` | 给部署配置与执行快照增加 `project_id`，部署创建后归属项目不可变更 |
 | 部署密码密文 | `V27__deployment_credential.sql` | 独立保存 AES-GCM 加密后的 SSH 密码；主密钥只存在 `~/.regent/deployment/credential.key` |
-| 可复用部署服务器 | `V28__reusable_deployment_servers.sql` | 抽取项目级服务器与服务器凭据；旧部署按连接和凭据自动迁移，部署配置改为引用 `server_id` |
+| 可复用部署服务器 | `V28__reusable_deployment_servers.sql` | 抽取服务器与服务器凭据；旧部署按连接和凭据自动迁移，部署配置改为引用 `server_id` |
 | 账户数据隔离 | `V29__account_data_isolation.sql` | `project.owner_id` 作为租户根；环境与计划增加 `user_id`；存量数据归最早账号，环境唯一键改为按账号区分 |
 | 服务器默认部署目录 | `V31__deployment_server_default_directory.sql` | 服务器保存 `default_remote_directory`；新建部署选中服务器时自动带出 `REGENT_DEPLOY_DIRECTORY` |
+| 服务器多项目归属 | `V34__deployment_server_projects.sql` | 新增服务器与项目关联表；一台服务器可服务多个项目，部署配置仍只归属一个项目 |
+| 手机独立会话 | `V40__mobile_auth_session.sql`、`V41__mobile_refresh_token_history.sql` | 手机 Access/Refresh Token 哈希、安装实例、刷新轮换与历史令牌重放检测 |
+| 项目版本与部署版本快照 | `V49__project_version_and_deployment_snapshot.sql` | 项目保存 Git Tag / 手动版本策略与备用版本；部署执行记录保存本次解析出的版本事实 |
+| 项目开发规范库 | `V50__project_code_standards.sql` | 文件库增加资料分类；开发规范保存稳定条目、不可变版本、跨项目复制来源与任务版本快照 |
+| 产品版本与需求池 | `V59__product_version_and_requirement_pool.sql` | 项目级产品版本；需求增加版本归属、需求池状态、来源与评审结果；历史已交付需求回填为正式需求 |
+| 版本级立项 | `V60__initiative_product_version.sql` | 立项增加产品版本归属，每个版本最多一份立项；历史项目级立项保留为空版本，兼容存量数据 |
 
 全部用 `utf8mb4`，主键用 `BIGINT`，状态字段用 `VARCHAR` 存枚举名（不用 MySQL `ENUM`，避免改枚举要动表结构）。时间统一 `DATETIME(3)` 存 UTC。
 
@@ -203,6 +210,7 @@ regent/
 ├── regent-boot/                 # Spring Boot 启动与装配
 ├── regent-relay/                # 公网中继与本地连接器，零第三方运行时依赖
 ├── regent-web/                  # 前端（Vue 3 + Tailwind，见 FRONTEND.md）
+├── regent-mobile/               # iOS / Android App（Capacitor 8 + Vue 3）
 └── deploy/                      # 本地启停脚本 + 远程发布脚本
 ```
 
@@ -371,7 +379,7 @@ codex exec resume <thread_id> \
 
 ```bash
 node scripts/publish-release.mjs \
-  --version feature_V1.0.3_R100B003 \
+  --version Regent_V1.0.3_R100B003 \
   --code R100B003 \
   --notes "修复执行记录与更新提醒" \
   --macos /path/Regent-1.0.3-macOS.dmg \
@@ -411,9 +419,12 @@ regent:
       resend-cooldown: PT60S       # 同一邮箱重发冷却
       max-per-day: 10              # 同一邮箱每日发送上限
       home-url: ${REGENT_PUBLIC_URL:http://127.0.0.1:12580}
+  organization:
+    invitation-url: ${REGENT_PUBLIC_URL:https://ichuang.top/regent}
+    invitation-ttl: ${REGENT_ORGANIZATION_INVITATION_TTL:P7D}
 
 spring:
-  mail:                            # 注册验证码 SMTP；密码只放本地配置或环境变量
+  mail:                            # 注册验证码与组织邀请共用；密码只放本地配置或环境变量
     host: ${SPRING_MAIL_HOST:smtp.126.com}
     port: ${SPRING_MAIL_PORT:465}
     username: ${SPRING_MAIL_USERNAME:}

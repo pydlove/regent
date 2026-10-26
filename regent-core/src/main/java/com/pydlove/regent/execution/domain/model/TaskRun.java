@@ -37,6 +37,7 @@ public class TaskRun {
     private final TaskId taskId;
     private final int attemptNo;
     private final String branchName;
+    private final String baseRef;
 
     private RunStatus status;
     private Integer exitCode;
@@ -47,19 +48,28 @@ public class TaskRun {
     private List<String> changedFiles;
     private String executor;
     private String agentName;
+    private String deviceId;
     private Instant leaseExpiresAt;
+    private Instant lastHeartbeatAt;
+    private Instant lastEventAt;
 
     private final Instant startedAt;
     private Instant finishedAt;
     private final Instant createdAt;
 
-    private TaskRun(TaskId taskId, int attemptNo, String branchName, Instant startedAt, Instant createdAt) {
+    private TaskRun(TaskId taskId,
+                    int attemptNo,
+                    String branchName,
+                    String baseRef,
+                    Instant startedAt,
+                    Instant createdAt) {
         this.taskId = requireNotNull(taskId, "所属任务");
         if (attemptNo < 1) {
             throw new DomainException("尝试序号从 1 开始：" + attemptNo);
         }
         this.attemptNo = attemptNo;
         this.branchName = blankToNull(branchName);
+        this.baseRef = blankToNull(baseRef);
         this.status = RunStatus.RUNNING;
         this.tokens = TokenUsage.ZERO;
         this.changedFiles = List.of();
@@ -71,8 +81,13 @@ public class TaskRun {
 
     /** 开跑。调用方负责先把它落库再把 ID 交出去，事件流才有挂靠点。 */
     public static TaskRun start(TaskId taskId, int attemptNo, String branchName) {
+        return start(taskId, attemptNo, branchName, null);
+    }
+
+    /** 开跑并固定本次执行起点的提交；非 Git 项目传 null。 */
+    public static TaskRun start(TaskId taskId, int attemptNo, String branchName, String baseRef) {
         Instant now = now();
-        return new TaskRun(taskId, attemptNo, branchName, now, now);
+        return new TaskRun(taskId, attemptNo, branchName, baseRef, now, now);
     }
 
     /**
@@ -80,7 +95,7 @@ public class TaskRun {
      */
     public static TaskRun restore(TaskRunSnapshot snapshot) {
         TaskRun run = new TaskRun(snapshot.taskId(), snapshot.attemptNo(), snapshot.branchName(),
-                snapshot.startedAt(), snapshot.createdAt());
+                snapshot.baseRef(), snapshot.startedAt(), snapshot.createdAt());
         run.id = requireNotNull(snapshot.id(), "执行记录 ID");
         run.status = requireNotNull(snapshot.status(), "执行状态");
         run.exitCode = snapshot.exitCode();
@@ -91,7 +106,10 @@ public class TaskRun {
         run.changedFiles = snapshot.changedFiles() == null ? List.of() : List.copyOf(snapshot.changedFiles());
         run.executor = snapshot.executor() == null ? EXECUTOR_INTERNAL : snapshot.executor();
         run.agentName = snapshot.agentName();
+        run.deviceId = snapshot.deviceId();
         run.leaseExpiresAt = snapshot.leaseExpiresAt();
+        run.lastHeartbeatAt = snapshot.lastHeartbeatAt();
+        run.lastEventAt = snapshot.lastEventAt();
         run.finishedAt = snapshot.finishedAt();
         return run;
     }
@@ -136,6 +154,24 @@ public class TaskRun {
     }
 
     /**
+     * 设备代理进程重启。外部执行者本身还在那台设备上，只是旧进程已经消失；这与租约超时的
+     * “设备失联”不同，平台可以在同一设备下一次心跳时立即续回任务。
+     */
+    public void interruptByDeviceRestart(String expectedDeviceId, String reason) {
+        requireRunning("只有执行中的记录可以按设备重启中断");
+        if (!EXECUTOR_AGENT.equals(executor)) {
+            throw new DomainException("内部执行记录不能按设备重启中断：" + id);
+        }
+        if (deviceId == null || !deviceId.equals(expectedDeviceId)) {
+            throw new DomainException("执行记录不属于该设备，不能按设备重启中断：" + id);
+        }
+        this.status = RunStatus.INTERRUPTED;
+        this.summary = requireText(reason, "中断原因");
+        this.finishedAt = now();
+        this.leaseExpiresAt = null;
+    }
+
+    /**
      * 外部执行者认领这次尝试。
      *
      * <p>租约是这条路唯一的活性证明：外部执行者跑在别人的进程里，平台既看不见它、
@@ -143,24 +179,58 @@ public class TaskRun {
      * 没有租约的话，一个人中途关掉编辑器，任务会永远停在「执行中」。
      */
     public void claimBy(String agentName, Instant leaseExpiresAt) {
+        claimBy(agentName, null, leaseExpiresAt);
+    }
+
+    /** 外部设备认领：执行者身份与设备身份同时落在这条记录上。 */
+    public void claimBy(String agentName, String deviceId, Instant leaseExpiresAt) {
         requireRunning("执行记录已收场，不能再被认领");
         this.executor = EXECUTOR_AGENT;
         this.agentName = requireText(agentName, "执行者");
+        this.deviceId = blankToNull(deviceId);
         this.leaseExpiresAt = requireNotNull(leaseExpiresAt, "租约到期时间");
+        this.lastHeartbeatAt = now();
     }
 
     /** 续租。执行者每次心跳续一次；不是自己的租约不能续。 */
     public void renewLease(String agentName, Instant leaseExpiresAt) {
+        renewLease(agentName, deviceId, leaseExpiresAt, now());
+    }
+
+    /**
+     * 带设备身份续租。请求若声明了设备，就必须与认领时的设备一致；通用协议没有设备号时，
+     * 仍按执行者名字守住租约。
+     */
+    public void renewLease(String agentName,
+                           String requestedDeviceId,
+                           Instant leaseExpiresAt,
+                           Instant heartbeatAt) {
         requireRunning("执行记录已收场，不能再续租");
-        if (!isLeaseHolder(agentName)) {
+        if (!isLeaseHolder(agentName, requestedDeviceId)) {
             throw new DomainException("这条执行记录不属于该执行者，不能续租：" + agentName);
         }
         this.leaseExpiresAt = requireNotNull(leaseExpiresAt, "租约到期时间");
+        this.lastHeartbeatAt = requireNotNull(heartbeatAt, "最后心跳时间");
     }
 
     /** 这条记录的租约是不是这个执行者持有的。 */
     public boolean isLeaseHolder(String agentName) {
         return EXECUTOR_AGENT.equals(executor) && this.agentName != null && this.agentName.equals(agentName);
+    }
+
+    public boolean isLeaseHolder(String agentName, String requestedDeviceId) {
+        if (!isLeaseHolder(agentName)) {
+            return false;
+        }
+        if (deviceId != null) {
+            return requestedDeviceId != null
+                    && !requestedDeviceId.isBlank()
+                    && deviceId.equals(requestedDeviceId.trim());
+        }
+        if (requestedDeviceId == null || requestedDeviceId.isBlank()) {
+            return true;
+        }
+        return true;
     }
 
     /** 租约是否已到期。没有租约（内部执行者、或已收场）永远返回 false。 */
@@ -171,6 +241,16 @@ public class TaskRun {
     /** 有没有外部执行者正拿着它。 */
     public boolean hasLease() {
         return EXECUTOR_AGENT.equals(executor) && leaseExpiresAt != null;
+    }
+
+    /** 记录最后一条事件时间；事件只追加，时间只向前推进。 */
+    public void recordEventAt(Instant occurredAt) {
+        if (occurredAt == null) {
+            return;
+        }
+        if (lastEventAt == null || occurredAt.isAfter(lastEventAt)) {
+            lastEventAt = occurredAt;
+        }
     }
 
     private void requireRunning(String message) {
@@ -201,6 +281,10 @@ public class TaskRun {
 
     public String getBranchName() {
         return branchName;
+    }
+
+    public String getBaseRef() {
+        return baseRef;
     }
 
     public RunStatus getStatus() {
@@ -244,6 +328,18 @@ public class TaskRun {
     /** 租约到期时间；没有外部执行者持有（或已收场）时为 null。 */
     public Instant getLeaseExpiresAt() {
         return leaseExpiresAt;
+    }
+
+    public String getDeviceId() {
+        return deviceId;
+    }
+
+    public Instant getLastHeartbeatAt() {
+        return lastHeartbeatAt;
+    }
+
+    public Instant getLastEventAt() {
+        return lastEventAt;
     }
 
     public Instant getStartedAt() {

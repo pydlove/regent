@@ -5,6 +5,7 @@ import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
 import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
+import com.pydlove.regent.requirement.domain.model.RequirementId;
 import com.pydlove.regent.shared.domain.DomainException;
 import org.springframework.stereotype.Repository;
 
@@ -49,6 +50,13 @@ public class MyBatisTaskRepository implements TaskRepository {
     }
 
     @Override
+    public List<Task> findByRequirement(RequirementId requirementId) {
+        return taskMapper.selectByRequirement(requirementId.value()).stream()
+                .map(TaskDataMapper::toDomain)
+                .toList();
+    }
+
+    @Override
     public List<Task> findRunning() {
         return taskMapper.selectRunning().stream()
                 .map(TaskDataMapper::toDomain)
@@ -65,6 +73,13 @@ public class MyBatisTaskRepository implements TaskRepository {
     @Override
     public List<Task> findQueued(int limit) {
         return taskMapper.selectQueued(limit).stream()
+                .map(TaskDataMapper::toDomain)
+                .toList();
+    }
+
+    @Override
+    public List<Task> findQueued(UserId ownerId, int limit) {
+        return taskMapper.selectQueuedOwned(ownerId.value(), limit).stream()
                 .map(TaskDataMapper::toDomain)
                 .toList();
     }

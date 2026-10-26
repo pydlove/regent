@@ -1,9 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { useAuthStore } from '@/stores/useAuthStore'
+import { resolveRouterScroll } from '@/utils/routerScroll'
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(import.meta.env.BASE_URL),
+  scrollBehavior(to, _from, savedPosition) {
+    return resolveRouterScroll(savedPosition, to.hash)
+  },
   routes: [
     {
       path: '/login',
@@ -27,9 +31,26 @@ const router = createRouter({
       meta: { title: '下载', layout: 'auth', public: true },
     },
     {
+      path: '/download/app',
+      name: 'mobile-download',
+      component: () => import('@/views/MobileAppDownloadView.vue'),
+      meta: { title: '下载手机 App', layout: 'auth', public: true },
+    },
+    {
+      path: '/invite/:token',
+      name: 'organization-invitation',
+      component: () => import('@/views/InvitationAcceptView.vue'),
+      meta: { title: '加入组织', layout: 'auth', public: true },
+    },
+    {
+      path: '/change-password',
+      name: 'change-password',
+      component: () => import('@/views/ChangePasswordView.vue'),
+      meta: { title: '修改密码', layout: 'auth', allowAuthenticated: true },
+    },
+    {
       path: '/',
-      // 默认落地在任务页：样式基准页只是设置里的展示分区，不当首屏
-      redirect: '/tasks',
+      redirect: '/dashboard',
     },
     {
       path: '/baseline',
@@ -44,26 +65,26 @@ const router = createRouter({
     {
       path: '/tasks',
       name: 'tasks',
-      component: () => import('@/views/TasksView.vue'),
+      component: () => import('@/views/TasksWorkspaceView.vue'),
       meta: { title: '任务' },
     },
     {
       path: '/plans',
-      name: 'plans',
-      component: () => import('@/views/PlansView.vue'),
-      meta: { title: '计划' },
+      redirect: (to) => ({ path: '/tasks', query: { ...to.query, view: 'plans' } }),
     },
     {
       path: '/deployments',
-      name: 'deployments',
-      component: () => import('@/views/DeploymentsView.vue'),
-      meta: { title: '部署' },
+      redirect: (to) => ({ path: '/delivery', query: { ...to.query, view: 'deployments' } }),
+    },
+    {
+      path: '/delivery',
+      name: 'delivery',
+      component: () => import('@/views/DeliveryWorkspaceView.vue'),
+      meta: { title: '交付' },
     },
     {
       path: '/servers',
-      name: 'servers',
-      component: () => import('@/views/DeploymentServersView.vue'),
-      meta: { title: '服务器' },
+      redirect: (to) => ({ path: '/projects', query: { ...to.query, view: 'servers' } }),
     },
     {
       path: '/decisions',
@@ -74,26 +95,26 @@ const router = createRouter({
     {
       path: '/projects',
       name: 'projects',
-      component: () => import('@/views/ProjectsView.vue'),
+      component: () => import('@/views/ProjectsWorkspaceView.vue'),
       meta: { title: '项目' },
     },
     {
+      path: '/organizations',
+      name: 'organizations',
+      component: () => import('@/views/OrganizationManagementView.vue'),
+      meta: { title: '组织管理' },
+    },
+    {
       path: '/environments',
-      name: 'environments',
-      component: () => import('@/views/EnvironmentsView.vue'),
-      meta: { title: '环境' },
+      redirect: (to) => ({ path: '/projects', query: { ...to.query, view: 'environments' } }),
     },
     {
       path: '/plugins',
-      name: 'plugins',
-      component: () => import('@/views/PluginsView.vue'),
-      meta: { title: '插件' },
+      redirect: (to) => ({ path: '/projects', query: { ...to.query, view: 'plugins' } }),
     },
     {
       path: '/test-cases',
-      name: 'test-cases',
-      component: () => import('@/views/TestCasesView.vue'),
-      meta: { title: '测试用例' },
+      redirect: (to) => ({ path: '/delivery', query: { ...to.query, view: 'tests' } }),
     },
     {
       path: '/help',
@@ -122,12 +143,31 @@ router.beforeEach(async (to) => {
 
   const authPage = to.meta.layout === 'auth'
   const publicPage = to.meta.public === true
-  if (authPage && auth.isAuthenticated && !publicPage) {
+  if (
+    authPage
+    && auth.isAuthenticated
+    && !publicPage
+    && to.meta.allowAuthenticated !== true
+  ) {
     return { name: 'tasks' }
   }
   if (!authPage && !publicPage && !auth.isAuthenticated) {
     return {
       name: 'login',
+      query: to.fullPath === '/' ? undefined : { redirect: to.fullPath },
+    }
+  }
+  if (to.name === 'change-password' && !auth.isAuthenticated) {
+    return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  if (
+    auth.isAuthenticated
+    && auth.user?.mustChangePassword
+    && to.name !== 'change-password'
+    && !publicPage
+  ) {
+    return {
+      name: 'change-password',
       query: to.fullPath === '/' ? undefined : { redirect: to.fullPath },
     }
   }

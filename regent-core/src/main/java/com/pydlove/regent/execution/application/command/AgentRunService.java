@@ -2,11 +2,13 @@ package com.pydlove.regent.execution.application.command;
 
 import com.pydlove.regent.execution.domain.model.ExecReport;
 import com.pydlove.regent.execution.domain.model.ExecResult;
+import com.pydlove.regent.execution.domain.model.ExecutionDevice;
 import com.pydlove.regent.execution.domain.model.RunEvent;
 import com.pydlove.regent.execution.domain.model.RunStatus;
 import com.pydlove.regent.execution.domain.model.Task;
 import com.pydlove.regent.execution.domain.model.TaskAdjustmentId;
 import com.pydlove.regent.execution.domain.model.TaskAttachment;
+import com.pydlove.regent.execution.domain.model.TaskDocument;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskRunId;
@@ -14,7 +16,9 @@ import com.pydlove.regent.execution.domain.model.TaskStatus;
 import com.pydlove.regent.execution.domain.port.BranchManager;
 import com.pydlove.regent.execution.domain.port.ExecutorContract;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
+import com.pydlove.regent.execution.domain.repository.ExecutionDeviceRepository;
 import com.pydlove.regent.execution.domain.repository.TaskAttachmentRepository;
+import com.pydlove.regent.execution.domain.repository.TaskDocumentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
 import com.pydlove.regent.execution.domain.service.ExecutionConcurrencyGate;
@@ -32,8 +36,11 @@ import com.pydlove.regent.project.domain.repository.ProjectProfile;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
+import com.pydlove.regent.shared.domain.TransactionRunner;
 import com.pydlove.regent.shared.kernel.TokenUsage;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -67,35 +74,40 @@ import java.util.concurrent.ConcurrentHashMap;
  * 外部执行者跑在平台看不见也杀不掉的进程里。没有租约，用户把编辑器一关，任务就永远停在
  * 「执行中」，而工作台上没有任何线索。所以：认领即拿租约、心跳续租、到期由回收任务判失联。
  *
- * <h2>工作区独占</h2>
- * 同一个项目上只允许有一个活跃租约 —— 理由与平台级并发上限默认 1 相同：
- * 一条执行链路会切分支、改文件，两个执行者在同一个工作区里并行，彼此的改动会互相覆盖。
- * 判据取自库里还没过期的租约，而不是内存名单：平台重启之后名单就没了。
+ * <h2>并发只由平台闸门决定</h2>
+ * 任务能否认领只看平台全局并发上限，不额外按项目加锁。同一项目下的多个任务可以在不同设备
+ * 或不同执行者上并行推进。
  */
-public class AgentRunService {
+public class AgentRunService implements DeviceRestartRecoveryHandler {
 
     /** 协议版本。执行者看到不认识的版本就该拒绝开工，而不是猜字段。 */
     public static final String PROTOCOL = "regent-agent/1";
 
-    /** 没指定任务时，一次扫描多少条候选。挑不到活的常见原因是工作区被占着，多扫几条没意义。 */
+    /** 没指定任务时，一次扫描多少条候选。 */
     private static final int CANDIDATE_SCAN = 20;
+    private static final Duration DEVICE_ONLINE_TTL = Duration.ofSeconds(45);
 
     /** 一次尝试内允许的连续决策轮次上限，与内部执行者同一把尺子。 */
     public static final int MAX_DECISION_ROUNDS = TaskRunService.MAX_DECISION_ROUNDS;
 
     private final TaskRepository taskRepository;
     private final TaskRunRepository taskRunRepository;
+    private final ExecutionDeviceRepository executionDeviceRepository;
     private final RunEventRepository runEventRepository;
     private final TaskAttachmentRepository attachmentRepository;
+    private final TaskDocumentRepository documentRepository;
     private final ProjectProfileRepository projectProfileRepository;
     private final EnvironmentEntryRepository environmentEntryRepository;
     private final TaskPluginRepository taskPluginRepository;
+    private final TaskCodeStandardService taskCodeStandardService;
     private final DecisionRepository decisionRepository;
     private final BranchManager branchManager;
     private final BranchProvisioningService branchProvisioningService;
     private final RunSettlementService settlement;
     private final ExecutorContract contract;
     private final ExecutionConcurrencyGate concurrencyGate;
+    private final TransactionRunner transactionRunner;
+    private final DeviceRestartRecoveryService deviceRestartRecoveryService;
     private final Duration lease;
     private final String contractUrl;
     private final Map<Long, ExecutionConcurrencyGate.Permit> activePermits = new ConcurrentHashMap<>();
@@ -104,8 +116,10 @@ public class AgentRunService {
 
     public AgentRunService(TaskRepository taskRepository,
                            TaskRunRepository taskRunRepository,
+                           ExecutionDeviceRepository executionDeviceRepository,
                            RunEventRepository runEventRepository,
                            TaskAttachmentRepository attachmentRepository,
+                           TaskDocumentRepository documentRepository,
                            ProjectProfileRepository projectProfileRepository,
                            EnvironmentEntryRepository environmentEntryRepository,
                            TaskPluginRepository taskPluginRepository,
@@ -115,24 +129,65 @@ public class AgentRunService {
                            RunSettlementService settlement,
                            ExecutorContract contract,
                            ExecutionConcurrencyGate concurrencyGate,
+                           TransactionRunner transactionRunner,
+                           DeviceRestartRecoveryService deviceRestartRecoveryService,
                            Duration lease,
                            String contractUrl) {
+        this(taskRepository, taskRunRepository, executionDeviceRepository, runEventRepository,
+                attachmentRepository, documentRepository, projectProfileRepository,
+                environmentEntryRepository, taskPluginRepository, decisionRepository,
+                branchManager, branchProvisioningService, settlement, contract, concurrencyGate,
+                transactionRunner, deviceRestartRecoveryService, lease, contractUrl, null);
+    }
+
+    public AgentRunService(TaskRepository taskRepository,
+                           TaskRunRepository taskRunRepository,
+                           ExecutionDeviceRepository executionDeviceRepository,
+                           RunEventRepository runEventRepository,
+                           TaskAttachmentRepository attachmentRepository,
+                           TaskDocumentRepository documentRepository,
+                           ProjectProfileRepository projectProfileRepository,
+                           EnvironmentEntryRepository environmentEntryRepository,
+                           TaskPluginRepository taskPluginRepository,
+                           DecisionRepository decisionRepository,
+                           BranchManager branchManager,
+                           BranchProvisioningService branchProvisioningService,
+                           RunSettlementService settlement,
+                           ExecutorContract contract,
+                           ExecutionConcurrencyGate concurrencyGate,
+                           TransactionRunner transactionRunner,
+                           DeviceRestartRecoveryService deviceRestartRecoveryService,
+                           Duration lease,
+                           String contractUrl,
+                           TaskCodeStandardService taskCodeStandardService) {
         this.taskRepository = taskRepository;
         this.taskRunRepository = taskRunRepository;
+        this.executionDeviceRepository = executionDeviceRepository;
         this.runEventRepository = runEventRepository;
         this.attachmentRepository = attachmentRepository;
+        this.documentRepository = documentRepository;
         this.projectProfileRepository = projectProfileRepository;
         this.environmentEntryRepository = environmentEntryRepository;
         this.taskPluginRepository = taskPluginRepository;
+        this.taskCodeStandardService = taskCodeStandardService;
         this.decisionRepository = decisionRepository;
         this.branchManager = branchManager;
         this.branchProvisioningService = branchProvisioningService;
         this.settlement = settlement;
         this.contract = contract;
         this.concurrencyGate = concurrencyGate;
+        this.transactionRunner = transactionRunner;
+        this.deviceRestartRecoveryService = deviceRestartRecoveryService;
         this.lease = lease;
         this.contractUrl = contractUrl;
         restoreActiveLeases(Instant.now());
+    }
+
+    @Override
+    public int recover(String deviceId, String reason) {
+        List<TaskRunId> recovered = deviceRestartRecoveryService.recover(deviceId, reason);
+        recovered.forEach(this::releasePermit);
+        return recovered.size();
     }
 
     /**
@@ -144,9 +199,29 @@ public class AgentRunService {
      * @param taskId      指定任务（批准之后回来续跑时用）；为空则自己挑一条
      */
     public Optional<AgentWorkPackage> claim(String agentName, String sessionId, String projectCode, Long taskId) {
+        return claim(agentName, sessionId, projectCode, taskId, null);
+    }
+
+    /**
+     * 认领一条任务。设备协议会额外带上 deviceId，用于服务端自检和租约归属校验。
+     */
+    public Optional<AgentWorkPackage> claim(String agentName,
+                                            String sessionId,
+                                            String projectCode,
+                                            Long taskId,
+                                            String deviceId) {
         requireText(agentName, "执行者");
         requireText(sessionId, "会话标识");
         Instant now = now();
+
+        Task requestedTask = taskId == null ? null : loadTask(TaskId.of(taskId));
+        if (requestedTask != null && !claimable(requestedTask)) {
+            throw new DomainException("任务当前状态不可认领：" + requestedTask.getId()
+                    + "，状态：" + requestedTask.getStatus());
+        }
+        ProjectProfile requestedProject = requestedTask != null || projectCode == null || projectCode.isBlank()
+                ? null
+                : loadProjectByCode(projectCode);
 
         Optional<ExecutionConcurrencyGate.Permit> acquired = concurrencyGate.tryAcquire();
         if (acquired.isEmpty()) {
@@ -159,23 +234,31 @@ public class AgentRunService {
         ExecutionConcurrencyGate.Permit permit = acquired.orElseThrow();
 
         try {
-            Task task;
-            if (taskId != null) {
-                task = loadTask(TaskId.of(taskId));
-            } else if (projectCode != null && !projectCode.isBlank()) {
-                // 指定了项目就不许含糊：工作区被占着要明说。悄悄返回「没活」会让执行者
-                // 以为这个项目没活干然后走人，而人交代的是「去这个项目上干活」。
-                ProjectProfile project = loadProjectByCode(projectCode);
-                requireWorkspaceFree(project, now);
-                task = pickCandidateIn(project, now);
-            } else {
-                task = pickCandidate(now);
-            }
-            if (task == null) {
-                permit.release();
-                return Optional.empty();
-            }
-            Optional<AgentWorkPackage> work = startAttempt(task, agentName, sessionId, now);
+            Optional<AgentWorkPackage> work = transactionRunner.inTransaction(() -> {
+                Task task;
+                if (requestedTask != null) {
+                    task = taskRepository.findByIdForUpdate(requestedTask.getId())
+                            .orElseThrow(() -> new EntityNotFoundException(
+                                    "任务不存在：" + requestedTask.getId()));
+                    if (!claimable(task)) {
+                        throw new DomainException("任务当前状态不可认领：" + task.getId()
+                                + "，状态：" + task.getStatus());
+                    }
+                } else if (requestedProject != null) {
+                    task = lockCandidateIn(requestedProject);
+                } else {
+                    task = lockCandidate();
+                }
+                if (task == null) {
+                    return Optional.empty();
+                }
+
+                ProjectProfile project = preflight(task, deviceId, now);
+                Optional<AgentWorkPackage> claimed =
+                        startAttempt(task, project, agentName, sessionId, deviceId, now);
+                claimed.ifPresent(ignored -> markDeviceClaimed(deviceId, now));
+                return claimed;
+            });
             if (work.isEmpty()) {
                 permit.release();
                 return Optional.empty();
@@ -191,11 +274,10 @@ public class AgentRunService {
     /**
      * 可领任务清单。「这个项目上有哪些活」—— 让执行者先看再领，而不是只能盲领。
      *
-     * <p>{@code claimable=false} 的行照样列出来：工作区被占着是暂时的，执行者等一会儿再来
+     * <p>{@code claimable=false} 的行照样列出来：平台全局并发已满是暂时的，执行者等一会儿再来
      * 比它以为「这个项目没活」然后走人要好。
      */
     public List<AgentTaskSummary> list(String projectCode, int limit) {
-        Instant now = now();
         List<Task> candidates = projectCode == null || projectCode.isBlank()
                 ? taskRepository.findDispatchable(limit)
                 : taskRepository.findDispatchableInProject(loadProjectByCode(projectCode).id(), limit);
@@ -204,16 +286,31 @@ public class AgentRunService {
         boolean platformFull = !concurrencyGate.hasAvailableSlot();
         for (Task task : candidates) {
             String code = projectCodeOf(task);
-            boolean busy = taskRunRepository.hasActiveLease(task.getProjectId(), now);
-            String reason = busy
-                    ? "项目工作区正被另一个执行者占着，等它收工或租约到期"
-                    : platformFull ? "平台同时运行的任务已达到上限 " + concurrencyGate.limit() : "";
+            String reason = platformFull
+                    ? "平台同时运行的任务已达到上限 " + concurrencyGate.limit()
+                    : "";
             summaries.add(new AgentTaskSummary(task.getId().value(), code, task.getTitle(),
                     task.getStatus().name(), task.getPriority(), task.getSource().name(),
                     task.getCreatedAt(),
-                    !busy && !platformFull, reason));
+                    !platformFull, reason));
         }
         return summaries;
+    }
+
+    /** 当前设备明确受理但暂时无法执行时，把任务落到排队状态，不等于创建执行记录。 */
+    public Task queueForDevice(long taskId) {
+        Task task = loadTask(TaskId.of(taskId));
+        if (task.getStatus() == TaskStatus.QUEUED) {
+            return task;
+        }
+        if (task.getStatus() != TaskStatus.PENDING) {
+            throw new DomainException("任务当前不能进入排队：" + task.getStatus());
+        }
+        ProjectProfile project = loadProject(task);
+        project.requireDispatchable();
+        task.queue();
+        taskRepository.save(task);
+        return task;
     }
 
     /**
@@ -223,16 +320,21 @@ public class AgentRunService {
      * 「批完了吗」。这条路径不再续租 —— 活已经交出去了，占着工作区没有意义。
      */
     public AgentRunSnapshot heartbeat(long runId, String agentName) {
+        return heartbeat(runId, agentName, null);
+    }
+
+    public AgentRunSnapshot heartbeat(long runId, String agentName, String deviceId) {
         TaskRun run = loadRun(TaskRunId.of(runId));
         Task task = loadTask(run.getTaskId());
         Instant now = now();
 
         if (!run.getStatus().isFinished()) {
-            if (!run.isLeaseHolder(agentName)) {
+            if (!run.isLeaseHolder(agentName, deviceId)) {
                 throw new DomainException("这条执行记录不是「" + agentName + "」认领的，不能续租：" + runId);
             }
-            run.renewLease(agentName, now.plus(lease));
-            taskRunRepository.renewLease(run.getId(), run.getLeaseExpiresAt());
+            run.renewLease(agentName, deviceId, now.plus(lease), now);
+            taskRunRepository.renewLease(
+                    run.getId(), deviceId, run.getLeaseExpiresAt(), run.getLastHeartbeatAt());
         }
         return snapshot(run, task);
     }
@@ -251,8 +353,18 @@ public class AgentRunService {
                                      String sessionId,
                                      TokenUsage tokens,
                                      String rawResult) {
+        return report(runId, agentName, null, report, sessionId, tokens, rawResult);
+    }
+
+    public AgentReportOutcome report(long runId,
+                                     String agentName,
+                                     String deviceId,
+                                     ExecReport report,
+                                     String sessionId,
+                                     TokenUsage tokens,
+                                     String rawResult) {
         TaskRun run = loadRun(TaskRunId.of(runId));
-        if (!run.isLeaseHolder(agentName)) {
+        if (!run.isLeaseHolder(agentName, deviceId)) {
             throw new DomainException("这条执行记录不是「" + agentName + "」认领的，不能上报：" + runId);
         }
         if (run.getStatus().isFinished()) {
@@ -282,6 +394,44 @@ public class AgentRunService {
             return outcome;
         }
         return settleAndRelease(run, result, seq);
+    }
+
+    /**
+     * 追加外部执行者的实时事件。事件只存原文，平台不解析 Codex 私有结构。
+     */
+    public int appendEvents(long runId, String agentName, List<AgentRunEvent> incoming) {
+        return appendEvents(runId, agentName, null, incoming);
+    }
+
+    public int appendEvents(long runId,
+                            String agentName,
+                            String deviceId,
+                            List<AgentRunEvent> incoming) {
+        requireText(agentName, "执行者");
+        if (incoming == null || incoming.isEmpty()) {
+            return 0;
+        }
+        if (incoming.size() > 100) {
+            throw new DomainException("单批事件不能超过 100 条");
+        }
+        TaskRun run = loadRun(TaskRunId.of(runId));
+        if (!run.isLeaseHolder(agentName, deviceId)) {
+            throw new DomainException("这条执行记录不是「" + agentName + "」认领的，不能写事件：" + runId);
+        }
+        if (run.getStatus().isFinished()) {
+            throw new DomainException("这次执行已经结束，不能再写事件：" + runId);
+        }
+        int seq = runEventRepository.findByRun(run.getId()).size();
+        int appended = 0;
+        for (AgentRunEvent event : incoming) {
+            if (event == null) {
+                continue;
+            }
+            runEventRepository.append(run.getId(), new RunEvent(
+                    seq++, event.type(), event.payload(), event.occurredAt()));
+            appended++;
+        }
+        return appended;
     }
 
     /**
@@ -343,8 +493,8 @@ public class AgentRunService {
                             + "可以用心跳等批复，也可以在批复后重新认领继续。",
                     MAX_DECISION_ROUNDS - rounds);
         }
-        String instruction = appendPendingAdjustments(
-                run, settlement.continuationPrompt(raised.decision()));
+        String instruction = withStandards(task.getId(), appendPendingAdjustments(
+                run, settlement.continuationPrompt(raised.decision())));
         return new AgentReportOutcome(AgentReportOutcome.Outcome.CONTINUE, run.getStatus().name(),
                 task.getStatus().name(), instruction,
                 raised.decision().getId().value(), raised.decision().getEffectiveLevel().name(),
@@ -359,8 +509,8 @@ public class AgentRunService {
         if (finish.deferredForAdjustment()) {
             appendEvent(run, "platform.adjustment-deferred",
                     "{\"reason\":\"success-reported-with-pending-adjustments\"}", seq);
-            String instruction = appendPendingAdjustments(run,
-                    "上一轮执行已结束，但平台收到了新的调整方向。请接着同一会话继续，不要重新开始。");
+            String instruction = withStandards(run.getTaskId(), appendPendingAdjustments(run,
+                    "上一轮执行已结束，但平台收到了新的调整方向。请接着同一会话继续，不要重新开始。"));
             return new AgentReportOutcome(AgentReportOutcome.Outcome.CONTINUE,
                     RunStatus.RUNNING.name(),
                     finish.taskStatus().name(),
@@ -390,6 +540,12 @@ public class AgentRunService {
                 : "任务已完成。改动留在分支 " + run.getBranchName() + " 上，等人工验收。";
     }
 
+    private String withStandards(TaskId taskId, String instruction) {
+        if (taskCodeStandardService == null) return instruction;
+        String standards = taskCodeStandardService.context(taskId).promptSection();
+        return standards.isBlank() ? instruction : instruction + standards;
+    }
+
     private AgentReportOutcome settleAndRelease(TaskRun run, ExecResult result, int seq) {
         AgentReportOutcome outcome = settle(run, result, seq);
         if (outcome.outcome() != AgentReportOutcome.Outcome.CONTINUE) {
@@ -412,9 +568,12 @@ public class AgentRunService {
         }
     }
 
-    private Optional<AgentWorkPackage> startAttempt(Task task, String agentName, String sessionId, Instant now) {
-        ProjectProfile project = loadProject(task);
-        requireWorkspaceFree(project, now);
+    private Optional<AgentWorkPackage> startAttempt(Task task,
+                                                    ProjectProfile project,
+                                                    String agentName,
+                                                    String sessionId,
+                                                    String deviceId,
+                                                    Instant now) {
         EnvironmentContext environment = EnvironmentContext.resolve(
                 environmentEntryRepository.findApplicableTo(project.ownerId(), project.id()));
         PluginContext plugins = PluginContext.from(taskPluginRepository.findByTask(task.getId()));
@@ -423,6 +582,10 @@ public class AgentRunService {
         // 先把这次会话写进去，首跑就会被当成一次带着旧会话的重试。
         TaskRun previous = taskRunRepository.findLatestByTask(task.getId()).orElse(null);
         String instruction = settlement.instructionFor(task, previous);
+        TaskCodeStandardService.CodeStandardContext standards = taskCodeStandardService == null
+                ? TaskCodeStandardService.CodeStandardContext.empty()
+                : taskCodeStandardService.context(task.getId());
+        instruction += standards.promptSection();
 
         TaskStatus status = task.getStatus();
         if (status == TaskStatus.PENDING || status == TaskStatus.QUEUED) {
@@ -444,10 +607,14 @@ public class AgentRunService {
         taskRepository.save(task);
 
         String branch = task.getBranchName().orElse(null);
-        TaskRun run = TaskRun.start(task.getId(), task.getAttemptCount(), branch);
-        run.claimBy(agentName, now.plus(lease));
+        String baseRef = branchManager.currentCommit(project.path()).orElse(null);
+        TaskRun run = TaskRun.start(task.getId(), task.getAttemptCount(), branch, baseRef);
+        run.claimBy(agentName, deviceId, now.plus(lease));
         taskRunRepository.save(run);
         appendEvent(run, "agent.claim", "{\"agent\":\"" + json(agentName) + "\",\"executor\":\"外部执行者\"}");
+        if (!standards.isEmpty()) {
+            appendEvent(run, "platform.code-standards", standards.auditPayload());
+        }
         instruction = appendPendingAdjustments(run, instruction);
 
         List<AgentWorkPackage.Image> images = new ArrayList<>();
@@ -455,6 +622,15 @@ public class AgentRunService {
             images.add(new AgentWorkPackage.Image(attachment.id().value(), attachment.filename(),
                     attachment.storagePath()));
         }
+        List<TaskDocument> taskDocuments = documentRepository.findByTask(task.getId());
+        List<AgentWorkPackage.Document> documentSnapshots = taskDocuments.stream()
+                .map(document -> new AgentWorkPackage.Document(
+                        document.id().value(),
+                        document.filename(),
+                        document.contentType(),
+                        document.sizeBytes(),
+                        document.storagePath()))
+                .toList();
         List<AgentWorkPackage.EnvironmentVariable> variables = environment.variables().stream()
                 .map(variable -> new AgentWorkPackage.EnvironmentVariable(
                         variable.key(), variable.value(), variable.scope(),
@@ -472,8 +648,10 @@ public class AgentRunService {
         return Optional.of(new AgentWorkPackage(PROTOCOL, task.getId().value(), run.getId().value(), run.getAttemptNo(),
                 task.getTitle(), project.code(), project.path(), branch,
                 instruction + plugins.referenceSection() + environment.promptSection()
+                        + TaskDocumentPrompt.section(taskDocuments)
                         + "\n\n---\n\n" + contract.reportingRules(),
-                task.getCodexThreadId().orElse(null), images, pluginSnapshots, variables,
+                task.getCodexThreadId().orElse(null), images, documentSnapshots,
+                pluginSnapshots, variables,
                 project.defaultDecisionLevel().name(), (int) lease.toSeconds(), run.getLeaseExpiresAt(),
                 contractUrl));
     }
@@ -501,7 +679,7 @@ public class AgentRunService {
         return null;
     }
 
-    private static AgentRunSnapshot.NextAction nextAction(TaskRun run, Task task, Decision decision) {
+    private AgentRunSnapshot.NextAction nextAction(TaskRun run, Task task, Decision decision) {
         if (task.getStatus() == TaskStatus.CANCELLED) {
             return AgentRunSnapshot.NextAction.STOP;
         }
@@ -517,10 +695,9 @@ public class AgentRunService {
                     ? AgentRunSnapshot.NextAction.STOP
                     : AgentRunSnapshot.NextAction.CLAIM_AGAIN;
         }
-        boolean claimable = task.getStatus() == TaskStatus.PENDING
-                || task.getStatus() == TaskStatus.QUEUED
-                || task.getStatus() == TaskStatus.RUNNING;
-        return claimable ? AgentRunSnapshot.NextAction.CLAIM_AGAIN : AgentRunSnapshot.NextAction.STOP;
+        return claimable(task)
+                ? AgentRunSnapshot.NextAction.CLAIM_AGAIN
+                : AgentRunSnapshot.NextAction.STOP;
     }
 
     private static String noteFor(AgentRunSnapshot.NextAction action, Decision decision) {
@@ -534,28 +711,66 @@ public class AgentRunService {
         };
     }
 
-    /** 不限项目时自己挑一条：跳过工作区被占着的项目 —— 别的项目上可能还有活。 */
-    private Task pickCandidate(Instant now) {
+    /** 不限项目时自己挑一条；候选必须再次锁行确认，SQL 读到的状态不能当作认领凭据。 */
+    private Task lockCandidate() {
         for (Task candidate : taskRepository.findDispatchable(CANDIDATE_SCAN)) {
-            if (!taskRunRepository.hasActiveLease(candidate.getProjectId(), now)) {
-                return candidate;
+            Task locked = taskRepository.findByIdForUpdate(candidate.getId()).orElse(null);
+            if (locked != null && claimable(locked)) {
+                return locked;
             }
         }
         return null;
     }
 
     /** 指定项目时挑一条；项目里此刻没活就返回空。 */
-    private Task pickCandidateIn(ProjectProfile project, Instant now) {
-        return taskRepository.findDispatchableInProject(project.id(), CANDIDATE_SCAN).stream()
-                .findFirst()
-                .orElse(null);
+    private Task lockCandidateIn(ProjectProfile project) {
+        for (Task candidate : taskRepository.findDispatchableInProject(project.id(), CANDIDATE_SCAN)) {
+            Task locked = taskRepository.findByIdForUpdate(candidate.getId()).orElse(null);
+            if (locked != null && claimable(locked)) {
+                return locked;
+            }
+        }
+        return null;
     }
 
-    private void requireWorkspaceFree(ProjectProfile project, Instant now) {
-        if (taskRunRepository.hasActiveLease(project.id(), now)) {
-            throw new DomainException("项目「" + project.name() + "」的工作区正被另一个执行者占着："
-                    + "同一个项目一次只能有一个执行者在干活（分支与文件会互相覆盖）。等对方收工或租约到期再来。");
+    /**
+     * 接单前的最小执行环境检查。项目目录是平台能独立判断的事实；设备 Codex 状态来自最近心跳，
+     * 设备必须先在 TTL 内报过在线，检查失败时不创建 task_run、不消耗执行位。
+     */
+    private ProjectProfile preflight(Task task, String deviceId, Instant now) {
+        ProjectProfile project = loadProject(task);
+        if (taskCodeStandardService != null) {
+            taskCodeStandardService.requireReady(task.getId());
         }
+        project.requireDispatchable();
+        if (!Files.isDirectory(Path.of(project.path()))) {
+            throw new DomainException("项目目录不存在或不可访问：" + project.path()
+                    + "，请先在项目设置中重新选择目录");
+        }
+        if (deviceId == null || deviceId.isBlank()) {
+            return project;
+        }
+        ExecutionDevice device = executionDeviceRepository.findByDeviceId(deviceId.trim())
+                .orElseThrow(() -> new DomainException(
+                        "设备尚未注册心跳：" + deviceId + "，请重新连接设备代理"));
+        if (!device.isOnline(now, DEVICE_ONLINE_TTL)) {
+            throw new DomainException("设备已离线：" + device.hostname()
+                    + "，请重新连接或更换设备");
+        }
+        if (!device.codex().available()) {
+            throw new DomainException("设备「" + device.hostname() + "」上的 Codex 不可用："
+                    + device.codex().message() + "，请修复 Codex 安装或路径后重试");
+        }
+        return project;
+    }
+
+    private void markDeviceClaimed(String deviceId, Instant claimedAt) {
+        if (deviceId == null || deviceId.isBlank()) {
+            return;
+        }
+        executionDeviceRepository.findByDeviceId(deviceId.trim())
+                .map(device -> device.markClaimed(claimedAt))
+                .ifPresent(executionDeviceRepository::save);
     }
 
     private ProjectProfile loadProjectByCode(String projectCode) {
@@ -652,6 +867,18 @@ public class AgentRunService {
         if (value == null || value.isBlank()) {
             throw new DomainException(field + "不能为空");
         }
+    }
+
+    private boolean claimable(Task task) {
+        if (task.getStatus() == TaskStatus.PENDING || task.getStatus() == TaskStatus.QUEUED) {
+            return true;
+        }
+        if (task.getStatus() != TaskStatus.RUNNING || task.getCodexThreadId().isEmpty()) {
+            return false;
+        }
+        return taskRunRepository.findLatestByTask(task.getId())
+                .map(run -> run.getStatus() == RunStatus.BLOCKED)
+                .orElse(false);
     }
 
     private static Instant now() {

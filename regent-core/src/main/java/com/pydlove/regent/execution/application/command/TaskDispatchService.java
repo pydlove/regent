@@ -58,6 +58,7 @@ public class TaskDispatchService {
     private final ExecutorService workers;
     private final ExecutionConcurrencyGate concurrencyGate;
     private final TransactionRunner transactionRunner;
+    private final TaskCodeStandardService taskCodeStandardService;
 
     private final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
     private final Map<Long, Instant> cooldownUntil = new ConcurrentHashMap<>();
@@ -70,6 +71,19 @@ public class TaskDispatchService {
                                ExecutorService workers,
                                ExecutionConcurrencyGate concurrencyGate,
                                TransactionRunner transactionRunner) {
+        this(taskRepository, projectProfileRepository, branchManager, branchProvisioningService,
+                taskRunService, workers, concurrencyGate, transactionRunner, null);
+    }
+
+    public TaskDispatchService(TaskRepository taskRepository,
+                               ProjectProfileRepository projectProfileRepository,
+                               BranchManager branchManager,
+                               BranchProvisioningService branchProvisioningService,
+                               TaskRunService taskRunService,
+                               ExecutorService workers,
+                               ExecutionConcurrencyGate concurrencyGate,
+                               TransactionRunner transactionRunner,
+                               TaskCodeStandardService taskCodeStandardService) {
         this.taskRepository = taskRepository;
         this.projectProfileRepository = projectProfileRepository;
         this.branchManager = branchManager;
@@ -78,6 +92,7 @@ public class TaskDispatchService {
         this.workers = workers;
         this.concurrencyGate = concurrencyGate;
         this.transactionRunner = transactionRunner;
+        this.taskCodeStandardService = taskCodeStandardService;
     }
 
     /**
@@ -105,6 +120,9 @@ public class TaskDispatchService {
         requireContinuationParentSettled(task);
         ProjectProfile project = projectProfileRepository.findById(task.getProjectId())
                 .orElseThrow(() -> new EntityNotFoundException("任务所属项目不存在：" + task.getProjectId()));
+        if (taskCodeStandardService != null) {
+            taskCodeStandardService.requireReady(taskId);
+        }
 
         if (!inFlight.add(taskId.value())) {
             if (task.getStatus() == TaskStatus.QUEUED) {

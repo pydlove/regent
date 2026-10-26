@@ -5,6 +5,7 @@ import com.pydlove.regent.deployment.domain.model.DeploymentServerId;
 import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -25,7 +26,9 @@ public interface DeploymentServerRepository {
         return findAll(projectId);
     }
 
-    boolean existsByName(ProjectId projectId, String name, DeploymentServerId excludingId);
+    boolean existsByName(Collection<ProjectId> projectIds,
+                         String name,
+                         DeploymentServerId excludingId);
 
     void save(DeploymentServer server);
 

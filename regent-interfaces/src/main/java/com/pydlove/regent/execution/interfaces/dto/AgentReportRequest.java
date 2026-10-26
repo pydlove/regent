@@ -17,6 +17,7 @@ import java.util.List;
  * 之后再往下走的一切（三条结局的判定、分级）都不认识 HTTP。
  */
 public record AgentReportRequest(String executor,
+                                 String deviceId,
                                  String sessionId,
                                  String status,
                                  String summary,
@@ -26,6 +27,20 @@ public record AgentReportRequest(String executor,
                                  Tokens tokens,
                                  Integer exitCode,
                                  String rawResult) {
+
+    public AgentReportRequest(String executor,
+                              String sessionId,
+                              String status,
+                              String summary,
+                              List<String> changedFiles,
+                              Decision decision,
+                              List<Bug> bugs,
+                              Tokens tokens,
+                              Integer exitCode,
+                              String rawResult) {
+        this(executor, null, sessionId, status, summary, changedFiles,
+                decision, bugs, tokens, exitCode, rawResult);
+    }
 
     public ExecReport toReport() {
         ExecReport.Decision parsed = decision == null ? null : new ExecReport.Decision(

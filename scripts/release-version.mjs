@@ -10,7 +10,9 @@ const releasesPath = path.join(projectDirectory, 'regent-web/src/content/release
 const desktopPackagePath = path.join(projectDirectory, 'regent-desktop/package.json')
 const desktopLockPath = path.join(projectDirectory, 'regent-desktop/package-lock.json')
 const desktopReleaseInfoPath = path.join(projectDirectory, 'regent-desktop/release-info.json')
-const VERSION_PATTERN = /^feature_V(\d+(?:\.\d+){2})_(R\d+B\d+)$/
+const desktopShellInfoPath = path.join(projectDirectory, 'regent-desktop/shell-info.json')
+const VERSION_PATTERN = /^Regent_V(\d+(?:\.\d+){2})_(R\d+B\d+)$/
+const RELEASE_CODE_PATTERN = /^R\d+B\d+$/
 
 function option(name) {
   const inline = process.argv.find((argument) => argument.startsWith(`--${name}=`))
@@ -171,6 +173,10 @@ if (!currentVersion || !VERSION_PATTERN.test(currentVersion)) {
 let version = option('version')
 let notes = option('notes')
 let deploy = flag('deploy')
+const requestedShellRelease = option('shell-release')
+const requestedMinShellRelease = option('min-shell-release')
+const androidApp = option('android-app')
+const webOnly = flag('web-only')
 
 if (!version) {
   const prompt = createInterface({ input: process.stdin, output: process.stdout })
@@ -191,10 +197,35 @@ if (!version) {
 notes ||= '版本更新与问题修复'
 const match = version.match(VERSION_PATTERN)
 if (!match) {
-  throw new Error('版本号格式应为 feature_V1.0.2_R100B003')
+  throw new Error('版本号格式应为 Regent_V1.0.3_R100B001')
 }
 const desktopVersion = option('desktop-version') || match[1]
 const releaseCode = option('release-code') || match[2]
+const usedReleaseCodes = new Set(
+  releases.releases
+    .map((release) => String(release.version || '').match(VERSION_PATTERN)?.[2])
+    .filter(Boolean),
+)
+if (usedReleaseCodes.has(releaseCode) && !flag('force')) {
+  throw new Error(
+    `客户端发布码 ${releaseCode} 已被历史版本使用。`
+    + '发布码必须全局唯一且递增，否则同构建号的旧客户端不会收到升级提示。'
+    + '请递增 B 号后重新发布。',
+  )
+}
+if (requestedShellRelease && !RELEASE_CODE_PATTERN.test(requestedShellRelease)) {
+  throw new Error(`客户端壳版本号不合法：${requestedShellRelease}`)
+}
+if (requestedMinShellRelease && !RELEASE_CODE_PATTERN.test(requestedMinShellRelease)) {
+  throw new Error(`Runtime 最低客户端壳版本号不合法：${requestedMinShellRelease}`)
+}
+const fullShellRelease = Boolean(requestedShellRelease) || flag('full')
+if (webOnly && fullShellRelease) {
+  throw new Error('--web-only 不能与 --full 或 --shell-release 同时使用')
+}
+const desktopShellInfo = JSON.parse(fs.readFileSync(desktopShellInfoPath, 'utf8'))
+const desktopReleaseInfo = JSON.parse(fs.readFileSync(desktopReleaseInfoPath, 'utf8'))
+const shellRelease = requestedShellRelease || desktopShellInfo.shellRelease
 if (releases.releases.some((release) => release.version === version) && !flag('force')) {
   throw new Error(
     `版本 ${version} 已存在。重复发布同一版本不会触发客户端更新；`
@@ -242,6 +273,9 @@ const summary = {
   version,
   releaseCode,
   desktopVersion,
+  shellRelease,
+  runtimeOnly: !fullShellRelease && !webOnly,
+  webOnly,
   tag: flag('no-tag') ? null : tagName,
   tagCommit,
   notes,
@@ -255,7 +289,13 @@ if (flag('dry-run')) {
 }
 
 const originals = new Map()
-for (const file of [releasesPath, desktopPackagePath, desktopLockPath, desktopReleaseInfoPath]) {
+for (const file of [
+  releasesPath,
+  desktopPackagePath,
+  desktopLockPath,
+  desktopReleaseInfoPath,
+  desktopShellInfoPath,
+]) {
   originals.set(file, fs.readFileSync(file, 'utf8'))
 }
 
@@ -267,47 +307,64 @@ try {
   ]
   writeJson(releasesPath, releases)
 
-  const desktopPackage = JSON.parse(fs.readFileSync(desktopPackagePath, 'utf8'))
-  desktopPackage.version = desktopVersion
-  writeJson(desktopPackagePath, desktopPackage)
+  if (!webOnly) {
+    const desktopPackage = JSON.parse(fs.readFileSync(desktopPackagePath, 'utf8'))
+    desktopPackage.version = desktopVersion
+    writeJson(desktopPackagePath, desktopPackage)
 
-  const desktopLock = JSON.parse(fs.readFileSync(desktopLockPath, 'utf8'))
-  desktopLock.version = desktopVersion
-  if (desktopLock.packages?.['']) desktopLock.packages[''].version = desktopVersion
-  writeJson(desktopLockPath, desktopLock)
+    const desktopLock = JSON.parse(fs.readFileSync(desktopLockPath, 'utf8'))
+    desktopLock.version = desktopVersion
+    if (desktopLock.packages?.['']) desktopLock.packages[''].version = desktopVersion
+    writeJson(desktopLockPath, desktopLock)
 
-  writeJson(desktopReleaseInfoPath, {
-    version: desktopVersion,
-    productVersion: version,
-    releaseCode,
-    releasedAt: releaseEntry.releasedAt,
-  })
+    writeJson(desktopReleaseInfoPath, {
+      version: desktopVersion,
+      productVersion: version,
+      releaseCode,
+      releasedAt: releaseEntry.releasedAt,
+    })
+    if (requestedShellRelease) {
+      writeJson(desktopShellInfoPath, {
+        shellRelease: requestedShellRelease,
+      })
+    }
+  }
 
   const webDirectory = path.join(projectDirectory, 'regent-web')
   const desktopDirectory = path.join(projectDirectory, 'regent-desktop')
   ensureDependencies(webDirectory)
-  ensureDependencies(desktopDirectory)
+  if (!webOnly) ensureDependencies(desktopDirectory)
 
   console.log(`\n发布 ${version}（${releaseCode}）`)
-  run('npm', ['run', 'typecheck'], { cwd: webDirectory })
-  run('npm', ['test'], { cwd: webDirectory })
-  run('npm', ['run', 'build'], { cwd: webDirectory })
-  run('npm', ['run', 'build:release'], {
-    cwd: desktopDirectory,
-    env: { REGENT_RELEASE_CODE: releaseCode },
-  })
-
-  const macos = path.join(
+  if (fullShellRelease || webOnly) {
+    run('npm', ['run', 'typecheck'], { cwd: webDirectory })
+    run('npm', ['test'], { cwd: webDirectory })
+    run('npm', ['run', 'build'], { cwd: webDirectory })
+  }
+  let runtime = null
+  if (!webOnly) {
+    run('npm', ['test'], { cwd: desktopDirectory })
+    run('npm', ['run', fullShellRelease ? 'build:release' : 'build:runtime'], {
+      cwd: desktopDirectory,
+      env: { REGENT_RELEASE_CODE: releaseCode },
+    })
+    runtime = path.join(
+      desktopDirectory,
+      'dist',
+      `Regent-${desktopVersion}-${releaseCode}-runtime.zip`,
+    )
+  }
+  const macos = fullShellRelease ? path.join(
     desktopDirectory,
     'dist',
     `Regent-${desktopVersion}-${releaseCode}-macOS.dmg`,
-  )
-  const windows = path.join(
+  ) : null
+  const windows = fullShellRelease ? path.join(
     desktopDirectory,
     'dist',
     `Regent-${desktopVersion}-${releaseCode}-Windows-x64.zip`,
-  )
-  run('node', [
+  ) : null
+  const publishArguments = [
     'scripts/publish-release.mjs',
     '--version',
     version,
@@ -315,11 +372,22 @@ try {
     releaseCode,
     '--notes',
     notes,
-    '--macos',
-    macos,
-    '--windows',
-    windows,
-  ])
+  ]
+  if (webOnly) {
+    publishArguments.push('--web-only', '--client-code', desktopReleaseInfo.releaseCode)
+  } else {
+    const runtimeMinShellRelease = requestedMinShellRelease || shellRelease
+    publishArguments.push(
+      '--runtime',
+      runtime,
+      '--min-shell-release',
+      runtimeMinShellRelease,
+    )
+  }
+  if (macos) publishArguments.push('--macos', macos)
+  if (windows) publishArguments.push('--windows', windows)
+  if (androidApp) publishArguments.push('--android', androidApp)
+  run('node', publishArguments)
   published = true
 
   if (tagCommit) {
@@ -329,6 +397,7 @@ try {
       desktopPackagePath,
       desktopLockPath,
       desktopReleaseInfoPath,
+      desktopShellInfoPath,
     ])
     if (capture('git', ['status', '--porcelain']) !== '') {
       run('git', ['commit', '-m', `chore(release): 发布 ${version}`])
@@ -360,8 +429,10 @@ try {
   console.log('\n发布完成')
   console.log(`版本：${version}`)
   console.log(`发布码：${releaseCode}`)
-  console.log(`macOS：${macos}`)
-  console.log(`Windows：${windows}`)
+  console.log(`客户端壳：${shellRelease}`)
+  if (runtime) console.log(`Runtime：${runtime}`)
+  if (macos) console.log(`macOS：${macos}`)
+  if (windows) console.log(`Windows：${windows}`)
   console.log(`发布清单：${path.join(process.env.HOME || '', '.regent/downloads/latest.json')}`)
 } catch (error) {
   if (!published) {

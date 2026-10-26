@@ -11,6 +11,9 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 
 /** 环境信息仓储的 MyBatis 实现。 */
@@ -26,39 +29,33 @@ public class MyBatisEnvironmentEntryRepository implements EnvironmentEntryReposi
     @Override
     public Optional<EnvironmentEntry> findById(EnvironmentId id) {
         return Optional.ofNullable(mapper.selectById(id.value()))
-                .map(EnvironmentDataMapper::toEntry);
+                .map(row -> toDomains(List.of(row)).get(0));
     }
 
     @Override
     public Optional<EnvironmentEntry> findById(EnvironmentId id, UserId userId) {
         return Optional.ofNullable(mapper.selectByIdOwned(id.value(), userId.value()))
-                .map(EnvironmentDataMapper::toEntry);
+                .map(row -> toDomains(List.of(row)).get(0));
     }
 
     @Override
     public List<EnvironmentEntry> findAll() {
-        return mapper.selectAll().stream().map(EnvironmentDataMapper::toEntry).toList();
+        return toDomains(mapper.selectAll());
     }
 
     @Override
     public List<EnvironmentEntry> findAll(UserId userId) {
-        return mapper.selectAllOwned(userId.value()).stream()
-                .map(EnvironmentDataMapper::toEntry)
-                .toList();
+        return toDomains(mapper.selectAllOwned(userId.value()));
     }
 
     @Override
     public List<EnvironmentEntry> findApplicableTo(ProjectId projectId) {
-        return mapper.selectApplicableTo(projectId.value()).stream()
-                .map(EnvironmentDataMapper::toEntry)
-                .toList();
+        return toDomains(mapper.selectApplicableTo(projectId.value()));
     }
 
     @Override
     public List<EnvironmentEntry> findApplicableTo(UserId userId, ProjectId projectId) {
-        return mapper.selectApplicableToOwned(userId.value(), projectId.value()).stream()
-                .map(EnvironmentDataMapper::toEntry)
-                .toList();
+        return toDomains(mapper.selectApplicableToOwned(userId.value(), projectId.value()));
     }
 
     @Override
@@ -92,11 +89,10 @@ public class MyBatisEnvironmentEntryRepository implements EnvironmentEntryReposi
                     throw new DomainException("环境信息新增失败：" + entry.getKey());
                 }
                 entry.assignIdentity(EnvironmentId.of(data.getId()));
-                return;
-            }
-            if (mapper.update(data) != 1) {
+            } else if (mapper.update(data) != 1) {
                 throw new DomainException("环境信息更新失败或已被删除：" + entry.getId());
             }
+            replaceProjectLinks(entry);
         } catch (DuplicateKeyException e) {
             throw new DomainException("同一归属已存在环境键：" + entry.getKey(), e);
         }
@@ -106,6 +102,52 @@ public class MyBatisEnvironmentEntryRepository implements EnvironmentEntryReposi
     public void delete(EnvironmentId id) {
         if (mapper.softDelete(id.value()) != 1) {
             throw new DomainException("环境信息删除失败或已被删除：" + id);
+        }
+    }
+
+    private List<EnvironmentEntry> toDomains(List<EnvironmentRow> rows) {
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        List<Long> entryIds = rows.stream().map(EnvironmentRow::getId).toList();
+        Map<Long, List<Long>> projectIdsByEntry = new LinkedHashMap<>();
+        for (EnvironmentProjectRow link : mapper.selectProjectLinks(entryIds)) {
+            projectIdsByEntry
+                    .computeIfAbsent(link.getEnvironmentId(), ignored -> new ArrayList<>())
+                    .add(link.getProjectId());
+        }
+        return rows.stream()
+                .map(row -> EnvironmentDataMapper.toEntry(
+                        row,
+                        orderedProjectIds(
+                                row.getProjectId(),
+                                projectIdsByEntry.getOrDefault(
+                                        row.getId(),
+                                        row.getProjectId() == null
+                                                ? List.of()
+                                                : List.of(row.getProjectId())))))
+                .toList();
+    }
+
+    private static List<Long> orderedProjectIds(Long primaryProjectId,
+                                                List<Long> linkedProjectIds) {
+        if (primaryProjectId == null) {
+            return linkedProjectIds;
+        }
+        List<Long> ordered = new ArrayList<>();
+        ordered.add(primaryProjectId);
+        linkedProjectIds.stream()
+                .filter(projectId -> !projectId.equals(primaryProjectId))
+                .forEach(ordered::add);
+        return ordered;
+    }
+
+    private void replaceProjectLinks(EnvironmentEntry entry) {
+        long environmentId = entry.getId().value();
+        mapper.deleteProjectLinks(environmentId);
+        List<Long> projectIds = entry.getProjectIds().stream().map(ProjectId::value).toList();
+        if (!projectIds.isEmpty()) {
+            mapper.insertProjectLinks(environmentId, projectIds);
         }
     }
 }

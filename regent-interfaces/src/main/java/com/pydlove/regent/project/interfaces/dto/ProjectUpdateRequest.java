@@ -9,5 +9,14 @@ public record ProjectUpdateRequest(
         String name,
         String path,
         String defaultDecisionLevel,
+        String versionSource,
+        String fallbackVersion,
         Boolean enabled) {
+
+    public ProjectUpdateRequest(String name,
+                                String path,
+                                String defaultDecisionLevel,
+                                Boolean enabled) {
+        this(name, path, defaultDecisionLevel, "GIT_TAG", null, enabled);
+    }
 }

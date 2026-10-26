@@ -8,7 +8,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Collection;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * 部署配置聚合。
@@ -25,7 +29,8 @@ public class Deployment {
     public static final int MAX_SCRIPT_LENGTH = 512 * 1024;
 
     private DeploymentId id;
-    private final ProjectId projectId;
+    private ProjectId projectId;
+    private Set<ProjectId> projectIds;
     private DeploymentServerId serverId;
     private String name;
     private String remoteDirectory;
@@ -38,7 +43,7 @@ public class Deployment {
     private Instant updatedAt;
 
     private Deployment(DeploymentId id,
-                       ProjectId projectId,
+                       Collection<ProjectId> projectIds,
                        DeploymentServerId serverId,
                        String name,
                        String remoteDirectory,
@@ -50,11 +55,11 @@ public class Deployment {
                        Instant createdAt,
                        Instant updatedAt) {
         this.id = id;
-        this.projectId = requireNotNull(projectId, "归属项目");
+        applyProjectIds(projectIds);
         this.serverId = requireNotNull(serverId, "部署服务器");
         this.createdAt = requireNotNull(createdAt, "创建时间").truncatedTo(ChronoUnit.MILLIS);
         this.updatedAt = requireNotNull(updatedAt, "更新时间").truncatedTo(ChronoUnit.MILLIS);
-        apply(name, serverId, remoteDirectory, scriptFilename, scriptContent, scriptHash,
+        apply(projectIds, name, serverId, remoteDirectory, scriptFilename, scriptContent, scriptHash,
                 executionMode, projectScriptPath);
     }
 
@@ -64,7 +69,7 @@ public class Deployment {
                                     String remoteDirectory,
                                     String scriptFilename,
                                     String scriptContent) {
-        return create(projectId, serverId, name, remoteDirectory, scriptFilename, scriptContent,
+        return create(List.of(projectId), serverId, name, remoteDirectory, scriptFilename, scriptContent,
                 DeploymentExecutionMode.REMOTE_SCRIPT, null);
     }
 
@@ -76,8 +81,30 @@ public class Deployment {
                                     String scriptContent,
                                     DeploymentExecutionMode executionMode,
                                     String projectScriptPath) {
+        return create(List.of(projectId), serverId, name, remoteDirectory, scriptFilename,
+                scriptContent, executionMode, projectScriptPath);
+    }
+
+    public static Deployment create(Collection<ProjectId> projectIds,
+                                    DeploymentServerId serverId,
+                                    String name,
+                                    String remoteDirectory,
+                                    String scriptFilename,
+                                    String scriptContent) {
+        return create(projectIds, serverId, name, remoteDirectory, scriptFilename, scriptContent,
+                DeploymentExecutionMode.REMOTE_SCRIPT, null);
+    }
+
+    public static Deployment create(Collection<ProjectId> projectIds,
+                                    DeploymentServerId serverId,
+                                    String name,
+                                    String remoteDirectory,
+                                    String scriptFilename,
+                                    String scriptContent,
+                                    DeploymentExecutionMode executionMode,
+                                    String projectScriptPath) {
         Instant now = now();
-        return new Deployment(null, projectId, serverId, name, remoteDirectory,
+        return new Deployment(null, projectIds, serverId, name, remoteDirectory,
                 scriptFilename, scriptContent, null, executionMode, projectScriptPath, now, now);
     }
 
@@ -91,7 +118,7 @@ public class Deployment {
                                      String scriptHash,
                                      Instant createdAt,
                                      Instant updatedAt) {
-        return restore(id, projectId, serverId, name, remoteDirectory, scriptFilename,
+        return restore(id, List.of(projectId), serverId, name, remoteDirectory, scriptFilename,
                 scriptContent, scriptHash, DeploymentExecutionMode.REMOTE_SCRIPT, null,
                 createdAt, updatedAt);
     }
@@ -108,7 +135,23 @@ public class Deployment {
                                      String projectScriptPath,
                                      Instant createdAt,
                                      Instant updatedAt) {
-        return new Deployment(requireNotNull(id, "部署 ID"), projectId, serverId, name,
+        return restore(id, List.of(projectId), serverId, name, remoteDirectory, scriptFilename,
+                scriptContent, scriptHash, executionMode, projectScriptPath, createdAt, updatedAt);
+    }
+
+    public static Deployment restore(DeploymentId id,
+                                     Collection<ProjectId> projectIds,
+                                     DeploymentServerId serverId,
+                                     String name,
+                                     String remoteDirectory,
+                                     String scriptFilename,
+                                     String scriptContent,
+                                     String scriptHash,
+                                     DeploymentExecutionMode executionMode,
+                                     String projectScriptPath,
+                                     Instant createdAt,
+                                     Instant updatedAt) {
+        return new Deployment(requireNotNull(id, "部署 ID"), projectIds, serverId, name,
                 remoteDirectory, scriptFilename, scriptContent, scriptHash, executionMode,
                 projectScriptPath, createdAt, updatedAt);
     }
@@ -129,7 +172,21 @@ public class Deployment {
                        String scriptContent,
                        DeploymentExecutionMode executionMode,
                        String projectScriptPath) {
-        apply(name, serverId, remoteDirectory,
+        apply(projectIds, name, serverId, remoteDirectory,
+                scriptFilename, scriptContent, null, executionMode, projectScriptPath);
+        this.updatedAt = now();
+    }
+
+    public void update(Collection<ProjectId> projectIds,
+                       String name,
+                       DeploymentServerId serverId,
+                       String remoteDirectory,
+                       String scriptFilename,
+                       String scriptContent,
+                       DeploymentExecutionMode executionMode,
+                       String projectScriptPath) {
+        applyProjectIds(projectIds);
+        apply(projectIds, name, serverId, remoteDirectory,
                 scriptFilename, scriptContent, null, executionMode, projectScriptPath);
         this.updatedAt = now();
     }
@@ -142,15 +199,30 @@ public class Deployment {
     }
 
     public DeploymentSnapshot snapshot() {
+        return snapshot(projectId);
+    }
+
+    public DeploymentSnapshot snapshot(ProjectId targetProjectId) {
+        return snapshot(targetProjectId, executionMode, projectScriptPath);
+    }
+
+    public DeploymentSnapshot snapshot(ProjectId targetProjectId,
+                                       DeploymentExecutionMode targetMode,
+                                       String targetProjectScriptPath) {
         if (id == null) {
             throw new DomainException("部署尚未持久化，不能执行");
         }
-        return new DeploymentSnapshot(id, projectId, serverId, name,
+        ProjectId executionProjectId = requireNotNull(targetProjectId, "本次执行项目");
+        if (!belongsTo(executionProjectId)) {
+            throw new DomainException("本次执行项目不属于该部署：" + executionProjectId.value());
+        }
+        return new DeploymentSnapshot(id, executionProjectId, serverId, name,
                 remoteDirectory, scriptFilename, scriptContent, scriptHash,
-                executionMode, projectScriptPath);
+                targetMode, targetProjectScriptPath);
     }
 
-    private void apply(String name,
+    private void apply(Collection<ProjectId> projectIds,
+                       String name,
                        DeploymentServerId serverId,
                        String remoteDirectory,
                        String scriptFilename,
@@ -158,6 +230,7 @@ public class Deployment {
                        String scriptHash,
                        DeploymentExecutionMode executionMode,
                        String projectScriptPath) {
+        applyProjectIds(projectIds);
         this.name = requireName(name);
         this.serverId = requireNotNull(serverId, "部署服务器");
         this.remoteDirectory = requireRemoteDirectory(remoteDirectory);
@@ -166,6 +239,18 @@ public class Deployment {
         this.projectScriptPath = this.executionMode == DeploymentExecutionMode.PROJECT_SCRIPT
                 ? requireProjectScriptPath(projectScriptPath)
                 : null;
+    }
+
+    private void applyProjectIds(Collection<ProjectId> values) {
+        if (values == null || values.isEmpty()) {
+            throw new DomainException("请至少选择一个部署归属项目");
+        }
+        LinkedHashSet<ProjectId> normalized = new LinkedHashSet<>();
+        for (ProjectId value : values) {
+            normalized.add(requireNotNull(value, "归属项目"));
+        }
+        this.projectIds = normalized;
+        this.projectId = normalized.iterator().next();
     }
 
     private void applyScript(String filename, String content, String hash) {
@@ -280,6 +365,14 @@ public class Deployment {
 
     public ProjectId getProjectId() {
         return projectId;
+    }
+
+    public List<ProjectId> getProjectIds() {
+        return List.copyOf(projectIds);
+    }
+
+    public boolean belongsTo(ProjectId projectId) {
+        return projectIds.contains(projectId);
     }
 
     public DeploymentServerId getServerId() {

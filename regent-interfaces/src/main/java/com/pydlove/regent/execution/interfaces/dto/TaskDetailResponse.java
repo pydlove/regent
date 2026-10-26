@@ -8,6 +8,7 @@ import java.time.Instant;
 public record TaskDetailResponse(
         long id,
         long projectId,
+        Long requirementId,
         String source,
         String title,
         String prompt,
@@ -27,6 +28,7 @@ public record TaskDetailResponse(
         return new TaskDetailResponse(
                 task.getId().value(),
                 task.getProjectId().value(),
+                task.getRequirementId().map(requirementId -> requirementId.value()).orElse(null),
                 task.getSource().name(),
                 task.getTitle(),
                 task.getPrompt(),

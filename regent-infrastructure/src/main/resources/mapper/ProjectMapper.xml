@@ -12,24 +12,33 @@
         WHERE code = #{code}
     </select>
 
+    <select id="countByOrganizationAndCode" resultType="int">
+        SELECT COUNT(*)
+        FROM project
+        WHERE organization_id = #{organizationId}
+          AND code = #{code}
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO project (owner_id, code, name, path, tech_stack, verify_method, default_decision_level,
-                             enabled, deleted, summary_status, summary, summary_error,
+        INSERT INTO project (organization_id, owner_id, code, name, path, tech_stack, verify_method, default_decision_level,
+                             version_source, fallback_version, enabled, deleted, summary_status, summary, summary_error,
                              summary_generated_at, created_at, updated_at)
-        VALUES (#{ownerId}, #{code}, #{name}, #{path}, #{techStack}, #{verifyMethod}, #{defaultDecisionLevel},
-                1, 0, #{summaryStatus}, #{summary}, #{summaryError}, #{summaryGeneratedAt},
+        VALUES (#{organizationId}, #{ownerId}, #{code}, #{name}, #{path}, #{techStack}, #{verifyMethod}, #{defaultDecisionLevel},
+                #{versionSource}, #{fallbackVersion}, 1, 0, #{summaryStatus}, #{summary}, #{summaryError}, #{summaryGeneratedAt},
                 #{createdAt}, #{updatedAt})
     </insert>
 
     <select id="selectById" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectData">
-        SELECT id, owner_id, code, name, path, tech_stack, verify_method, default_decision_level, enabled,
+        SELECT id, organization_id, owner_id, code, name, path, tech_stack, verify_method, default_decision_level, enabled,
+               version_source, fallback_version,
                summary_status, summary, summary_error, summary_generated_at, created_at, updated_at
         FROM project
         WHERE id = #{id} AND deleted = 0
     </select>
 
     <select id="selectByIdOwned" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectData">
-        SELECT id, owner_id, code, name, path, tech_stack, verify_method, default_decision_level, enabled,
+        SELECT id, organization_id, owner_id, code, name, path, tech_stack, verify_method, default_decision_level, enabled,
+               version_source, fallback_version,
                summary_status, summary, summary_error, summary_generated_at, created_at, updated_at
         FROM project
         WHERE id = #{id} AND owner_id = #{ownerId} AND deleted = 0
@@ -37,7 +46,8 @@
 
     <select id="selectBySummaryStatus"
             resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectData">
-        SELECT id, owner_id, code, name, path, tech_stack, verify_method, default_decision_level, enabled,
+        SELECT id, organization_id, owner_id, code, name, path, tech_stack, verify_method, default_decision_level, enabled,
+               version_source, fallback_version,
                summary_status, summary, summary_error, summary_generated_at, created_at, updated_at
         FROM project
         WHERE summary_status = #{summaryStatus} AND deleted = 0
@@ -59,6 +69,8 @@
         SET name = #{name},
             path = #{path},
             default_decision_level = #{defaultDecisionLevel},
+            version_source = #{versionSource},
+            fallback_version = #{fallbackVersion},
             enabled = #{enabled},
             updated_at = #{updatedAt}
         WHERE id = #{id} AND deleted = 0

@@ -7,28 +7,36 @@
 <mapper namespace="com.pydlove.regent.project.infrastructure.persistence.ProjectProfileMapper">
 
     <select id="selectById" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectProfileRow">
-        SELECT id, owner_id, code, name, path, default_decision_level, enabled,
+        SELECT id, organization_id, owner_id, code, name, path, default_decision_level, version_source, fallback_version, enabled,
                summary_status, summary, summary_error, summary_generated_at
         FROM project
         WHERE id = #{id} AND deleted = 0
     </select>
 
     <select id="selectByIdOwned" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectProfileRow">
-        SELECT id, owner_id, code, name, path, default_decision_level, enabled,
+        SELECT id, organization_id, owner_id, code, name, path, default_decision_level, version_source, fallback_version, enabled,
                summary_status, summary, summary_error, summary_generated_at
-        FROM project
-        WHERE id = #{id} AND owner_id = #{ownerId} AND deleted = 0
+        FROM project p
+        WHERE p.id = #{id}
+          AND p.deleted = 0
+          AND (
+            p.owner_id = #{ownerId}
+            OR EXISTS (
+                SELECT 1 FROM project_member pm
+                WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+            )
+          )
     </select>
 
     <select id="selectByCode" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectProfileRow">
-        SELECT id, owner_id, code, name, path, default_decision_level, enabled,
+        SELECT id, organization_id, owner_id, code, name, path, default_decision_level, version_source, fallback_version, enabled,
                summary_status, summary, summary_error, summary_generated_at
         FROM project
         WHERE code = #{code} AND deleted = 0
     </select>
 
     <select id="selectAll" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectProfileRow">
-        SELECT id, owner_id, code, name, path, default_decision_level, enabled,
+        SELECT id, organization_id, owner_id, code, name, path, default_decision_level, version_source, fallback_version, enabled,
                summary_status, summary, summary_error, summary_generated_at
         FROM project
         WHERE deleted = 0
@@ -36,11 +44,37 @@
     </select>
 
     <select id="selectAllOwned" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectProfileRow">
-        SELECT id, owner_id, code, name, path, default_decision_level, enabled,
+        SELECT id, organization_id, owner_id, code, name, path, default_decision_level, version_source, fallback_version, enabled,
+               summary_status, summary, summary_error, summary_generated_at
+        FROM project p
+        WHERE p.deleted = 0
+          AND (
+            p.owner_id = #{ownerId}
+            OR EXISTS (
+                SELECT 1 FROM project_member pm
+                WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+            )
+          )
+          <if test="organizationId != null">
+            AND p.organization_id = #{organizationId}
+          </if>
+        ORDER BY p.id
+    </select>
+
+    <select id="selectByOrganization" resultType="com.pydlove.regent.project.infrastructure.persistence.ProjectProfileRow">
+        SELECT id, organization_id, owner_id, code, name, path, default_decision_level, version_source, fallback_version, enabled,
                summary_status, summary, summary_error, summary_generated_at
         FROM project
-        WHERE owner_id = #{ownerId} AND deleted = 0
+        WHERE organization_id = #{organizationId}
+          AND deleted = 0
         ORDER BY id
+    </select>
+
+    <select id="countByOrganization" resultType="long">
+        SELECT COUNT(*)
+        FROM project
+        WHERE organization_id = #{organizationId}
+          AND deleted = 0
     </select>
 
 </mapper>

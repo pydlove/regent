@@ -5,9 +5,9 @@ const { resolveDeploymentServerSelection } = await import(
   '../src/utils/deploymentServerSelection.ts'
 )
 
-const server = (id, projectId) => ({
+const server = (id, projectIds) => ({
   id,
-  projectId,
+  projectIds,
   name: `server-${id}`,
   host: `${id}.example.com`,
   port: 22,
@@ -23,33 +23,33 @@ test('全部项目时优先选择确实有服务器的项目', () => {
   const selection = resolveDeploymentServerSelection(
     null,
     [{ id: 7 }, { id: 8 }],
-    [server(31, 8), server(30, 8), server(12, 7)],
+    [server(31, [8]), server(30, [8, 9]), server(12, [7, 8])],
   )
 
   assert.equal(selection.projectId, 8)
-  assert.deepEqual(selection.servers.map(({ id }) => id), [31, 30])
+  assert.deepEqual(selection.servers.map(({ id }) => id), [31, 30, 12])
 })
 
 test('已经指定项目时保持项目边界并只返回该项目的服务器', () => {
   const selection = resolveDeploymentServerSelection(
     7,
     [{ id: 7 }, { id: 8 }],
-    [server(31, 8), server(12, 7)],
+    [server(31, [8]), server(12, [7, 8])],
   )
 
   assert.equal(selection.projectId, 7)
   assert.deepEqual(selection.servers.map(({ id }) => id), [12])
 })
 
-test('指定项目没有服务器时切换到实际有服务器的项目', () => {
+test('指定项目没有服务器时仍保持该项目并返回空服务器列表', () => {
   const selection = resolveDeploymentServerSelection(
     7,
     [{ id: 7 }, { id: 8 }],
-    [server(31, 8), server(30, 8)],
+    [server(31, [8]), server(30, [8, 9])],
   )
 
-  assert.equal(selection.projectId, 8)
-  assert.deepEqual(selection.servers.map(({ id }) => id), [31, 30])
+  assert.equal(selection.projectId, 7)
+  assert.deepEqual(selection.servers, [])
 })
 
 test('全部项目且没有服务器时回退到第一个项目', () => {

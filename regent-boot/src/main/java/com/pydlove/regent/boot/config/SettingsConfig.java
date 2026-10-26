@@ -2,11 +2,15 @@ package com.pydlove.regent.boot.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pydlove.regent.settings.application.command.RelaySettingsService;
+import com.pydlove.regent.settings.application.command.GitCommitSettingsService;
+import com.pydlove.regent.settings.domain.repository.GitCommitSettingsRepository;
 import com.pydlove.regent.settings.domain.model.RelaySettings;
 import com.pydlove.regent.settings.domain.port.RelayHealthProbe;
 import com.pydlove.regent.settings.domain.port.RelayInstaller;
 import com.pydlove.regent.settings.domain.repository.RelaySettingsRepository;
 import com.pydlove.regent.settings.infrastructure.persistence.MyBatisRelaySettingsRepository;
+import com.pydlove.regent.settings.infrastructure.persistence.GitCommitSettingsMapper;
+import com.pydlove.regent.settings.infrastructure.persistence.MyBatisGitCommitSettingsRepository;
 import com.pydlove.regent.settings.infrastructure.persistence.RelaySettingsMapper;
 import com.pydlove.regent.settings.infrastructure.relay.HttpRelayHealthProbe;
 import com.pydlove.regent.settings.infrastructure.relay.ShellRelayInstaller;
@@ -25,6 +29,17 @@ public class SettingsConfig {
     @Bean
     public RelaySettingsRepository relaySettingsRepository(RelaySettingsMapper mapper) {
         return new MyBatisRelaySettingsRepository(mapper);
+    }
+
+    @Bean
+    public GitCommitSettingsRepository gitCommitSettingsRepository(GitCommitSettingsMapper mapper) {
+        return new MyBatisGitCommitSettingsRepository(mapper);
+    }
+
+    @Bean
+    public GitCommitSettingsService gitCommitSettingsService(
+            GitCommitSettingsRepository repository) {
+        return new GitCommitSettingsService(repository);
     }
 
     @Bean

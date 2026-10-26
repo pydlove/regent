@@ -1,11 +1,15 @@
 package com.pydlove.regent.execution.application.command;
 
 import com.pydlove.regent.execution.domain.model.Task;
+import com.pydlove.regent.execution.domain.model.CodeStandardId;
 import com.pydlove.regent.execution.domain.model.TaskId;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
+import com.pydlove.regent.governance.domain.model.Decision;
+import com.pydlove.regent.governance.domain.repository.DecisionRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
+import com.pydlove.regent.shared.domain.TransactionRunner;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -24,11 +28,27 @@ public class TaskCommandService {
 
     private final TaskRepository taskRepository;
     private final ProjectProfileRepository projectProfileRepository;
+    private final DecisionRepository decisionRepository;
+    private final TransactionRunner transactionRunner;
+    private final TaskCodeStandardService taskCodeStandardService;
 
     public TaskCommandService(TaskRepository taskRepository,
-                              ProjectProfileRepository projectProfileRepository) {
+                              ProjectProfileRepository projectProfileRepository,
+                              DecisionRepository decisionRepository,
+                              TransactionRunner transactionRunner) {
+        this(taskRepository, projectProfileRepository, decisionRepository, transactionRunner, null);
+    }
+
+    public TaskCommandService(TaskRepository taskRepository,
+                              ProjectProfileRepository projectProfileRepository,
+                              DecisionRepository decisionRepository,
+                              TransactionRunner transactionRunner,
+                              TaskCodeStandardService taskCodeStandardService) {
         this.taskRepository = taskRepository;
         this.projectProfileRepository = projectProfileRepository;
+        this.decisionRepository = decisionRepository;
+        this.transactionRunner = transactionRunner;
+        this.taskCodeStandardService = taskCodeStandardService;
     }
 
     /**
@@ -41,12 +61,25 @@ public class TaskCommandService {
      * 该拦住它的是 {@code ProjectProfile.requireDispatchable()}。
      */
     public Task createManual(CreateTaskCommand command) {
-        projectProfileRepository.findById(command.projectId())
-                .orElseThrow(() -> new EntityNotFoundException("项目不存在：" + command.projectId()));
-        Task task = Task.manual(command.projectId(), deriveTitle(command.prompt()), command.prompt(),
-                command.priority());
-        taskRepository.save(task);
-        return task;
+        if (taskCodeStandardService == null) {
+            projectProfileRepository.findById(command.projectId())
+                    .orElseThrow(() -> new EntityNotFoundException(
+                            "项目不存在：" + command.projectId()));
+            Task task = Task.manual(command.projectId(), deriveTitle(command.prompt()),
+                    command.prompt(), command.priority());
+            taskRepository.save(task);
+            return task;
+        }
+        return transactionRunner.inTransaction(() -> {
+            projectProfileRepository.findById(command.projectId())
+                    .orElseThrow(() -> new EntityNotFoundException(
+                            "项目不存在：" + command.projectId()));
+            Task task = Task.manual(command.projectId(), deriveTitle(command.prompt()),
+                    command.prompt(), command.priority());
+            taskRepository.save(task);
+            snapshotStandards(task, command.codeStandardIds());
+            return task;
+        });
     }
 
     /**
@@ -54,20 +87,39 @@ public class TaskCommandService {
      * 再叠加自己的开发指令。
      */
     public Task createContinuation(CreateTaskContinuationCommand command) {
-        Task source = taskRepository.findByIdForUpdate(command.sourceTaskId())
-                .orElseThrow(() -> new EntityNotFoundException(
-                        "来源任务不存在：" + command.sourceTaskId()));
-        source.requireContinuable();
-        Task task = Task.continuation(
-                source.getProjectId(),
-                source.getId(),
-                source.getCodexThreadId().orElseThrow(),
-                source.getBranchName().orElse(null),
-                deriveTitle(command.prompt()),
-                command.prompt(),
-                command.priority());
-        taskRepository.save(task);
-        return task;
+        if (taskCodeStandardService == null) {
+            Task source = taskRepository.findByIdForUpdate(command.sourceTaskId())
+                    .orElseThrow(() -> new EntityNotFoundException(
+                            "来源任务不存在：" + command.sourceTaskId()));
+            source.requireContinuable();
+            Task task = Task.continuation(
+                    source.getProjectId(),
+                    source.getId(),
+                    source.getCodexThreadId().orElseThrow(),
+                    source.getBranchName().orElse(null),
+                    deriveTitle(command.prompt()),
+                    command.prompt(),
+                    command.priority());
+            taskRepository.save(task);
+            return task;
+        }
+        return transactionRunner.inTransaction(() -> {
+            Task source = taskRepository.findByIdForUpdate(command.sourceTaskId())
+                    .orElseThrow(() -> new EntityNotFoundException(
+                            "来源任务不存在：" + command.sourceTaskId()));
+            source.requireContinuable();
+            Task task = Task.continuation(
+                    source.getProjectId(),
+                    source.getId(),
+                    source.getCodexThreadId().orElseThrow(),
+                    source.getBranchName().orElse(null),
+                    deriveTitle(command.prompt()),
+                    command.prompt(),
+                    command.priority());
+            taskRepository.save(task);
+            snapshotStandards(task, command.codeStandardIds());
+            return task;
+        });
     }
 
     /**
@@ -110,10 +162,18 @@ public class TaskCommandService {
     }
 
     public Task cancel(TaskId id) {
-        Task task = load(id);
-        task.cancel();
-        taskRepository.save(task);
-        return task;
+        return transactionRunner.inTransaction(() -> {
+            Task task = taskRepository.findByIdForUpdate(id)
+                    .orElseThrow(() -> new EntityNotFoundException("任务不存在：" + id));
+            List<Decision> pendingDecisions = decisionRepository.findPendingByTaskForUpdate(id);
+
+            task.cancel();
+            pendingDecisions.forEach(Decision::closeByTaskCancellation);
+
+            taskRepository.save(task);
+            pendingDecisions.forEach(decisionRepository::save);
+            return task;
+        });
     }
 
     /** 删除待执行、排队中或已终止的任务。状态守卫在聚合里，落库时仓储再做一次并发兜底。 */
@@ -155,5 +215,10 @@ public class TaskCommandService {
     private Task load(TaskId id) {
         return taskRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("任务不存在：" + id));
+    }
+
+    private void snapshotStandards(Task task, List<CodeStandardId> requestedIds) {
+        if (taskCodeStandardService == null) return;
+        taskCodeStandardService.snapshot(task.getId(), task.getProjectId(), requestedIds);
     }
 }

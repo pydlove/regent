@@ -5,6 +5,7 @@ import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.model.ProjectSummaryStatus;
 import com.pydlove.regent.project.domain.repository.ProjectRepository;
 import com.pydlove.regent.identity.domain.model.UserId;
+import com.pydlove.regent.organization.domain.model.OrganizationId;
 import com.pydlove.regent.shared.domain.DomainException;
 import org.springframework.stereotype.Repository;
 
@@ -24,6 +25,12 @@ public class MyBatisProjectRepository implements ProjectRepository {
     @Override
     public boolean existsByCode(String code) {
         return projectMapper.countByCode(code) > 0;
+    }
+
+    @Override
+    public boolean existsByOrganizationAndCode(OrganizationId organizationId, String code) {
+        return organizationId != null
+                && projectMapper.countByOrganizationAndCode(organizationId.value(), code) > 0;
     }
 
     @Override

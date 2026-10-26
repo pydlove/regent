@@ -3,16 +3,25 @@ import { computed, ref } from 'vue'
 
 import { createDeviceSession } from '@/api/auth'
 import {
-  getDeviceAgentStatus,
+  getDeviceAgentStatusSnapshot,
   pairDeviceAgent,
   type DeviceAgentStatus,
 } from '@/api/deviceAgent'
 import { ApiError } from '@/api/http'
 import type { CodexInstallMethod, CodexInstallResult, CodexRuntime } from '@/types/api'
+import { appServerUrl } from '@/utils/appBase'
 
 function messageOf(error: unknown): string {
   if (error instanceof ApiError) return error.message
-  if (error instanceof Error) return error.message
+  if (error instanceof Error) {
+    if (
+      error instanceof TypeError
+      || /failed to fetch|networkerror|load failed/i.test(error.message)
+    ) {
+      return '无法读取当前设备状态，请确认 Regent 服务和设备代理正在运行'
+    }
+    return error.message
+  }
   return '当前设备未连接 Regent 设备代理'
 }
 
@@ -44,11 +53,15 @@ export const useExecutionRuntimeStore = defineStore('executionRuntime', () => {
     loading.value = true
     error.value = null
     try {
-      let current = await getDeviceAgentStatus()
-      if (!current.paired && !window.regentDesktop) {
+      let snapshot = await getDeviceAgentStatusSnapshot()
+      if (!snapshot.status.paired && snapshot.source === 'local' && !window.regentDesktop) {
         const grant = await createDeviceSession()
-        current = await pairDeviceAgent(window.location.origin, grant.token)
+        snapshot = {
+          status: await pairDeviceAgent(appServerUrl(), grant.token),
+          source: 'local',
+        }
       }
+      const current = snapshot.status
       device.value = current
       status.value = {
         available: current.paired && current.codex.available,
@@ -57,7 +70,9 @@ export const useExecutionRuntimeStore = defineStore('executionRuntime', () => {
         version: current.codex.version,
         message: current.paired
           ? current.codex.message
-          : '当前设备代理尚未连接到 Regent 服务器，请先登录桌面客户端',
+          : snapshot.source === 'desktop'
+            ? '桌面客户端正在连接执行服务，请稍候重试'
+            : '当前设备代理尚未连接到 Regent 服务器，请先登录桌面客户端',
         checkedAt: current.codex.checkedAt,
       }
     } catch (e) {

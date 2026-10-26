@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.gitcommit.infrastructure.persistence.GitCommitQueryMapper">
+
+    <sql id="summaryColumns">
+        g.id, g.project_id, p.name AS project_name, g.task_id, t.title AS task_title,
+        g.review_snapshot_id, g.review_decision_id, g.ticket, g.commit_message,
+        g.branch_name, g.commit_sha, g.status,
+        g.failure_reason,
+        COALESCE(u.display_name, u.username, '未知用户') AS operator_name,
+        g.started_at, g.finished_at
+    </sql>
+
+    <sql id="filters">
+        <where>
+            (
+              p.owner_id = #{ownerId}
+              OR EXISTS (
+                SELECT 1 FROM project_member pm
+                WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+              )
+            )
+            AND p.deleted = 0
+            <if test="filter.projectId != null">
+                AND g.project_id = #{filter.projectId}
+            </if>
+            <if test="filter.taskId != null">
+                AND g.task_id = #{filter.taskId}
+            </if>
+            <if test="filter.status != null">
+                AND g.status = #{filter.status}
+            </if>
+            <if test="filter.keyword != null and filter.keyword != ''">
+                AND (
+                    t.title LIKE CONCAT('%', #{filter.keyword}, '%')
+                    OR g.commit_message LIKE CONCAT('%', #{filter.keyword}, '%')
+                    OR g.ticket LIKE CONCAT('%', #{filter.keyword}, '%')
+                    OR g.commit_sha LIKE CONCAT('%', #{filter.keyword}, '%')
+                )
+            </if>
+            <if test="filter.from != null">
+                AND g.started_at &gt;= #{filter.from}
+            </if>
+            <if test="filter.to != null">
+                AND g.started_at &lt;= #{filter.to}
+            </if>
+        </where>
+    </sql>
+
+    <select id="selectByTask"
+            resultType="com.pydlove.regent.gitcommit.infrastructure.persistence.GitCommitQueryRow">
+        SELECT <include refid="summaryColumns"/>
+        FROM git_commit_record g
+        JOIN project p ON p.id = g.project_id
+        JOIN task t ON t.id = g.task_id
+        JOIN app_user u ON u.id = g.operator_id
+        WHERE g.task_id = #{taskId}
+          AND (
+              p.owner_id = #{ownerId}
+              OR EXISTS (
+                  SELECT 1 FROM project_member pm
+                  WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+              )
+          )
+          AND p.deleted = 0
+        ORDER BY g.started_at DESC, g.id DESC
+    </select>
+
+    <select id="selectPage"
+            resultType="com.pydlove.regent.gitcommit.infrastructure.persistence.GitCommitQueryRow">
+        SELECT <include refid="summaryColumns"/>
+        FROM git_commit_record g
+        JOIN project p ON p.id = g.project_id
+        JOIN task t ON t.id = g.task_id
+        JOIN app_user u ON u.id = g.operator_id
+        <include refid="filters"/>
+        ORDER BY g.started_at DESC, g.id DESC
+        LIMIT #{filter.size} OFFSET #{offset}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(*)
+        FROM git_commit_record g
+        JOIN project p ON p.id = g.project_id
+        JOIN task t ON t.id = g.task_id
+        <include refid="filters"/>
+    </select>
+
+    <select id="selectDetail"
+            resultType="com.pydlove.regent.gitcommit.infrastructure.persistence.GitCommitQueryRow">
+        SELECT <include refid="summaryColumns"/>,
+               g.repository_path, g.base_ref, g.file_paths_json,
+               g.output_summary
+        FROM git_commit_record g
+        JOIN project p ON p.id = g.project_id
+        JOIN task t ON t.id = g.task_id
+        JOIN app_user u ON u.id = g.operator_id
+        WHERE g.id = #{id}
+          AND (
+              p.owner_id = #{ownerId}
+              OR EXISTS (
+                  SELECT 1 FROM project_member pm
+                  WHERE pm.project_id = p.id AND pm.user_id = #{ownerId}
+              )
+          )
+          AND p.deleted = 0
+    </select>
+
+</mapper>

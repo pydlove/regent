@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   AlertTriangle,
+  BookOpen,
   Blocks,
   Bot,
   Check,
@@ -25,6 +26,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { ACCEPTED_IMAGE_TYPES, listTaskAttachments, uploadTaskAttachment } from '@/api/attachments'
 import { listTaskDocuments } from '@/api/documents'
+import { listTaskCodeStandards } from '@/api/codeStandards'
 import { getDecision } from '@/api/decisions'
 import {
   getDeviceAgentJob,
@@ -79,6 +81,7 @@ import type {
   TaskBatchDispatchFailure,
   TaskDetail,
   TaskDocument,
+  TaskCodeStandard,
   TaskPluginBinding,
 } from '@/types/api'
 import {
@@ -802,6 +805,7 @@ const onTaskCreated = async (
   // 弹框是先建任务再传图，这里按 0 张读一次；传完它会再发 uploaded 事件让我们重拉
   await loadAttachments(payload.id)
   await loadDocuments(payload.id)
+  await loadTaskCodeStandards(payload.id)
   toast.success(
     `#${payload.id} 已创建`,
     continuedFromTaskId
@@ -822,6 +826,7 @@ const onContinuationCreated = async (task: TaskDetail) => {
  */
 const attachments = ref<TaskAttachment[]>([])
 const taskDocuments = ref<TaskDocument[]>([])
+const taskCodeStandards = ref<TaskCodeStandard[]>([])
 const taskPlugins = ref<TaskPluginBinding[]>([])
 const pluginDialogOpen = ref(false)
 const viewerOpen = ref(false)
@@ -841,6 +846,14 @@ const loadDocuments = async (id: number) => {
     taskDocuments.value = await listTaskDocuments(id)
   } catch {
     taskDocuments.value = []
+  }
+}
+
+const loadTaskCodeStandards = async (id: number) => {
+  try {
+    taskCodeStandards.value = await listTaskCodeStandards(id)
+  } catch {
+    taskCodeStandards.value = []
   }
 }
 
@@ -968,12 +981,14 @@ watch(
     viewerId.value = null
     attachments.value = []
     taskDocuments.value = []
+    taskCodeStandards.value = []
     taskPlugins.value = []
     pluginDialogOpen.value = false
     if (id !== undefined) {
       void runStore.load(id)
       void loadAttachments(id)
       void loadDocuments(id)
+      void loadTaskCodeStandards(id)
       void loadTaskPlugins(id)
     }
   },
@@ -1573,6 +1588,39 @@ onUnmounted(() => {
             class="hidden"
             @change="attachFiles"
           />
+        </div>
+
+        <div class="mt-4 border-t border-separator pt-3">
+          <div class="flex items-center gap-2">
+            <p class="text-caption font-emphasis text-label-secondary">开发规范</p>
+            <span v-if="taskCodeStandards.length > 0" class="tnum text-caption text-label-tertiary">
+              {{ taskCodeStandards.length }}
+            </span>
+            <Badge v-if="taskCodeStandards.length > 0" tone="success">已固定版本</Badge>
+          </div>
+          <div v-if="taskCodeStandards.length > 0" class="mt-2 space-y-1.5">
+            <a
+              v-for="standard in taskCodeStandards"
+              :key="standard.id"
+              :href="standard.contentUrl"
+              class="flex min-h-10 items-center gap-2 rounded-control border border-separator-soft bg-content px-2.5 py-1.5 transition-colors hover:border-accent/50"
+              :title="`下载 ${standard.filename}`"
+            >
+              <Icon :as="BookOpen" size="inline" class="shrink-0 text-label-tertiary" />
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-caption text-label">{{ standard.name }}</span>
+                <span class="mt-0.5 block truncate text-caption text-label-tertiary">
+                  v{{ standard.versionNo }} · {{ standard.filename }}
+                </span>
+              </span>
+              <span class="tnum shrink-0 text-caption text-label-tertiary">
+                {{ formatBytes(standard.sizeBytes) }}
+              </span>
+            </a>
+          </div>
+          <p v-else class="mt-2 text-caption text-label-tertiary">
+            创建任务时未引用项目开发规范。已有任务不会随规范库更新自动换版本。
+          </p>
         </div>
 
         <div class="mt-4 border-t border-separator pt-3">

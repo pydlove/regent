@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getLatestRelease } from '@/api/release'
 import { CURRENT_RELEASE } from '@/content/releases'
 import type { ReleaseManifest } from '@/types/release'
+import { isNewerRelease } from '@/utils/releaseVersion'
 
 const CHECK_INTERVAL = 30 * 60 * 1000
 
@@ -10,7 +11,7 @@ const CHECK_INTERVAL = 30 * 60 * 1000
  * 浏览器版更新检查。
  *
  * <p>服务端发布新的 latest.json 后，前端 JS 仍是旧版本；发现版本号变化时只提示刷新，
- * 不自动 reload，避免打断正在编辑的任务。桌面壳的更新由 Tauri updater 单独负责。
+ * 不自动 reload，避免打断正在编辑的任务。桌面客户端只在自己的 Runtime 版本变化时提示升级。
  */
 export function useWebUpdate() {
   const latest = ref<ReleaseManifest | null>(null)
@@ -19,7 +20,7 @@ export function useWebUpdate() {
 
   const hasUpdate = computed(() => {
     const version = latest.value?.version
-    return Boolean(version && version !== CURRENT_RELEASE.version && !dismissed.value)
+    return Boolean(version && isNewerRelease(version, CURRENT_RELEASE.version) && !dismissed.value)
   })
 
   const check = async () => {

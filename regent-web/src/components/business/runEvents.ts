@@ -14,7 +14,7 @@ import { formatTokens } from '@/utils/format'
 
 type Json = Record<string, unknown>
 
-type Base = { seq: number; at: string }
+type Base = { seq: number; at: string; technical?: boolean }
 
 /** 文件改动：kind 是 codex 给的原值（update / add / delete…），中文映射在展示层做 */
 export type RunFileChange = { kind: string; path: string }
@@ -70,11 +70,23 @@ export function translateRunEvents(events: RunEvent[]): RunHumanItem[] {
       continue
     }
     if (type === 'thread.started') {
-      items.push({ ...base, kind: 'note', title: '开始执行', detail: shortId(asString(node.thread_id)) })
+      items.push({
+        ...base,
+        technical: true,
+        kind: 'note',
+        title: '开始执行',
+        detail: shortId(asString(node.thread_id)),
+      })
       continue
     }
     if (type === 'turn.completed') {
-      items.push({ ...base, kind: 'note', title: '本轮结束', detail: usageText(node.usage) })
+      items.push({
+        ...base,
+        technical: true,
+        kind: 'note',
+        title: '本轮结束',
+        detail: usageText(node.usage),
+      })
       continue
     }
     if (type === 'item.started' || type === 'item.completed' || type === 'item.updated') {

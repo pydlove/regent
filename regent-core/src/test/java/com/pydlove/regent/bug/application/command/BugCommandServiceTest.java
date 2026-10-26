@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /** 缺陷写侧用例的落库编排。 */
 class BugCommandServiceTest {
@@ -50,5 +51,15 @@ class BugCommandServiceTest {
         Bug reloaded = bugs.findById(bug.getId()).orElseThrow();
         assertEquals(BugStatus.WONTFIX, reloaded.getStatus());
         assertEquals("上游接口决定保留该行为", reloaded.getWontFixReason().orElseThrow());
+    }
+
+    @Test
+    @DisplayName("不修复理由为空时仍会保存终态")
+    void 不修复无理由落库() {
+        service.wontFix(bug.getId(), null);
+
+        Bug reloaded = bugs.findById(bug.getId()).orElseThrow();
+        assertEquals(BugStatus.WONTFIX, reloaded.getStatus());
+        assertNull(reloaded.getWontFixReason().orElse(null));
     }
 }

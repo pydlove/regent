@@ -84,10 +84,10 @@ export function usePendingImages() {
       .map((item) => item.getAsFile())
       .filter((file): file is File => file !== null)
     if (files.length === 0) return
-    // 富文本里文字和图同时存在时，优先让文字进入当前输入框。
+    addFiles(files)
+    // 富文本里文字和图同时存在时，让浏览器继续插入文字，同时把图片加入待上传列表。
     if (data.getData('text/plain').length > 0) return
     event.preventDefault()
-    addFiles(files)
   }
 
   const onDrop = (event: DragEvent) => {
@@ -108,9 +108,12 @@ export function usePendingImages() {
   }
 
   /** 顺序上传，避免多张图的进度彼此抢带宽：一并发看起来更像卡住。 */
-  const uploadAll = async (upload: UploadImage) => {
+  const uploadAll = async (
+    upload: UploadImage,
+    images: readonly PendingImage[] = pending.value,
+  ) => {
     let uploaded = 0
-    for (const item of pending.value) {
+    for (const item of images) {
       if (item.status === 'done') continue
       item.status = 'uploading'
       item.progress = 0

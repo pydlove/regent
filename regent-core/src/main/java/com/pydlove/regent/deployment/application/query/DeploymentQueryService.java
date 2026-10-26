@@ -57,7 +57,7 @@ public class DeploymentQueryService {
                         profile -> profile.id().value(),
                         ProjectProfile::name,
                         (left, right) -> left));
-        Map<Long, DeploymentServer> servers = serverRepository.findAll(projectId, ownerId).stream()
+        Map<Long, DeploymentServer> servers = serverRepository.findAll(null, ownerId).stream()
                 .collect(Collectors.toMap(
                         server -> server.getId().value(),
                         Function.identity(),
@@ -77,9 +77,10 @@ public class DeploymentQueryService {
                     return new DeploymentOverview(
                             deployment,
                             server,
-                            projectNames.getOrDefault(
-                                    deployment.getProjectId().value(),
-                                    "项目 #" + deployment.getProjectId().value()),
+                            deployment.getProjectIds().stream()
+                                    .map(ProjectId::value)
+                                    .map(id -> projectNames.getOrDefault(id, "项目 #" + id))
+                                    .toList(),
                             latest.get(deployment.getId()),
                             credentialStore.exists(server.getId()));
                 })
@@ -99,18 +100,20 @@ public class DeploymentQueryService {
                 .stream()
                 .findFirst()
                 .orElse(null);
-        String projectName = (ownerId == null
-                ? projectProfileRepository.findById(deployment.getProjectId())
-                : projectProfileRepository.findById(deployment.getProjectId(), ownerId))
-                .map(ProjectProfile::name)
-                .orElse("项目 #" + deployment.getProjectId().value());
+        List<String> projectNames = deployment.getProjectIds().stream()
+                .map(projectId -> (ownerId == null
+                        ? projectProfileRepository.findById(projectId)
+                        : projectProfileRepository.findById(projectId, ownerId))
+                        .map(ProjectProfile::name)
+                        .orElse("项目 #" + projectId.value()))
+                .toList();
         DeploymentServer server = (ownerId == null
                 ? serverRepository.findById(deployment.getServerId())
                 : serverRepository.findByIdOwned(deployment.getServerId(), ownerId))
                 .orElseThrow(() -> new EntityNotFoundException(
                         "部署服务器不存在：" + deployment.getServerId().value()));
         return new DeploymentOverview(
-                deployment, server, projectName, latest, credentialStore.exists(server.getId()));
+                deployment, server, projectNames, latest, credentialStore.exists(server.getId()));
     }
 
     private static DeploymentServer requireServer(DeploymentServer server,

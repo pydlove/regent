@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { Bell, CircleAlert, CircleCheck } from '@lucide/vue'
+import { Bell, CircleAlert, CircleCheck, Workflow } from '@lucide/vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { listTasks } from '@/api/tasks'
+import { listDecisions } from '@/api/decisions'
 import Button from '@/components/ui/button/Button.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import IconButton from '@/components/ui/icon-button/IconButton.vue'
 import Popover from '@/components/ui/popover/Popover.vue'
 import { useTaskStore } from '@/stores/useTaskStore'
-import type { TaskSummary } from '@/types/api'
+import type { DecisionSummary, TaskSummary } from '@/types/api'
 import { formatRelative } from '@/utils/format'
 
 const store = useTaskStore()
@@ -17,20 +18,24 @@ const router = useRouter()
 
 const open = ref(false)
 const failedTasks = ref<TaskSummary[]>([])
+const pendingDecisions = ref<DecisionSummary[]>([])
 const total = ref(0)
+const decisionTotal = ref(0)
 const loaded = ref(false)
 const loading = ref(false)
 const error = ref<string | null>(null)
 let loadSequence = 0
 
-const badgeCount = computed(() => (loaded.value ? total.value : store.counts.FAILED))
+const badgeCount = computed(() =>
+  loaded.value ? total.value + decisionTotal.value : store.counts.FAILED + store.counts.BLOCKED,
+)
 const scopeLabel = computed(() => {
   if (store.projectId === null) return '全部项目'
   return store.projects.find((project) => project.id === store.projectId)?.name ?? '当前项目'
 })
 const buttonLabel = computed(() => {
-  if (!loaded.value || badgeCount.value === 0) return '失败任务通知'
-  return `失败任务通知，共 ${badgeCount.value} 个失败任务`
+  if (!loaded.value || badgeCount.value === 0) return '待办'
+  return `待办，共 ${badgeCount.value} 项需要处理`
 })
 
 const load = async () => {
@@ -38,15 +43,25 @@ const load = async () => {
   loading.value = true
   error.value = null
   try {
-    const result = await listTasks({
-      status: 'FAILED',
-      projectId: store.projectId,
-      page: 1,
-      size: 5,
-    })
+    const [result, decisions] = await Promise.all([
+      listTasks({
+        status: 'FAILED',
+        projectId: store.projectId,
+        page: 1,
+        size: 5,
+      }),
+      listDecisions({
+        scope: 'PENDING',
+        projectId: store.projectId,
+        page: 1,
+        size: 5,
+      }),
+    ])
     if (sequence !== loadSequence) return
     failedTasks.value = result.items
     total.value = result.total
+    pendingDecisions.value = decisions.items
+    decisionTotal.value = decisions.total
     loaded.value = true
   } catch {
     if (sequence !== loadSequence) return
@@ -86,6 +101,11 @@ const openTask = async (task: TaskSummary) => {
   await store.select(task)
   await router.push('/tasks')
 }
+
+const openDecisions = async () => {
+  open.value = false
+  await router.push('/decisions')
+}
 </script>
 
 <template>
@@ -103,32 +123,50 @@ const openTask = async (task: TaskSummary) => {
       </IconButton>
     </template>
 
-    <section class="w-80" aria-label="失败任务通知">
+    <section class="w-80" aria-label="待办">
       <div class="flex items-start justify-between gap-3">
         <div>
-          <h2 class="text-body font-emphasis text-label">失败任务</h2>
+          <h2 class="text-body font-emphasis text-label">待办</h2>
           <p class="mt-0.5 text-caption text-label-secondary">
-            {{ scopeLabel }} · {{ total > 0 ? `${total} 个任务需要处理` : '暂时没有失败任务' }}
+            {{ scopeLabel }} · {{ badgeCount > 0 ? `${badgeCount} 项需要处理` : '当前没有待办' }}
           </p>
         </div>
         <span
-          v-if="total > 0"
+          v-if="badgeCount > 0"
           class="rounded-badge bg-danger/10 px-1.5 py-0.5 text-caption text-danger"
         >
-          {{ total }}
+          {{ badgeCount }}
         </span>
       </div>
 
       <p v-if="loading" class="py-6 text-center text-caption text-label-secondary">正在读取…</p>
       <p v-else-if="error" class="py-6 text-center text-caption text-danger">{{ error }}</p>
       <div
-        v-else-if="failedTasks.length === 0"
+        v-else-if="failedTasks.length === 0 && pendingDecisions.length === 0"
         class="flex flex-col items-center gap-2 py-6 text-label-secondary"
       >
         <Icon :as="CircleCheck" size="xlarge" class="text-success" />
         <span class="text-caption">暂时没有失败任务</span>
       </div>
-      <div v-else class="mt-2 max-h-64 overflow-y-auto">
+      <div v-else class="mt-2 max-h-80 overflow-y-auto">
+        <button
+          v-for="decision in pendingDecisions"
+          :key="`decision-${decision.id}`"
+          type="button"
+          class="flex w-full items-start gap-2 rounded-control px-2 py-2 text-left hover:bg-hover focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/35"
+          @click="openDecisions"
+        >
+          <Icon :as="Workflow" size="regular" class="mt-0.5 text-warning" />
+          <span class="min-w-0 flex-1">
+            <span class="flex min-w-0 items-center gap-1.5">
+              <span class="truncate text-body text-label">{{ decision.question }}</span>
+              <span class="tnum shrink-0 text-caption text-label-tertiary">#{{ decision.id }}</span>
+            </span>
+            <span class="mt-0.5 block truncate text-caption text-label-secondary">
+              {{ decision.projectName }} · {{ decision.effectiveLevel }} 待批准
+            </span>
+          </span>
+        </button>
         <button
           v-for="task in failedTasks"
           :key="task.id"
@@ -149,9 +187,14 @@ const openTask = async (task: TaskSummary) => {
         </button>
       </div>
 
-      <Button v-if="total > 0" variant="ghost" block class="mt-2" @click="showFailedTasks">
-        查看{{ store.projectId === null ? '全部' : '该项目' }}失败任务
-      </Button>
+      <div v-if="badgeCount > 0" class="mt-2 flex gap-2">
+        <Button class="min-w-0 flex-1" @click="openDecisions">
+          处理决策
+        </Button>
+        <Button v-if="total > 0" class="min-w-0 flex-1" @click="showFailedTasks">
+          失败任务
+        </Button>
+      </div>
     </section>
   </Popover>
 </template>

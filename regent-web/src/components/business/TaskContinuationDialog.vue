@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { CornerDownRight, GitBranch } from '@lucide/vue'
+import { CornerDownRight, GitBranch, ImagePlus, TriangleAlert, X } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 
+import { ACCEPTED_IMAGE_TYPES, uploadTaskAttachment } from '@/api/attachments'
 import { ApiError } from '@/api/http'
 import { createTaskContinuation } from '@/api/tasks'
 import Button from '@/components/ui/button/Button.vue'
@@ -10,7 +11,11 @@ import DialogField from '@/components/ui/dialog/DialogField.vue'
 import Icon from '@/components/ui/icon/Icon.vue'
 import Input from '@/components/ui/input/Input.vue'
 import Textarea from '@/components/ui/input/Textarea.vue'
+import Progress from '@/components/ui/progress/Progress.vue'
+import { usePendingImages, type PendingImage } from '@/composables/usePendingImages'
+import { useToast } from '@/composables/useToast'
 import type { TaskDetail } from '@/types/api'
+import { formatBytes } from '@/utils/format'
 
 const props = defineProps<{
   task: TaskDetail | null
@@ -18,18 +23,37 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   created: [task: TaskDetail]
+  uploaded: [payload: { id: number }]
 }>()
 
 const open = defineModel<boolean>('open', { default: false })
+const toast = useToast()
 const prompt = ref('')
 const priority = ref('0')
 const saving = ref(false)
 const error = ref<string | null>(null)
+const {
+  pending,
+  dragging,
+  fileInput,
+  pendingBytes,
+  onPick,
+  onPaste,
+  onDrop,
+  onDragLeave,
+  removeImage,
+  reset,
+  uploadAll,
+} = usePendingImages()
 
 const canSubmit = computed(() => !saving.value && prompt.value.trim().length > 0)
 
 watch(open, (value) => {
-  if (!value) return
+  if (!value) {
+    reset()
+    return
+  }
+  reset()
   prompt.value = ''
   priority.value = String(props.task?.priority ?? 0)
   saving.value = false
@@ -40,6 +64,7 @@ const submit = async () => {
   const task = props.task
   if (!task || !canSubmit.value) return
 
+  const images = [...pending.value]
   saving.value = true
   error.value = null
   try {
@@ -49,12 +74,32 @@ const submit = async () => {
     })
     emit('created', created)
     open.value = false
+    reset()
+    if (images.length > 0) void uploadImages(created.id, images)
   } catch (cause) {
     error.value = cause instanceof ApiError
       ? cause.message
       : '后续任务没有创建成功，请稍后重试'
   } finally {
     saving.value = false
+  }
+}
+
+const uploadImages = async (
+  taskId: number,
+  images: PendingImage[],
+) => {
+  const attached = await uploadAll(
+    (file, onProgress) => uploadTaskAttachment(taskId, file, { onProgress }),
+    images,
+  )
+  const failed = images.length - attached
+  if (attached > 0) {
+    emit('uploaded', { id: taskId })
+    toast.success(`${attached} 张图已附上`, `#${taskId} 派发时会一并交给 Codex`)
+  }
+  if (failed > 0) {
+    toast.warning(`${failed} 张图没传上去`, '任务已创建，图片可以在右侧详情里补')
   }
 }
 </script>
@@ -91,10 +136,83 @@ const submit = async () => {
           :maxlength="12000"
           :disabled="saving"
           placeholder="例如：在现有实现上补齐权限校验、异常状态和对应测试"
+          @paste="onPaste"
         />
         <p class="tnum mt-1 text-right text-caption text-label-tertiary">
           {{ prompt.length }} / 12000
         </p>
+      </DialogField>
+
+      <DialogField
+        label="图片"
+        hint="支持拖放与 Ctrl+V / ⌘V 粘贴；截图、设计稿会随新任务一起交给 Codex"
+      >
+        <div
+          :class="[
+            'rounded-panel border border-dashed p-2 transition-colors',
+            dragging ? 'border-accent bg-accent/5' : 'border-separator',
+          ]"
+          @dragover.prevent="dragging = true"
+          @dragleave="onDragLeave"
+          @drop.prevent="onDrop"
+        >
+          <div class="flex flex-wrap items-start gap-2">
+            <div v-for="item in pending" :key="item.localId" class="group relative size-20">
+              <div class="size-full overflow-hidden rounded-panel border border-separator-soft bg-content">
+                <img
+                  :src="item.previewUrl"
+                  :alt="item.file.name"
+                  class="size-full object-cover"
+                  :class="item.status === 'uploading' ? 'opacity-40' : ''"
+                />
+                <Progress
+                  v-if="item.status === 'uploading'"
+                  :value="item.progress"
+                  class="absolute inset-x-0 bottom-0"
+                />
+                <span
+                  v-if="item.status === 'failed'"
+                  class="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-danger/15 text-caption text-danger"
+                  :title="item.error ?? undefined"
+                >
+                  <Icon :as="TriangleAlert" size="inline" />
+                  没传上
+                </span>
+              </div>
+              <button
+                v-if="item.status !== 'uploading'"
+                type="button"
+                title="移除这张图"
+                class="absolute -right-1.5 -top-1.5 hidden size-5 items-center justify-center rounded-full bg-label text-white shadow-control group-hover:flex focus-visible:flex focus-visible:outline-none"
+                @click="removeImage(item)"
+              >
+                <Icon :as="X" size="inline" />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              class="flex size-20 flex-col items-center justify-center gap-1 rounded-panel border border-dashed border-separator text-label-secondary transition-colors duration-100 ease-apple hover:border-accent/60 hover:text-accent focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-accent/35"
+              :disabled="saving"
+              @click="fileInput?.click()"
+            >
+              <Icon :as="ImagePlus" size="large" />
+              <span class="text-caption">添加图片</span>
+            </button>
+
+            <input
+              ref="fileInput"
+              type="file"
+              :accept="ACCEPTED_IMAGE_TYPES.join(',')"
+              multiple
+              class="hidden"
+              @change="onPick"
+            />
+          </div>
+          <span v-if="pending.length > 0" class="tnum mt-1 block text-caption text-label-tertiary">
+            已选 {{ pending.length }} 张 · {{ formatBytes(pendingBytes) }}
+          </span>
+        </div>
       </DialogField>
 
       <DialogField label="优先级" hint="数值越大越先派发">

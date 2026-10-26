@@ -8,7 +8,7 @@ import { tv } from '@/components/ui/tv'
  *
  * 几点是照着 NSAlert 定的，不是拍脑袋：
  *   - 文字左对齐。macOS 的警告框不是 iOS 那种居中弹窗，标题与说明都靠左。
- *   - 图标（若给）在左上角，32px，不与标题同行。
+ *   - 图标（若给）在标题左侧，与标题同一行，作为紧凑的上下文标识。
  *   - 按钮在右下角，并且「取消在左、默认动作在右」。破坏性动作才用红色实心。
  */
 export const dialogPanelVariants = tv({
@@ -23,6 +23,10 @@ export const dialogPanelVariants = tv({
     maxHeight: {
       default: 'max-h-[calc(100dvh-24px)]',
       compact: 'max-h-[80dvh]',
+    },
+    height: {
+      auto: '',
+      fixed: 'h-[760px]',
     },
     fullscreen: {
       true: 'h-dvh w-screen max-h-none max-w-none rounded-none',
@@ -60,6 +64,7 @@ export const dialogPanelVariants = tv({
     layout: 'alert',
     size: 'regular',
     maxHeight: 'default',
+    height: 'auto',
     fullscreen: false,
   },
 })

@@ -11,13 +11,14 @@ deploy/remote/    公网服务器：构建并部署无状态中继与静态前�
 
 | 脚本 | 作用 |
 |---|---|
-| `start-all.sh` | 一键起后端 + 前端（等价于依次跑下面两个） |
+| `start-all.sh` | 一键起后端 + 前端 + 设备代理 + 已配置的中继连接器 |
 | `start-backend.sh` | 只起后端。**已在监听就不重复起**，直接返回 |
 | `start-frontend.sh` | 只起前端（vite dev）。缺 `node_modules` 时先 `npm install` |
 | `start-relay.sh` | 起公网中继连接器；未配置 `~/.regent/relay-connector.env` 时安全跳过 |
 | `connect-relay.sh` | 配对中继：读取服务器共享密钥 → 写 `~/.regent/relay-connector.env` → 重启连接器 → 探活 |
 | `backend-agent.sh` | 把后端交给 launchd 托管（`install` / `uninstall` / `restart` / `status`），开机自启、崩溃重启 |
 | `relay-agent.sh` | 把连接器交给 launchd 托管（`install` / `uninstall` / `restart` / `status`），开机自启、崩溃自动重启 |
+| `device-agent.sh` | 把设备代理交给 launchd 托管，开机自启、崩溃自动重启 |
 | `stop-all.sh` | 按 pid 停，pid 文件丢了就按端口兜底 |
 | `restart.sh` | 构建后端 → `stop-all` → 等 2 秒 → `start-all` |
 | `status.sh` | 端口探活 + 健康检查，打印两行状态 |
@@ -27,6 +28,7 @@ deploy/remote/    公网服务器：构建并部署无状态中继与静态前�
 ./deploy/local/status.sh        # 看
 ./deploy/local/restart.sh       # 重新构建并重启（前端 vite 自己热更新）
 ./deploy/local/backend-agent.sh install   # 可选：后端交给 launchd 常驻
+./deploy/local/device-agent.sh install    # 设备代理常驻，浏览器可随时检测本机 Codex
 ./deploy/local/stop-all.sh      # 停
 ```
 
@@ -100,8 +102,8 @@ deploy/remote/    公网服务器：构建并部署无状态中继与静态前�
 
 - 显式传入 `-H/--host`（或设置 `REGENT_SERVER_IP`）时，委托
   `deploy/remote/deploy-local.sh` 完成本地构建、上传和公网部署。
-- 不传 `-H` 且由 Regent 注入 `REGENT_DEPLOY_DIRECTORY` 时，直接在当前服务器执行远端部署，
-  不会再建立 SSH 连接。
+- 不传 `-H` 且由 Regent 注入 `REGENT_DEPLOY_DIRECTORY` 时，平台会先自动创建并进入远程目录，
+  再在当前服务器执行远端部署，不会再建立 SSH 连接。
 
 也支持直接在命令行传入连接信息，且兼容 `sh` 启动：
 
@@ -175,6 +177,24 @@ Nginx 是自动配置的（第 7/7 步）：脚本探测服务器上的 `nginx.c
 只想重配连接器、不重新部署前端与中继时，单独跑 `./deploy/local/connect-relay.sh`。
 部署机不是跑 Regent 的那台机器时，设 `REGENT_SKIP_LOCAL_CONNECTOR=1` 跳过本机配对。
 
+### HTTPS 子路径
+
+浏览器只在安全上下文中允许读取当前电脑的 `127.0.0.1` 设备代理。公网使用时，可在
+`~/.regent/regent-public.env` 增加两项，让部署脚本和发布中心始终按同一入口构建：
+
+```bash
+REGENT_WEB_BASE_PATH=/regent/
+REGENT_PUBLIC_URL=https://你的域名/regent/
+```
+
+Nginx 需把 `/regent/api/` 转发到 `127.0.0.1:8788`，把其余 `/regent/` 指向同一份
+`frontend/dist`，并保留 SPA 回退到 `/regent/index.html`。部署脚本会同时生成
+`frontend/dist-root`，让旧版桌面客户端保存的 `18787` 根路径入口继续可用；
+`/api/relay/**` 和 `/health` 必须继续直连中继，供本机连接器使用。
+浏览器首次检测本机 Codex 时会请求“本地网络访问”权限；允许后同一站点后续可自动检测。
+可直接复用 `deploy/remote/nginx/regent-subpath.conf`，其中已显式拒绝把
+`/regent/api/agent/**` 暴露到公网。
+
 安装目录默认为 `/root/app/regent-relay`，可用 `REGENT_REMOTE_BASE` 覆盖。设置页的
 「安装中继器」也调用同一脚本；密码只在本机子进程环境中使用，不写数据库、不返回浏览器。
 Web 安装要求 Regent 进程能访问源码仓库、Maven、Node/npm 与部署脚本；可通过
@@ -182,3 +202,7 @@ Web 安装要求 Regent 进程能访问源码仓库、Maven、Node/npm 与部署
 
 前端 `dist/` 是静态产物，没有 Node 运行时依赖；中继由 systemd 托管，开机自启、崩溃重试。
 `SystemMaxUse` 之类的日志轮转不在脚本里，服务器上按需配 `journald` 即可。
+
+桌面客户端的 `~/.regent/downloads` 还会包含一个 Runtime 增量包。发布清单中的 `runtime`
+指向该文件并附带 SHA-256 与 Ed25519 签名；`deploy.sh` 会连同完整安装包和 `latest.json`
+一起同步。普通桌面更新只需同步几十 KB，完整 DMG/ZIP 仅在 Shell 升级时重新发布。

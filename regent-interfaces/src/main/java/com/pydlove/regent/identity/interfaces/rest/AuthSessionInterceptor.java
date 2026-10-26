@@ -2,6 +2,7 @@ package com.pydlove.regent.identity.interfaces.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pydlove.regent.identity.application.command.AuthService;
+import com.pydlove.regent.identity.application.command.MobileAuthService;
 import com.pydlove.regent.identity.application.query.AuthenticatedUser;
 import com.pydlove.regent.interfaces.dto.ApiError;
 import jakarta.servlet.http.Cookie;
@@ -23,10 +24,14 @@ public class AuthSessionInterceptor implements HandlerInterceptor {
             AuthSessionInterceptor.class.getName() + ".currentUser";
 
     private final AuthService authService;
+    private final MobileAuthService mobileAuthService;
     private final ObjectMapper objectMapper;
 
-    public AuthSessionInterceptor(AuthService authService, ObjectMapper objectMapper) {
+    public AuthSessionInterceptor(AuthService authService,
+                                  MobileAuthService mobileAuthService,
+                                  ObjectMapper objectMapper) {
         this.authService = authService;
+        this.mobileAuthService = mobileAuthService;
         this.objectMapper = objectMapper;
     }
 
@@ -34,8 +39,25 @@ public class AuthSessionInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request,
                              HttpServletResponse response,
                              Object handler) throws IOException {
-        AuthenticatedUser user = authService.authenticate(readToken(request)).orElse(null);
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())
+                && request.getHeader("Origin") != null
+                && request.getHeader("Access-Control-Request-Method") != null) {
+            // 预检本身没有 Bearer 令牌；来源是否合法交给 Spring 的 CORS 白名单判断。
+            return true;
+        }
+        String token = readToken(request);
+        AuthenticatedUser user = mobileAuthService.authenticate(token)
+                .or(() -> authService.authenticate(token))
+                .orElse(null);
         if (user != null) {
+            if (user.mustChangePassword() && !passwordChangeAllowed(request)) {
+                response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+                response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                objectMapper.writeValue(response.getWriter(),
+                        ApiError.of("PASSWORD_CHANGE_REQUIRED", "请先修改初始密码"));
+                return false;
+            }
             request.setAttribute(CURRENT_USER_ATTRIBUTE, user);
             return true;
         }
@@ -46,7 +68,7 @@ public class AuthSessionInterceptor implements HandlerInterceptor {
         return false;
     }
 
-    static String readToken(HttpServletRequest request) {
+    public static String readToken(HttpServletRequest request) {
         String authorization = request.getHeader("Authorization");
         if (authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
             String bearer = authorization.substring(7).trim();
@@ -70,5 +92,12 @@ public class AuthSessionInterceptor implements HandlerInterceptor {
             return user;
         }
         throw new IllegalStateException("登录守卫没有提供当前用户");
+    }
+
+    private static boolean passwordChangeAllowed(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return "/api/auth/me".equals(path)
+                || "/api/auth/logout".equals(path)
+                || "/api/auth/change-password".equals(path);
     }
 }

@@ -2,6 +2,9 @@ package com.pydlove.regent.execution.application.command;
 
 import com.pydlove.regent.project.domain.model.ProjectId;
 
+import java.util.List;
+import com.pydlove.regent.execution.domain.model.CodeStandardId;
+
 /**
  * 人工录入任务的入参。
  *
@@ -15,5 +18,14 @@ import com.pydlove.regent.project.domain.model.ProjectId;
 public record CreateTaskCommand(
         ProjectId projectId,
         String prompt,
-        int priority) {
+        int priority,
+        List<CodeStandardId> codeStandardIds) {
+
+    public CreateTaskCommand {
+        codeStandardIds = codeStandardIds == null ? null : List.copyOf(codeStandardIds);
+    }
+
+    public CreateTaskCommand(ProjectId projectId, String prompt, int priority) {
+        this(projectId, prompt, priority, null);
+    }
 }

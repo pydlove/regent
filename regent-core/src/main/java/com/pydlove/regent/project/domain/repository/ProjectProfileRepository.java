@@ -1,6 +1,7 @@
 package com.pydlove.regent.project.domain.repository;
 
 import com.pydlove.regent.identity.domain.model.UserId;
+import com.pydlove.regent.organization.domain.model.OrganizationId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 
 import java.util.List;
@@ -42,5 +43,20 @@ public interface ProjectProfileRepository {
     /** 当前账号可见的项目。 */
     default List<ProjectProfile> findAll(UserId ownerId) {
         return findAll();
+    }
+
+    default List<ProjectProfile> findAll(UserId ownerId, OrganizationId organizationId) {
+        return findAll(ownerId).stream()
+                .filter(profile -> organizationId == null
+                        || organizationId.equals(profile.organizationId()))
+                .toList();
+    }
+
+    default List<ProjectProfile> findByOrganization(OrganizationId organizationId) {
+        return List.of();
+    }
+
+    default long countByOrganization(OrganizationId organizationId) {
+        return 0;
     }
 }

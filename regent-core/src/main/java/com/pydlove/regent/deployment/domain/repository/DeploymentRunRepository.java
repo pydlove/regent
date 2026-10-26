@@ -19,6 +19,12 @@ public interface DeploymentRunRepository {
 
     List<DeploymentRun> findByDeployment(DeploymentId deploymentId, int limit);
 
+    default Optional<DeploymentRun> findActiveByDeployment(DeploymentId deploymentId) {
+        return findByDeployment(deploymentId, 10).stream()
+                .filter(run -> run.getStatus().isActive())
+                .findFirst();
+    }
+
     List<DeploymentRun> findLatestByDeploymentIds(List<DeploymentId> deploymentIds);
 
     List<DeploymentRun> findActive();

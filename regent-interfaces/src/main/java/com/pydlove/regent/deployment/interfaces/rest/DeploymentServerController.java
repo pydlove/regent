@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /** 可复用部署服务器接口。 */
@@ -63,8 +64,8 @@ public class DeploymentServerController {
     public DeploymentServerResponse create(@RequestBody DeploymentServerSaveRequest request,
                                            HttpServletRequest servletRequest) {
         UserId ownerId = currentUser(servletRequest);
-        requireProject(request.projectId(), ownerId);
-        var created = commandService.create(toCommand(request));
+        List<ProjectId> projectIds = requireProjects(request.projectIds(), ownerId);
+        var created = commandService.create(toCommand(request, projectIds));
         return DeploymentServerResponse.from(queryService.get(created.getId(), ownerId));
     }
 
@@ -74,8 +75,9 @@ public class DeploymentServerController {
                                            HttpServletRequest servletRequest) {
         UserId ownerId = currentUser(servletRequest);
         queryService.get(DeploymentServerId.of(id), ownerId);
-        requireProject(request.projectId(), ownerId);
-        var updated = commandService.update(DeploymentServerId.of(id), toCommand(request));
+        List<ProjectId> projectIds = requireProjects(request.projectIds(), ownerId);
+        var updated = commandService.update(
+                DeploymentServerId.of(id), toCommand(request, projectIds));
         return DeploymentServerResponse.from(queryService.get(updated.getId(), ownerId));
     }
 
@@ -86,11 +88,19 @@ public class DeploymentServerController {
         return ResponseEntity.noContent().build();
     }
 
-    private void requireProject(Long projectId, UserId ownerId) {
-        if (projectId == null) {
-            throw new IllegalArgumentException("缺少 projectId");
+    private List<ProjectId> requireProjects(List<Long> projectIds, UserId ownerId) {
+        if (projectIds == null || projectIds.isEmpty()) {
+            throw new IllegalArgumentException("请至少选择一个归属项目");
         }
-        projectAccessService.require(ProjectId.of(projectId), ownerId);
+        LinkedHashSet<ProjectId> unique = new LinkedHashSet<>();
+        for (Long projectId : projectIds) {
+            if (projectId == null) {
+                throw new IllegalArgumentException("归属项目不能为空");
+            }
+            unique.add(ProjectId.of(projectId));
+        }
+        unique.forEach(projectId -> projectAccessService.require(projectId, ownerId));
+        return List.copyOf(unique);
     }
 
     private static UserId currentUser(HttpServletRequest request) {
@@ -98,15 +108,13 @@ public class DeploymentServerController {
         return UserId.of(user.id());
     }
 
-    private static SaveDeploymentServerCommand toCommand(DeploymentServerSaveRequest request) {
-        if (request.projectId() == null) {
-            throw new IllegalArgumentException("缺少 projectId");
-        }
+    private static SaveDeploymentServerCommand toCommand(DeploymentServerSaveRequest request,
+                                                         List<ProjectId> projectIds) {
         if (request.port() == null) {
             throw new IllegalArgumentException("缺少 port");
         }
         return new SaveDeploymentServerCommand(
-                ProjectId.of(request.projectId()),
+                projectIds,
                 request.name(),
                 request.host(),
                 request.port(),

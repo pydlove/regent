@@ -9,5 +9,13 @@ package com.pydlove.regent.execution.interfaces.dto;
  * <p>{@code projectCode} 是「把地址和项目交给执行者」这句话的落点：人只说得出项目标识
  * （{@code regent}），说不出内部 ID。为空表示不限项目，由平台在全部候选里挑。
  */
-public record AgentClaimRequest(String executor, String sessionId, String projectCode, Long taskId) {
+public record AgentClaimRequest(String executor,
+                                String sessionId,
+                                String projectCode,
+                                Long taskId,
+                                String deviceId) {
+
+    public AgentClaimRequest(String executor, String sessionId, String projectCode, Long taskId) {
+        this(executor, sessionId, projectCode, taskId, null);
+    }
 }

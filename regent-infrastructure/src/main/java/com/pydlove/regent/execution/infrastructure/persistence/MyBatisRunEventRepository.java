@@ -25,9 +25,11 @@ public class MyBatisRunEventRepository implements RunEventRepository {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final RunEventMapper runEventMapper;
+    private final TaskRunMapper taskRunMapper;
 
-    public MyBatisRunEventRepository(RunEventMapper runEventMapper) {
+    public MyBatisRunEventRepository(RunEventMapper runEventMapper, TaskRunMapper taskRunMapper) {
         this.runEventMapper = runEventMapper;
+        this.taskRunMapper = taskRunMapper;
     }
 
     @Override
@@ -40,6 +42,11 @@ public class MyBatisRunEventRepository implements RunEventRepository {
         data.setOccurredAt(LocalDateTime.ofInstant(event.occurredAt(), ZoneOffset.UTC));
         data.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
         runEventMapper.insert(data);
+        if (event.occurredAt() != null) {
+            taskRunMapper.updateLastEvent(
+                    runId.value(),
+                    LocalDateTime.ofInstant(event.occurredAt(), ZoneOffset.UTC));
+        }
     }
 
     @Override

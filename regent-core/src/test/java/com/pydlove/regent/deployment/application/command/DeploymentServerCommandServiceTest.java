@@ -8,6 +8,7 @@ import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.shared.domain.DomainException;
+import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.domain.TransactionRunner;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 import com.pydlove.regent.support.DeploymentFakes;
@@ -44,6 +45,9 @@ class DeploymentServerCommandServiceTest {
         projects.put(new ProjectProfile(
                 ProjectId.of(7L), "regent", "Regent", "/tmp/regent",
                 DecisionLevel.L1, true));
+        projects.put(new ProjectProfile(
+                ProjectId.of(8L), "console", "Console", "/tmp/console",
+                DecisionLevel.L1, true));
         service = new DeploymentServerCommandService(
                 servers, deployments, runs, projects, credentials, new DirectTransactions());
     }
@@ -56,6 +60,38 @@ class DeploymentServerCommandServiceTest {
                 DeploymentAuthType.PASSWORD, "s3cret"));
 
         assertEquals("s3cret", credentials.password(server.getId()));
+    }
+
+    @Test
+    @DisplayName("新建和编辑服务器时可维护多个归属项目")
+    void maintainsMultipleProjects() {
+        DeploymentServer server = service.create(new SaveDeploymentServerCommand(
+                List.of(ProjectId.of(7L), ProjectId.of(8L)),
+                "共享服务器", "api.example.com", 22, "root",
+                DeploymentAuthType.KEY, null, null));
+
+        assertEquals(
+                List.of(ProjectId.of(7L), ProjectId.of(8L)),
+                server.getProjectIds());
+
+        DeploymentServer updated = service.update(
+                server.getId(),
+                new SaveDeploymentServerCommand(
+                        List.of(ProjectId.of(8L)),
+                        "共享服务器", "api.example.com", 22, "root",
+                        DeploymentAuthType.KEY, null, null));
+
+        assertEquals(List.of(ProjectId.of(8L)), updated.getProjectIds());
+    }
+
+    @Test
+    @DisplayName("服务器归属项目必须全部存在")
+    void rejectsUnknownProject() {
+        assertThrows(EntityNotFoundException.class, () -> service.create(
+                new SaveDeploymentServerCommand(
+                        List.of(ProjectId.of(7L), ProjectId.of(99L)),
+                        "共享服务器", "api.example.com", 22, "root",
+                        DeploymentAuthType.KEY, null, null)));
     }
 
     @Test

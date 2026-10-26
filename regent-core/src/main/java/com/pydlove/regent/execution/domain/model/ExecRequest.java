@@ -99,4 +99,10 @@ public record ExecRequest(
     public boolean isReadOnly() {
         return accessMode == AgentAccessMode.READ_ONLY;
     }
+
+    /** 清掉失效的续跑键，其他执行上下文原样保留。 */
+    public ExecRequest withResumeThreadId(String threadId) {
+        return new ExecRequest(projectId, projectPath, prompt, threadId, timeout, imagePaths,
+                environmentVariables, branchName, accessMode);
+    }
 }

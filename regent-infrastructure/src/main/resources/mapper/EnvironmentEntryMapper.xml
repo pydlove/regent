@@ -37,7 +37,17 @@
         SELECT <include refid="columns"/>
         FROM environment_entry
         WHERE deleted = 0
-          AND (project_id IS NULL OR project_id = #{projectId})
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM environment_entry_project ep
+              WHERE ep.environment_id = environment_entry.id
+            )
+            OR EXISTS (
+              SELECT 1 FROM environment_entry_project ep
+              WHERE ep.environment_id = environment_entry.id
+                AND ep.project_id = #{projectId}
+            )
+          )
         ORDER BY project_id IS NOT NULL, item_key, id
     </select>
 
@@ -47,7 +57,17 @@
         FROM environment_entry
         WHERE user_id = #{userId}
           AND deleted = 0
-          AND (project_id IS NULL OR project_id = #{projectId})
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM environment_entry_project ep
+              WHERE ep.environment_id = environment_entry.id
+            )
+            OR EXISTS (
+              SELECT 1 FROM environment_entry_project ep
+              WHERE ep.environment_id = environment_entry.id
+                AND ep.project_id = #{projectId}
+            )
+          )
         ORDER BY project_id IS NOT NULL, item_key, id
     </select>
 
@@ -56,14 +76,6 @@
         FROM environment_entry
         WHERE deleted = 0
           AND item_key = #{itemKey}
-        <choose>
-            <when test="projectId == null">
-                AND project_id IS NULL
-            </when>
-            <otherwise>
-                AND project_id = #{projectId}
-            </otherwise>
-        </choose>
         <if test="excludingId != null">
             AND id != #{excludingId}
         </if>
@@ -75,18 +87,33 @@
         WHERE user_id = #{userId}
           AND deleted = 0
           AND item_key = #{itemKey}
-        <choose>
-            <when test="projectId == null">
-                AND project_id IS NULL
-            </when>
-            <otherwise>
-                AND project_id = #{projectId}
-            </otherwise>
-        </choose>
         <if test="excludingId != null">
             AND id != #{excludingId}
         </if>
     </select>
+
+    <select id="selectProjectLinks"
+            resultType="com.pydlove.regent.project.infrastructure.persistence.EnvironmentProjectRow">
+        SELECT environment_id, project_id
+        FROM environment_entry_project
+        WHERE environment_id IN
+        <foreach collection="environmentIds" item="environmentId" open="(" separator="," close=")">
+            #{environmentId}
+        </foreach>
+        ORDER BY environment_id, project_id
+    </select>
+
+    <delete id="deleteProjectLinks">
+        DELETE FROM environment_entry_project WHERE environment_id = #{environmentId}
+    </delete>
+
+    <insert id="insertProjectLinks">
+        INSERT INTO environment_entry_project (environment_id, project_id, created_at)
+        VALUES
+        <foreach collection="projectIds" item="projectId" separator=",">
+            (#{environmentId}, #{projectId}, UTC_TIMESTAMP(3))
+        </foreach>
+    </insert>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO environment_entry (user_id, project_id, item_key, item_value, tags, description, secret,

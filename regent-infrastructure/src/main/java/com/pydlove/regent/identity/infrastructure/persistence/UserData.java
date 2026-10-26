@@ -12,6 +12,7 @@ public class UserData {
     private String displayName;
     private String email;
     private String passwordHash;
+    private Boolean mustChangePassword;
     private String avatarFilename;
     private String avatarContentType;
     private String avatarStoragePath;

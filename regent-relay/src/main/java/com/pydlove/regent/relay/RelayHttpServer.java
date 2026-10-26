@@ -181,10 +181,7 @@ public final class RelayHttpServer implements AutoCloseable {
             sendJson(exchange, 400, "RELAY_BAD_REQUEST", "请求路径不合法");
             return;
         }
-        if (!"GET".equals(exchange.getRequestMethod())
-            && !"HEAD".equals(exchange.getRequestMethod())
-            && !"OPTIONS".equals(exchange.getRequestMethod())
-            && !"1".equals(exchange.getRequestHeaders().getFirst(RelayHeaders.REQUEST_MARKER_NAME))) {
+        if (!RelayHeaders.acceptsWrite(exchange.getRequestMethod(), exchange.getRequestHeaders())) {
             sendJson(exchange, 403, "RELAY_CSRF_REJECTED", "写操作缺少中继请求标记");
             return;
         }
@@ -200,12 +197,19 @@ public final class RelayHttpServer implements AutoCloseable {
         }
 
         byte[] body = readBody(exchange, config.maxBodyBytes());
+        Map<String, String> forwardedHeaders = new java.util.LinkedHashMap<>(
+            RelayHeaders.filterRequest(exchange.getRequestHeaders())
+        );
+        if (RelayHeaders.isSameOrigin(exchange.getRequestHeaders())) {
+            // 同源请求不需要 Spring CORS；保留 Origin 会被后端当成跨域来源拒绝。
+            forwardedHeaders.remove("origin");
+        }
         RelayRequest request;
         try {
             request = registry.enqueue(
                 exchange.getRequestMethod(),
                 pathAndQuery,
-                RelayHeaders.filterRequest(exchange.getRequestHeaders()),
+                forwardedHeaders,
                 body
             );
         } catch (RelayRequestRegistry.RelayOfflineException exception) {

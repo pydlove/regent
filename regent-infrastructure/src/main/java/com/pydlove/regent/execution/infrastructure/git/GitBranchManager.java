@@ -41,6 +41,11 @@ public class GitBranchManager implements BranchManager {
     }
 
     @Override
+    public Optional<String> currentCommit(String projectPath) {
+        return repository(projectPath).flatMap(this::currentCommit);
+    }
+
+    @Override
     public Optional<String> createRequestedFeature(String projectPath, TaskId taskId, String requestedName) {
         Optional<Path> repository = repository(projectPath);
         if (repository.isEmpty()) {
@@ -110,6 +115,15 @@ public class GitBranchManager implements BranchManager {
         }
         String branch = result.output().strip();
         return branch.isEmpty() ? Optional.empty() : Optional.of(branch);
+    }
+
+    private Optional<String> currentCommit(Path workTree) {
+        ProcessResult result = run(workTree, "rev-parse", "--verify", "HEAD");
+        if (result.exitCode() != 0) {
+            return Optional.empty();
+        }
+        String commit = result.output().strip();
+        return commit.matches("[0-9a-f]{40,64}") ? Optional.of(commit) : Optional.empty();
     }
 
     private boolean branchExists(Path workTree, String branch) {

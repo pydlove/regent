@@ -3,11 +3,17 @@ package com.pydlove.regent.boot.config;
 import com.pydlove.regent.bug.domain.repository.BugRepository;
 import com.pydlove.regent.execution.application.command.AgentRunService;
 import com.pydlove.regent.execution.application.command.BranchProvisioningService;
+import com.pydlove.regent.execution.application.command.CodeStandardService;
 import com.pydlove.regent.execution.application.command.ExecutionRecoveryService;
 import com.pydlove.regent.execution.application.command.ExecutionSettingsService;
+import com.pydlove.regent.execution.application.command.DevicePresenceService;
+import com.pydlove.regent.execution.application.command.DeviceRestartRecoveryService;
+import com.pydlove.regent.execution.application.command.DeviceRestartRecoveryHandler;
 import com.pydlove.regent.execution.application.command.ExecutorInstallService;
 import com.pydlove.regent.execution.application.command.RunSettlementService;
 import com.pydlove.regent.execution.application.command.TaskAttachmentService;
+import com.pydlove.regent.execution.application.command.TaskDocumentService;
+import com.pydlove.regent.execution.application.command.TaskCodeStandardService;
 import com.pydlove.regent.execution.application.command.TaskDispatchService;
 import com.pydlove.regent.execution.application.command.TaskRunService;
 import com.pydlove.regent.execution.application.query.AgentContractService;
@@ -21,12 +27,19 @@ import com.pydlove.regent.execution.domain.port.BranchManager;
 import com.pydlove.regent.execution.domain.repository.RunEventRepository;
 import com.pydlove.regent.execution.domain.repository.TaskAdjustmentRepository;
 import com.pydlove.regent.execution.domain.repository.TaskAttachmentRepository;
+import com.pydlove.regent.execution.domain.repository.TaskDocumentRepository;
+import com.pydlove.regent.execution.domain.repository.LibraryDocumentRepository;
+import com.pydlove.regent.execution.domain.repository.CodeStandardRepository;
+import com.pydlove.regent.execution.domain.repository.CodeStandardVersionRepository;
+import com.pydlove.regent.execution.domain.repository.TaskCodeStandardRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRepository;
 import com.pydlove.regent.execution.domain.repository.TaskRunRepository;
 import com.pydlove.regent.execution.domain.repository.ExecutionSettingsRepository;
+import com.pydlove.regent.execution.domain.repository.ExecutionDeviceRepository;
 import com.pydlove.regent.execution.domain.service.ExecutionConcurrencyGate;
 import com.pydlove.regent.execution.infrastructure.agent.ClasspathExecutorContract;
 import com.pydlove.regent.shared.domain.port.AttachmentStorage;
+import com.pydlove.regent.shared.domain.port.TaskStandardBinder;
 import com.pydlove.regent.shared.infrastructure.attachment.LocalAttachmentStorage;
 import com.pydlove.regent.execution.infrastructure.codex.CodexCliAdapter;
 import com.pydlove.regent.execution.infrastructure.codex.CodexInstaller;
@@ -38,6 +51,7 @@ import com.pydlove.regent.governance.domain.repository.DecisionRepository;
 import com.pydlove.regent.plugin.domain.repository.TaskPluginRepository;
 import com.pydlove.regent.project.domain.repository.EnvironmentEntryRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
+import com.pydlove.regent.review.domain.port.ReviewSnapshotScheduler;
 import com.pydlove.regent.shared.domain.TransactionRunner;
 import com.pydlove.regent.testing.domain.port.TestCaseExecutionScheduler;
 import org.springframework.beans.factory.annotation.Value;
@@ -176,6 +190,55 @@ public class ExecutionConfig {
         return new TaskAttachmentService(taskRepository, attachmentRepository, attachmentStorage, maxBytes);
     }
 
+    @Bean
+    public TaskDocumentService taskDocumentService(
+            TaskRepository taskRepository,
+            TaskDocumentRepository taskDocumentRepository,
+            LibraryDocumentRepository libraryDocumentRepository,
+            ProjectProfileRepository projectProfileRepository,
+            AttachmentStorage attachmentStorage,
+            TransactionRunner transactionRunner,
+            @Value("${regent.documents.max-bytes:26214400}") long maxBytes) {
+        return new TaskDocumentService(
+                taskRepository, taskDocumentRepository, libraryDocumentRepository,
+                projectProfileRepository, attachmentStorage, transactionRunner, maxBytes);
+    }
+
+    @Bean
+    public CodeStandardService codeStandardService(
+            ProjectProfileRepository projectProfileRepository,
+            CodeStandardRepository codeStandardRepository,
+            CodeStandardVersionRepository codeStandardVersionRepository,
+            LibraryDocumentRepository libraryDocumentRepository,
+            AttachmentStorage attachmentStorage,
+            TransactionRunner transactionRunner,
+            @Value("${regent.code-standards.max-bytes:524288}") long maxBytes) {
+        return new CodeStandardService(
+                projectProfileRepository, codeStandardRepository, codeStandardVersionRepository,
+                libraryDocumentRepository, attachmentStorage, transactionRunner, maxBytes);
+    }
+
+    @Bean
+    public TaskCodeStandardService taskCodeStandardService(
+            TaskRepository taskRepository,
+            CodeStandardRepository codeStandardRepository,
+            CodeStandardVersionRepository codeStandardVersionRepository,
+            TaskCodeStandardRepository taskCodeStandardRepository,
+            AttachmentStorage attachmentStorage,
+            @Value("${regent.code-standards.max-prompt-bytes:1048576}") long maxPromptBytes) {
+        return new TaskCodeStandardService(
+                taskRepository, codeStandardRepository, codeStandardVersionRepository,
+                taskCodeStandardRepository, attachmentStorage, maxPromptBytes);
+    }
+
+    @Bean
+    public TaskStandardBinder taskStandardBinder(TaskCodeStandardService taskCodeStandardService) {
+        return (taskId, projectId) -> taskCodeStandardService.snapshot(
+                com.pydlove.regent.execution.domain.model.TaskId.of(taskId),
+                com.pydlove.regent.project.domain.model.ProjectId.of(projectId),
+                null);
+    }
+
     /**
      * 出参与契约的文本提供者。内部执行器与外部执行者读到的是同一份 —— 这正是放一个 bean 的理由。
      */
@@ -196,10 +259,12 @@ public class ExecutionConfig {
                                                      DecisionRaiseService decisionRaiseService,
                                                      BugRepository bugRepository,
                                                      TestCaseExecutionScheduler testCaseExecutionScheduler,
+                                                     ReviewSnapshotScheduler reviewSnapshotScheduler,
                                                      TransactionRunner transactionRunner) {
         return new RunSettlementService(
                 taskRepository, taskRunRepository, adjustmentRepository, decisionRepository,
-                decisionRaiseService, bugRepository, testCaseExecutionScheduler, transactionRunner);
+                decisionRaiseService, bugRepository, testCaseExecutionScheduler,
+                reviewSnapshotScheduler, transactionRunner);
     }
 
     @Bean
@@ -207,6 +272,8 @@ public class ExecutionConfig {
                                          TaskRunRepository taskRunRepository,
                                          RunEventRepository runEventRepository,
                                          TaskAttachmentRepository attachmentRepository,
+                                         TaskDocumentRepository taskDocumentRepository,
+                                         TaskCodeStandardService taskCodeStandardService,
                                          ProjectProfileRepository projectProfileRepository,
                                          EnvironmentEntryRepository environmentEntryRepository,
                                          TaskPluginRepository taskPluginRepository,
@@ -214,8 +281,10 @@ public class ExecutionConfig {
                                          AgentExecutor agentExecutor,
                                          BranchManager branchManager,
                                          @Value("${regent.execution.timeout:PT30M}") Duration timeout) {
-        return new TaskRunService(taskRepository, taskRunRepository, runEventRepository, attachmentRepository,
+        return new TaskRunService(taskRepository, taskRunRepository, runEventRepository,
+                attachmentRepository, taskDocumentRepository,
                 projectProfileRepository, environmentEntryRepository, taskPluginRepository,
+                taskCodeStandardService,
                 runSettlementService, agentExecutor, branchManager, timeout);
     }
 
@@ -228,8 +297,11 @@ public class ExecutionConfig {
     @Bean
     public AgentRunService agentRunService(TaskRepository taskRepository,
                                            TaskRunRepository taskRunRepository,
+                                           ExecutionDeviceRepository executionDeviceRepository,
                                            RunEventRepository runEventRepository,
                                            TaskAttachmentRepository attachmentRepository,
+                                           TaskDocumentRepository taskDocumentRepository,
+                                           TaskCodeStandardService taskCodeStandardService,
                                            ProjectProfileRepository projectProfileRepository,
                                            EnvironmentEntryRepository environmentEntryRepository,
                                            TaskPluginRepository taskPluginRepository,
@@ -239,13 +311,36 @@ public class ExecutionConfig {
                                            RunSettlementService runSettlementService,
                                            ExecutorContract executorContract,
                                            ExecutionConcurrencyGate executionConcurrencyGate,
+                                           TransactionRunner transactionRunner,
+                                           DeviceRestartRecoveryService deviceRestartRecoveryService,
                                            @Value("${regent.agent.lease-seconds:900}") long leaseSeconds,
                                            @Value("${regent.agent.contract-url:http://127.0.0.1:8787/api/agent/contract}")
                                            String contractUrl) {
-        return new AgentRunService(taskRepository, taskRunRepository, runEventRepository, attachmentRepository,
+        return new AgentRunService(taskRepository, taskRunRepository, executionDeviceRepository,
+                runEventRepository, attachmentRepository, taskDocumentRepository,
                 projectProfileRepository, environmentEntryRepository, taskPluginRepository,
                 decisionRepository, branchManager, branchProvisioningService, runSettlementService,
-                executorContract, executionConcurrencyGate, Duration.ofSeconds(leaseSeconds), contractUrl);
+                executorContract, executionConcurrencyGate, transactionRunner,
+                deviceRestartRecoveryService,
+                Duration.ofSeconds(leaseSeconds), contractUrl, taskCodeStandardService);
+    }
+
+    @Bean
+    public DevicePresenceService devicePresenceService(
+            ExecutionDeviceRepository executionDeviceRepository,
+            TaskRepository taskRepository,
+            DeviceRestartRecoveryHandler deviceRestartRecoveryHandler) {
+        return new DevicePresenceService(
+                executionDeviceRepository, taskRepository, deviceRestartRecoveryHandler);
+    }
+
+    @Bean
+    public DeviceRestartRecoveryService deviceRestartRecoveryService(
+            TaskRepository taskRepository,
+            TaskRunRepository taskRunRepository,
+            TransactionRunner transactionRunner) {
+        return new DeviceRestartRecoveryService(
+                taskRepository, taskRunRepository, transactionRunner);
     }
 
     @Bean
@@ -259,11 +354,12 @@ public class ExecutionConfig {
                                                    BranchManager branchManager,
                                                    BranchProvisioningService branchProvisioningService,
                                                    TaskRunService taskRunService,
+                                                   TaskCodeStandardService taskCodeStandardService,
                                                    ExecutorService executionWorkers,
                                                    ExecutionConcurrencyGate executionConcurrencyGate,
                                                    TransactionRunner transactionRunner) {
         return new TaskDispatchService(taskRepository, projectProfileRepository, branchManager,
                 branchProvisioningService, taskRunService, executionWorkers, executionConcurrencyGate,
-                transactionRunner);
+                transactionRunner, taskCodeStandardService);
     }
 }

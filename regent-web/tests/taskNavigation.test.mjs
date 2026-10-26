@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parseTaskIdQuery } from '../src/utils/taskNavigation.ts'
+import { parseProjectIdQuery, parseTaskIdQuery } from '../src/utils/taskNavigation.ts'
 
 test('解析合法任务号与路由数组参数', () => {
   assert.equal(parseTaskIdQuery('126'), 126)
@@ -18,4 +18,11 @@ test('拒绝空值、零、负数和带杂质的任务号', () => {
   assert.equal(parseTaskIdQuery('-1'), null)
   assert.equal(parseTaskIdQuery('12a'), null)
   assert.equal(parseTaskIdQuery('1.5'), null)
+})
+
+test('项目号沿用同一套正整数校验', () => {
+  assert.equal(parseProjectIdQuery('7'), 7)
+  assert.equal(parseProjectIdQuery(['12', '8']), 12)
+  assert.equal(parseProjectIdQuery('0'), null)
+  assert.equal(parseProjectIdQuery('project-7'), null)
 })

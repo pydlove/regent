@@ -23,16 +23,28 @@ class ReleaseControllerTest {
     @DisplayName("读取 latest.json 并返回本机托管下载地址")
     void returnsLatestManifest(@TempDir Path directory) throws Exception {
         Files.writeString(directory.resolve("Regent.dmg"), "dmg-content", StandardCharsets.UTF_8);
+        Files.writeString(directory.resolve("Regent-Mobile.apk"), "apk-content", StandardCharsets.UTF_8);
+        Files.writeString(directory.resolve("Regent-runtime.zip"), "runtime", StandardCharsets.UTF_8);
         Files.writeString(directory.resolve("latest.json"), """
                 {
                   "version": "1.2.0",
                   "releaseCode": "R100B003",
+                  "clientReleaseCode": "R100B003",
+                  "webOnly": false,
                   "releasedAt": "2026-10-19T00:00:00Z",
                   "minShellVersion": "1.0.0",
                   "notes": "test release",
+                  "runtime": {
+                    "file": "Regent-runtime.zip",
+                    "sizeBytes": 7,
+                    "sha256": "runtime-sha",
+                    "signature": "runtime-signature",
+                    "minShellRelease": "R100B010"
+                  },
                   "downloads": {
                     "macos": {"file": "Regent.dmg", "sizeBytes": 11, "sha256": "abc"},
-                    "windows": {"file": "Regent.exe", "sizeBytes": 99, "sha256": "def"}
+                    "windows": {"file": "Regent.exe", "sizeBytes": 99, "sha256": "def"},
+                    "android": {"file": "Regent-Mobile.apk", "sizeBytes": 11, "sha256": "ghi"}
                   }
                 }
                 """, StandardCharsets.UTF_8);
@@ -42,8 +54,13 @@ class ReleaseControllerTest {
         mvc.perform(get("/api/release/latest"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.version").value("1.2.0"))
+                .andExpect(jsonPath("$.webOnly").value(false))
+                .andExpect(jsonPath("$.runtime.url").value("/downloads/Regent-runtime.zip"))
+                .andExpect(jsonPath("$.runtime.minShellRelease").value("R100B010"))
                 .andExpect(jsonPath("$.downloads.macos.url").value("/downloads/Regent.dmg"))
-                .andExpect(jsonPath("$.downloads.windows").doesNotExist());
+                .andExpect(jsonPath("$.downloads.windows").doesNotExist())
+                .andExpect(jsonPath("$.downloads.android.url")
+                        .value("/downloads/Regent-Mobile.apk"));
 
         mvc.perform(get("/api/release/download/macos"))
                 .andExpect(status().isFound())

@@ -25,7 +25,7 @@ const description = computed(() => {
     v-model:open="open"
     layout="log"
     size="wide"
-    title="项目资料"
+    title="项目摘要"
     :description="description"
     :icon="FileText"
   >
@@ -35,7 +35,7 @@ const description = computed(() => {
       </p>
       <MarkdownContent :markdown="project.summary" />
     </template>
-    <p v-else class="text-caption text-label-tertiary">这个项目还没有可查看的项目资料。</p>
+    <p v-else class="text-caption text-label-tertiary">这个项目还没有可查看的项目摘要。</p>
 
     <template #footer>
       <span v-if="project?.summaryGeneratedAt" class="mr-auto self-center text-caption text-label-tertiary">

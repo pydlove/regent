@@ -4,6 +4,7 @@ import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.EnvironmentEntry;
 import com.pydlove.regent.project.domain.model.EnvironmentId;
 import com.pydlove.regent.project.domain.model.EnvironmentScope;
+import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.repository.EnvironmentEntryRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
 import com.pydlove.regent.shared.domain.DomainException;
@@ -41,7 +42,7 @@ public class EnvironmentEntryService {
 
     public EnvironmentEntry create(SaveEnvironmentCommand command, UserId userId) {
         requireName(command.description());
-        EnvironmentEntry entry = EnvironmentEntry.create(userId, command.scope(), command.projectId(),
+        EnvironmentEntry entry = EnvironmentEntry.create(userId, command.scope(), command.projectIds(),
                 nextKey(), command.value(), command.tags(), command.description(), command.secret());
         requireProjectExists(entry, userId);
         requireKeyAvailable(entry, null, userId);
@@ -57,7 +58,7 @@ public class EnvironmentEntryService {
         requireName(command.description());
         EnvironmentEntry entry = load(id, userId);
         String key = keyForUpdate(command, entry, userId);
-        entry.update(command.scope(), command.projectId(), key, command.value(),
+        entry.update(command.scope(), command.projectIds(), key, command.value(),
                 command.tags(), command.description(), command.secret());
         requireProjectExists(entry, userId);
         requireKeyAvailable(entry, id, userId);
@@ -84,23 +85,26 @@ public class EnvironmentEntryService {
     }
 
     private void requireProjectExists(EnvironmentEntry entry, UserId userId) {
-        if (entry.getScope() == EnvironmentScope.PROJECT
-                && (userId == null
-                ? projectProfileRepository.findById(entry.getProjectId())
-                : projectProfileRepository.findById(entry.getProjectId(), userId)).isEmpty()) {
-            throw new EntityNotFoundException("项目不存在：" + entry.getProjectId());
+        if (entry.getScope() == EnvironmentScope.PROJECT) {
+            for (ProjectId projectId : entry.getProjectIds()) {
+                if ((userId == null
+                        ? projectProfileRepository.findById(projectId)
+                        : projectProfileRepository.findById(projectId, userId)).isEmpty()) {
+                    throw new EntityNotFoundException("项目不存在：" + projectId);
+                }
+            }
         }
     }
 
     private void requireKeyAvailable(EnvironmentEntry entry, EnvironmentId excludingId, UserId userId) {
         boolean exists = userId == null
-                ? repository.existsByKey(entry.getScope(), entry.getProjectId(), entry.getKey(), excludingId)
-                : repository.existsByKey(userId, entry.getScope(), entry.getProjectId(),
+                ? repository.existsByKey(entry.getScope(), entry.getProjectIds(), entry.getKey(), excludingId)
+                : repository.existsByKey(userId, entry.getScope(), entry.getProjectIds(),
                         entry.getKey(), excludingId);
         if (exists) {
             String owner = entry.getScope() == EnvironmentScope.GLOBAL
                     ? "全局"
-                    : "项目 " + entry.getProjectId();
+                    : "所选项目";
             throw new DomainException(owner + "已存在环境键：" + entry.getKey());
         }
     }
@@ -129,8 +133,8 @@ public class EnvironmentEntryService {
     private String keyForUpdate(SaveEnvironmentCommand command, EnvironmentEntry entry, UserId userId) {
         String current = entry.getKey();
         boolean exists = userId == null
-                ? repository.existsByKey(command.scope(), command.projectId(), current, entry.getId())
-                : repository.existsByKey(userId, command.scope(), command.projectId(),
+                ? repository.existsByKey(command.scope(), command.projectIds(), current, entry.getId())
+                : repository.existsByKey(userId, command.scope(), command.projectIds(),
                         current, entry.getId());
         if (!exists) {
             return current;

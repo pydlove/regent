@@ -1,6 +1,7 @@
 package com.pydlove.regent.execution.interfaces.rest;
 
 import com.pydlove.regent.execution.application.query.TaskRunQueryService;
+import com.pydlove.regent.execution.domain.model.TaskRun;
 import com.pydlove.regent.execution.domain.model.TaskRunId;
 import com.pydlove.regent.execution.interfaces.dto.TaskRunDetailResponse;
 import com.pydlove.regent.identity.application.query.AuthenticatedUser;
@@ -34,8 +35,10 @@ public class RunController {
         TaskRunId runId = TaskRunId.of(id);
         AuthenticatedUser user = AuthSessionInterceptor.currentUser(request);
         UserId ownerId = UserId.of(user.id());
+        TaskRun run = taskRunQueryService.get(runId, ownerId);
         return TaskRunDetailResponse.of(
-                taskRunQueryService.get(runId, ownerId),
+                run,
+                taskRunQueryService.diagnose(runId),
                 taskRunQueryService.events(runId));
     }
 }

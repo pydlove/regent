@@ -16,6 +16,9 @@ import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.domain.TransactionRunner;
 
 import java.util.List;
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.Objects;
 
 /** 部署配置的写侧用例。执行快照由执行服务负责。 */
 public class DeploymentCommandService {
@@ -41,11 +44,11 @@ public class DeploymentCommandService {
     public Deployment create(SaveDeploymentCommand command) {
         return transactionRunner.inTransaction(() -> {
             DeploymentScriptValidator.requireValid(command.scriptContent());
-            ProjectId projectId = requireProject(command.projectId());
-            requireProjectExists(projectId);
-            requireServer(projectId, command.serverId());
+            List<ProjectId> projectIds = requireProjects(command.projectIds());
+            requireProjectsExist(projectIds);
+            requireServer(projectIds, command.serverId());
             Deployment deployment = Deployment.create(
-                    projectId,
+                    projectIds,
                     command.serverId(),
                     command.name(),
                     command.remoteDirectory(),
@@ -53,7 +56,7 @@ public class DeploymentCommandService {
                     command.scriptContent(),
                     command.executionMode(),
                     command.projectScriptPath());
-            requireNameAvailable(projectId, deployment.getName(), null);
+            requireNameAvailable(projectIds, deployment.getName(), null);
             deploymentRepository.save(deployment);
             return deployment;
         });
@@ -64,13 +67,13 @@ public class DeploymentCommandService {
             DeploymentScriptValidator.requireValid(command.scriptContent());
             Deployment deployment = deploymentRepository.findByIdForUpdate(id)
                     .orElseThrow(() -> new EntityNotFoundException("部署不存在：" + id.value()));
-            if (!deployment.getProjectId().equals(requireProject(command.projectId()))) {
-                throw new DomainException("部署归属项目创建后不能修改");
-            }
-            requireServer(deployment.getProjectId(), command.serverId());
+            List<ProjectId> projectIds = requireProjects(command.projectIds());
+            requireProjectsExist(projectIds);
+            requireServer(projectIds, command.serverId());
             String nextName = command.name() == null ? deployment.getName() : command.name().trim();
-            requireNameAvailable(deployment.getProjectId(), nextName, id);
+            requireNameAvailable(projectIds, nextName, id);
             deployment.update(
+                    projectIds,
                     nextName,
                     command.serverId(),
                     command.remoteDirectory(),
@@ -100,34 +103,40 @@ public class DeploymentCommandService {
         return DeploymentScriptValidator.validate(scriptContent);
     }
 
-    private void requireProjectExists(ProjectId projectId) {
-        if (projectProfileRepository.findById(projectId).isEmpty()) {
-            throw new EntityNotFoundException("项目不存在：" + projectId);
+    private void requireProjectsExist(Collection<ProjectId> projectIds) {
+        for (ProjectId projectId : projectIds) {
+            if (projectProfileRepository.findById(projectId).isEmpty()) {
+                throw new EntityNotFoundException("项目不存在：" + projectId);
+            }
         }
     }
 
-    private void requireNameAvailable(ProjectId projectId, String name, DeploymentId excludingId) {
-        if (deploymentRepository.existsByName(projectId, name, excludingId)) {
-            throw new DomainException("该项目已存在同名部署：" + name);
+    private void requireNameAvailable(Collection<ProjectId> projectIds,
+                                      String name,
+                                      DeploymentId excludingId) {
+        if (deploymentRepository.existsByName(projectIds, name, excludingId)) {
+            throw new DomainException("所选项目中已存在同名部署：" + name);
         }
     }
 
-    private void requireServer(ProjectId projectId, DeploymentServerId serverId) {
+    private void requireServer(Collection<ProjectId> projectIds, DeploymentServerId serverId) {
         if (serverId == null) {
             throw new DomainException("请选择部署服务器");
         }
         DeploymentServer server = serverRepository.findByIdForUpdate(serverId)
                 .orElseThrow(() -> new EntityNotFoundException(
                         "部署服务器不存在：" + serverId.value()));
-        if (!server.getProjectId().equals(projectId)) {
-            throw new DomainException("部署与服务器必须属于同一项目");
+        for (ProjectId projectId : projectIds) {
+            if (!server.belongsTo(projectId)) {
+                throw new DomainException("所选服务器未归属项目：" + projectId.value());
+            }
         }
     }
 
-    private static ProjectId requireProject(ProjectId projectId) {
-        if (projectId == null) {
-            throw new DomainException("请选择部署归属项目");
+    private static List<ProjectId> requireProjects(List<ProjectId> projectIds) {
+        if (projectIds == null || projectIds.isEmpty() || projectIds.stream().anyMatch(Objects::isNull)) {
+            throw new DomainException("请至少选择一个部署归属项目");
         }
-        return projectId;
+        return List.copyOf(new LinkedHashSet<>(projectIds));
     }
 }

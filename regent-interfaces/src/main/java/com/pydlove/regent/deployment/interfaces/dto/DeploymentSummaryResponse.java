@@ -5,12 +5,15 @@ import com.pydlove.regent.deployment.domain.model.Deployment;
 import com.pydlove.regent.deployment.domain.model.DeploymentRun;
 
 import java.time.Instant;
+import java.util.List;
 
 /** 部署列表项，不返回脚本正文。 */
 public record DeploymentSummaryResponse(
         long id,
         long projectId,
         String projectName,
+        List<Long> projectIds,
+        List<String> projectNames,
         long serverId,
         String serverName,
         String name,
@@ -36,7 +39,9 @@ public record DeploymentSummaryResponse(
         return new DeploymentSummaryResponse(
                 deployment.getId().value(),
                 deployment.getProjectId().value(),
-                overview.projectName(),
+                overview.projectNames().isEmpty() ? "" : overview.projectNames().get(0),
+                deployment.getProjectIds().stream().map(projectId -> projectId.value()).toList(),
+                overview.projectNames(),
                 server.getId().value(),
                 server.getName(),
                 deployment.getName(),

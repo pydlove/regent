@@ -8,16 +8,19 @@ import {
   ScrollText,
   Search,
   ServerCog,
+  Square,
   Trash2,
   X,
 } from '@lucide/vue'
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
 import { ApiError } from '@/api/http'
 import {
   deleteDeployment,
   listDeployments,
   runDeployment,
+  stopDeployment,
 } from '@/api/deployments'
 import DeploymentDialog from '@/components/business/DeploymentDialog.vue'
 import DeploymentRunConfirmDialog from '@/components/business/DeploymentRunConfirmDialog.vue'
@@ -39,6 +42,7 @@ import type { DeploymentDetail, DeploymentSummary } from '@/types/api'
 import { formatDateTime, formatRelative } from '@/utils/format'
 
 const store = useTaskStore()
+const route = useRoute()
 const toast = useToast()
 const deployments = ref<DeploymentSummary[]>([])
 const loading = ref(false)
@@ -57,6 +61,13 @@ const runsInitialId = ref<number | null>(null)
 const deleteOpen = ref(false)
 const deleteTarget = ref<DeploymentSummary | null>(null)
 const deleting = ref(false)
+const stopOpen = ref(false)
+const stopTarget = ref<DeploymentSummary | null>(null)
+const stopping = ref(false)
+const routeTaskId = computed(() => {
+  const value = Number(route.query.taskId)
+  return Number.isInteger(value) && value > 0 ? value : null
+})
 
 const columns: TableColumn[] = [
   { key: 'name', label: '部署名称' },
@@ -68,6 +79,11 @@ const columns: TableColumn[] = [
   { key: 'actions', label: '', align: 'right', width: '132px' },
 ]
 
+const projectNamesOf = (deployment: DeploymentSummary) =>
+  deployment.projectNames.length > 0
+    ? deployment.projectNames.join('、')
+    : deployment.projectName
+
 const filtered = computed(() => {
   const search = keyword.value.trim().toLowerCase()
   if (!search) return deployments.value
@@ -75,7 +91,7 @@ const filtered = computed(() => {
     [
       deployment.name,
       deployment.serverName,
-      deployment.projectName,
+      projectNamesOf(deployment),
       deployment.host,
       deployment.username,
       deployment.remoteDirectory,
@@ -118,6 +134,15 @@ watch(
   () => store.projectId,
   () => {
     void load()
+  },
+  { immediate: true },
+)
+
+watch(
+  () => route.query.projectId,
+  (value) => {
+    const projectId = Number(value)
+    if (Number.isInteger(projectId) && projectId > 0) store.projectId = projectId
   },
   { immediate: true },
 )
@@ -168,11 +193,15 @@ const openRuns = (deployment: DeploymentSummary, initialRunId: number | null = n
   runsOpen.value = true
 }
 
-const startRun = async (deployment: DeploymentSummary): Promise<boolean> => {
+const startRun = async (
+  deployment: DeploymentSummary,
+  projectId: number,
+  taskId: number | null = null,
+): Promise<boolean> => {
   if (runningIds.value.has(deployment.id) || isActive(deployment)) return false
   setRunning(deployment.id, true)
   try {
-    const run = await runDeployment(deployment.id)
+    const run = await runDeployment(deployment.id, projectId, taskId)
     deployments.value = deployments.value.map((item) =>
       item.id === deployment.id
         ? {
@@ -198,15 +227,46 @@ const requestRun = (deployment: DeploymentSummary) => {
   confirmOpen.value = true
 }
 
-const confirmRun = async () => {
+const confirmRun = async (payload: { projectId: number; taskId: number | null }) => {
   const deployment = confirmTarget.value
   if (!deployment || startingConfirm.value) return
   startingConfirm.value = true
-  const started = await startRun(deployment)
+  const started = await startRun(deployment, payload.projectId, payload.taskId)
   startingConfirm.value = false
   if (started) {
     confirmOpen.value = false
     confirmTarget.value = null
+  }
+}
+
+const requestStop = (deployment: DeploymentSummary) => {
+  stopTarget.value = deployment
+  stopOpen.value = true
+}
+
+const confirmStop = async () => {
+  const deployment = stopTarget.value
+  if (!deployment || stopping.value) return
+  stopping.value = true
+  try {
+    const run = await stopDeployment(deployment.id)
+    deployments.value = deployments.value.map((item) =>
+      item.id === deployment.id
+        ? {
+            ...item,
+            latestRunStatus: run.status,
+            latestRunAt: run.finishedAt ?? run.queuedAt,
+          }
+        : item,
+    )
+    stopOpen.value = false
+    stopTarget.value = null
+    toast.success(`正在停止部署「${deployment.name}」`, run.summary || '停止请求已提交')
+    void load(true)
+  } catch (e) {
+    toast.failure(`部署「${deployment.name}」未能停止`, messageOf(e))
+  } finally {
+    stopping.value = false
   }
 }
 
@@ -306,9 +366,9 @@ const confirmDelete = async () => {
           <span
             v-else-if="column.key === 'project'"
             class="truncate text-caption text-label-secondary"
-            :title="row.projectName"
+            :title="projectNamesOf(row as DeploymentSummary)"
           >
-            {{ row.projectName }}
+            {{ projectNamesOf(row as DeploymentSummary) }}
           </span>
           <span
             v-else-if="column.key === 'server'"
@@ -333,15 +393,15 @@ const confirmDelete = async () => {
             {{ formatRelative(row.updatedAt) }}
           </span>
           <div v-else-if="column.key === 'actions'" class="flex justify-end gap-0.5" @click.stop>
-            <Tooltip :content="isActive(row) ? '部署执行中' : '立即部署'">
+            <Tooltip :content="isActive(row) ? '停止部署' : '立即部署'">
               <span class="inline-flex">
                 <IconButton
-                  label="立即部署"
+                  :label="isActive(row) ? '停止部署' : '立即部署'"
                   size="sm"
-                  :disabled="isActive(row) || runningIds.has(row.id)"
-                  @click.stop="requestRun(row)"
+                  :disabled="runningIds.has(row.id) || (stopping && stopTarget?.id === row.id)"
+                  @click.stop="isActive(row) ? requestStop(row) : requestRun(row)"
                 >
-                  <Icon :as="Play" size="inline" />
+                  <Icon :as="isActive(row) ? Square : Play" size="inline" />
                 </IconButton>
               </span>
             </Tooltip>
@@ -409,6 +469,7 @@ const confirmDelete = async () => {
     <DeploymentRunConfirmDialog
       v-model:open="confirmOpen"
       :deployment="confirmTarget"
+      :default-task-id="routeTaskId"
       :starting="startingConfirm"
       @confirm="confirmRun"
     />
@@ -432,6 +493,24 @@ const confirmDelete = async () => {
         <Button :disabled="deleting" @click="deleteOpen = false">取消</Button>
         <Button variant="danger" :disabled="deleting" @click="confirmDelete">
           {{ deleting ? '删除中…' : '删除' }}
+        </Button>
+      </template>
+    </Dialog>
+
+    <Dialog
+      v-model:open="stopOpen"
+      title="停止当前部署？"
+      :description="stopTarget ? `将终止「${stopTarget.name}」正在执行的 SSH 或本机发布进程。` : ''"
+      :icon="AlertTriangle"
+      icon-tone="danger"
+    >
+      <p class="text-caption text-label-secondary">
+        已经完成的服务器变更不会自动回滚；停止后请查看执行日志确认停在哪一步。
+      </p>
+      <template #footer>
+        <Button :disabled="stopping" @click="stopOpen = false">继续执行</Button>
+        <Button variant="danger" :disabled="stopping" @click="confirmStop">
+          {{ stopping ? '停止中…' : '停止部署' }}
         </Button>
       </template>
     </Dialog>

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pydlove.regent.organization.infrastructure.persistence.OrganizationInvitationMapper">
+
+    <sql id="columns">
+        id, organization_id, email, role_code, token_hash, status, expires_at,
+        accepted_at, accepted_by, created_by, created_at
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO organization_invitation
+            (organization_id, email, role_code, token_hash, status, expires_at,
+             accepted_at, accepted_by, created_by, created_at)
+        VALUES
+            (#{organizationId}, #{email}, #{roleCode}, #{tokenHash}, #{status}, #{expiresAt},
+             #{acceptedAt}, #{acceptedBy}, #{createdBy}, #{createdAt})
+    </insert>
+
+    <update id="update">
+        UPDATE organization_invitation
+        SET status = #{status},
+            accepted_at = #{acceptedAt},
+            accepted_by = #{acceptedBy}
+        WHERE id = #{id}
+    </update>
+
+    <select id="selectByTokenHash"
+            resultType="com.pydlove.regent.organization.infrastructure.persistence.OrganizationInvitationData">
+        SELECT <include refid="columns"/>
+        FROM organization_invitation
+        WHERE token_hash = #{tokenHash}
+    </select>
+
+    <select id="selectPending"
+            resultType="com.pydlove.regent.organization.infrastructure.persistence.OrganizationInvitationData">
+        SELECT <include refid="columns"/>
+        FROM organization_invitation
+        WHERE organization_id = #{organizationId}
+          AND email = #{email}
+          AND status = 'PENDING'
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectByOrganization"
+            resultType="com.pydlove.regent.organization.infrastructure.persistence.OrganizationInvitationData">
+        SELECT <include refid="columns"/>
+        FROM organization_invitation
+        WHERE organization_id = #{organizationId}
+        ORDER BY created_at DESC, id DESC
+    </select>
+
+</mapper>
