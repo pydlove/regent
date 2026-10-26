@@ -6,6 +6,7 @@ export type ProjectMemberRole =
   | 'ARCHITECT'
   | 'DEVELOPER'
   | 'QA'
+  | 'TESTER'
   | 'OPS'
   | 'SECURITY'
   | 'RELEASE_MANAGER'
@@ -26,6 +27,7 @@ export type ProjectMemberCandidate = {
   username: string
   displayName: string
   email: string | null
+  avatarUrl: string | null
   organizationRoles: Array<
     'ORG_OWNER' | 'ORG_ADMIN' | 'PROJECT_MANAGER' | 'ORG_MEMBER'
   >

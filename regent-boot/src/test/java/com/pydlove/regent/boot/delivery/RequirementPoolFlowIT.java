@@ -1,8 +1,10 @@
 package com.pydlove.regent.boot.delivery;
 
 import com.pydlove.regent.delivery.application.command.InitiativeCommandService;
+import com.pydlove.regent.delivery.application.command.InitiativePlanCommandService;
 import com.pydlove.regent.delivery.application.command.ProductVersionCommandService;
 import com.pydlove.regent.delivery.application.command.SaveInitiativeCommand;
+import com.pydlove.regent.delivery.application.command.SaveInitiativePlanCommand;
 import com.pydlove.regent.delivery.domain.model.DeliveryStage;
 import com.pydlove.regent.delivery.domain.model.Initiative;
 import com.pydlove.regent.delivery.domain.model.ProductVersion;
@@ -25,6 +27,7 @@ import com.pydlove.regent.requirement.domain.model.RequirementReviewStatus;
 import com.pydlove.regent.requirement.domain.model.RequirementSource;
 import com.pydlove.regent.requirement.domain.repository.RequirementRepository;
 import com.pydlove.regent.requirement.domain.repository.RequirementReviewRecordRepository;
+import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.kernel.DecisionLevel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -42,6 +45,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 产品版本与需求池从录入到正式设计的真实 MySQL 闭环。 */
@@ -60,6 +64,9 @@ class RequirementPoolFlowIT {
 
     @Autowired
     private InitiativeCommandService initiativeCommandService;
+
+    @Autowired
+    private InitiativePlanCommandService initiativePlanCommandService;
 
     @Autowired
     private ProductVersionCommandService productVersionCommandService;
@@ -101,10 +108,13 @@ class RequirementPoolFlowIT {
     @DisplayName("线下需求评审登记后自动创建设计交付")
     void completesRequirementPoolFlow(@TempDir Path workspace) {
         var templates = workflowTemplateQueryService.list();
-        assertEquals(1, templates.size());
-        assertEquals("standard_waterfall", templates.get(0).code());
-        assertEquals("标准瀑布式", templates.get(0).name());
-        assertEquals(14, templates.get(0).stages().size());
+        var standard = templates.stream()
+                .filter(template -> "standard_waterfall".equals(template.code())
+                        && template.versionNo() == 2)
+                .findFirst()
+                .orElseThrow();
+        assertEquals("标准瀑布式", standard.name());
+        assertEquals(15, standard.stages().size());
         Project project = projectRegistrationService.register(new RegisterProjectCommand(
                 "requirement_pool_flow_it",
                 "需求池闭环测试",
@@ -129,6 +139,7 @@ class RequirementPoolFlowIT {
                 null,
                 "会议纪要：同意启动 v1.0.0 版本"), OWNER);
         assertEquals("v1.0.0 版本立项", initiative.getTitle());
+        savePlan(initiative, version);
         initiativeCommandService.submit(initiative.getId(), OWNER);
         initiativeCommandService.approve(initiative.getId(), OWNER, "同意");
 
@@ -173,24 +184,31 @@ class RequirementPoolFlowIT {
         RequirementDelivery delivery = deliveryRepository
                 .findActiveByRequirement(requirement.getId())
                 .orElseThrow();
-        assertEquals(DeliveryStage.DESIGN, delivery.getStage());
+        assertEquals(DeliveryStage.OUTLINE_DESIGN, delivery.getStage());
 
-        Requirement draft = requirementCommandService.create(
+        Requirement lateRequirement = requirementCommandService.create(
                 new SaveRequirementCommand(
                         project.getId(),
                         initiative.getId(),
-                        "批量删除草稿",
-                        "验证正式需求和草稿可以一起删除",
+                        "设计后追加需求",
+                        "验证版本进入设计后不能追加需求",
                         null,
                         null),
                 OWNER);
+        DomainException exception = assertThrows(
+                DomainException.class,
+                () -> requirementCommandService.assignVersion(
+                        lateRequirement.getId(), version.getId(), OWNER));
+        assertEquals("产品版本已进入设计或研发阶段，不能继续纳入需求",
+                exception.getMessage());
+
         assertEquals(2, requirementCommandService.moveManyToTrash(
-                List.of(requirement.getId(), draft.getId()), OWNER));
+                List.of(requirement.getId(), lateRequirement.getId()), OWNER));
         assertEquals(2, requirementRepository
                 .findDeletedByProject(project.getId(), OWNER).size());
 
         assertEquals(2, requirementCommandService.purgeFromTrash(
-                List.of(requirement.getId(), draft.getId()), OWNER));
+                List.of(requirement.getId(), lateRequirement.getId()), OWNER));
         assertTrue(requirementRepository
                 .findDeletedByProject(project.getId(), OWNER).isEmpty());
         assertTrue(deliveryRepository
@@ -199,12 +217,12 @@ class RequirementPoolFlowIT {
                 "SELECT COUNT(*) FROM requirement WHERE id IN (?, ?)",
                 Integer.class,
                 requirement.getId().value(),
-                draft.getId().value()));
+                lateRequirement.getId().value()));
         assertEquals(0, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM requirement_delivery WHERE requirement_id IN (?, ?)",
                 Integer.class,
                 requirement.getId().value(),
-                draft.getId().value()));
+                lateRequirement.getId().value()));
     }
 
     @Test
@@ -223,6 +241,41 @@ class RequirementPoolFlowIT {
         productVersionCommandService.delete(version.getId(), OWNER);
 
         assertTrue(productVersionRepository.findById(version.getId()).isEmpty());
+    }
+
+    @Test
+    @DisplayName("已关闭且没有需求的版本可以连同立项记录一起删除")
+    void deletesClosedVersionWithInitiative(@TempDir Path workspace) {
+        Project project = projectRegistrationService.register(new RegisterProjectCommand(
+                "requirement_pool_delete_linked_it",
+                "删除误建立项版本",
+                workspace.toString(),
+                null,
+                null,
+                DecisionLevel.L1), OWNER);
+        ProductVersion version = productVersionCommandService.create(
+                project.getId(), "v0.0.2", "误建版本", "验证立项版本关闭后可删除", OWNER);
+        Initiative initiative = initiativeCommandService.create(new SaveInitiativeCommand(
+                project.getId(),
+                version.getId(),
+                "",
+                "",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "误建版本的立项纪要"), OWNER);
+        productVersionCommandService.close(version.getId(), OWNER);
+
+        productVersionCommandService.delete(version.getId(), OWNER);
+
+        assertTrue(productVersionRepository.findById(version.getId()).isEmpty());
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM initiative WHERE version_id = ?",
+                Integer.class,
+                version.getId().value()));
     }
 
     @Test
@@ -249,6 +302,7 @@ class RequirementPoolFlowIT {
                 null,
                 null,
                 "会议纪要：同意启动 v1.0.0 版本"), OWNER);
+        savePlan(initiative, version);
         initiativeCommandService.submit(initiative.getId(), OWNER);
         initiativeCommandService.approve(initiative.getId(), OWNER, "同意");
         Requirement requirement = requirementCommandService.create(
@@ -279,5 +333,34 @@ class RequirementPoolFlowIT {
                 reviewRecordRepository.findById(submitted.record().getId())
                         .orElseThrow().getStatus());
         assertTrue(deliveryRepository.findActiveByRequirement(requirement.getId()).isEmpty());
+    }
+
+    private void savePlan(Initiative initiative, ProductVersion version) {
+        initiativePlanCommandService.save(
+                initiative.getId(),
+                new SaveInitiativePlanCommand(
+                        LocalDate.now(),
+                        LocalDate.now().plusDays(14),
+                        "版本目标、设计、研发与发布",
+                        List.of(
+                                new SaveInitiativePlanCommand.Item(
+                                        "需求与概要设计",
+                                        "TECH_LEAD",
+                                        LocalDate.now(),
+                                        LocalDate.now().plusDays(3),
+                                        1),
+                                new SaveInitiativePlanCommand.Item(
+                                        "模块详细设计与研发",
+                                        "DEVELOPER",
+                                        LocalDate.now().plusDays(4),
+                                        LocalDate.now().plusDays(10),
+                                        2),
+                                new SaveInitiativePlanCommand.Item(
+                                        "测试与发布",
+                                        "QA",
+                                        LocalDate.now().plusDays(11),
+                                        LocalDate.now().plusDays(14),
+                                        1))),
+                OWNER);
     }
 }

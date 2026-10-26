@@ -8,6 +8,7 @@ public enum ProjectMemberRole {
     ARCHITECT,
     DEVELOPER,
     QA,
+    TESTER,
     OPS,
     SECURITY,
     RELEASE_MANAGER,

@@ -20,6 +20,10 @@ public class RequirementDelivery {
     private DeliveryStatus status;
     private String designSummary;
     private String designContent;
+    private String outlineDesignSummary;
+    private String outlineDesignContent;
+    private Instant outlineDesignSubmittedAt;
+    private UserId outlineDesignSubmittedBy;
     private final Instant createdAt;
     private Instant updatedAt;
 
@@ -32,6 +36,10 @@ public class RequirementDelivery {
                                 DeliveryStatus status,
                                 String designSummary,
                                 String designContent,
+                                String outlineDesignSummary,
+                                String outlineDesignContent,
+                                Instant outlineDesignSubmittedAt,
+                                UserId outlineDesignSubmittedBy,
                                 Instant createdAt,
                                 Instant updatedAt) {
         this.id = id;
@@ -43,6 +51,10 @@ public class RequirementDelivery {
         this.status = requireNotNull(status, "交付状态");
         this.designSummary = optionalText(designSummary, 4000);
         this.designContent = optionalText(designContent, 60000);
+        this.outlineDesignSummary = optionalText(outlineDesignSummary, 4000);
+        this.outlineDesignContent = optionalText(outlineDesignContent, 60000);
+        this.outlineDesignSubmittedAt = outlineDesignSubmittedAt;
+        this.outlineDesignSubmittedBy = outlineDesignSubmittedBy;
         this.createdAt = requireNotNull(createdAt, "创建时间").truncatedTo(ChronoUnit.MILLIS);
         this.updatedAt = requireNotNull(updatedAt, "更新时间").truncatedTo(ChronoUnit.MILLIS);
     }
@@ -63,7 +75,7 @@ public class RequirementDelivery {
         Instant now = now();
         return new RequirementDelivery(null, initiativeId, projectId, requirementId, createdBy,
                 requireNotNull(initialStage, "交付初始阶段"), DeliveryStatus.ACTIVE,
-                null, null, now, now);
+                null, null, null, null, null, null, now, now);
     }
 
     public static RequirementDelivery restore(RequirementDeliveryId id,
@@ -75,14 +87,33 @@ public class RequirementDelivery {
                                               DeliveryStatus status,
                                               String designSummary,
                                               String designContent,
+                                              String outlineDesignSummary,
+                                              String outlineDesignContent,
+                                              Instant outlineDesignSubmittedAt,
+                                              UserId outlineDesignSubmittedBy,
                                               Instant createdAt,
                                               Instant updatedAt) {
         return new RequirementDelivery(id, initiativeId, projectId, requirementId, createdBy,
-                stage, status, designSummary, designContent, createdAt, updatedAt);
+                stage, status, designSummary, designContent,
+                outlineDesignSummary, outlineDesignContent,
+                outlineDesignSubmittedAt, outlineDesignSubmittedBy,
+                createdAt, updatedAt);
     }
 
     public void approveRequirementReview() {
         requireStage(DeliveryStage.REQUIREMENT_REVIEW, "只有需求评审中的交付可以进入设计");
+        stage = DeliveryStage.OUTLINE_DESIGN;
+        touch();
+    }
+
+    public void submitOutlineDesign(String summary,
+                                    String content,
+                                    UserId submittedBy) {
+        requireStage(DeliveryStage.OUTLINE_DESIGN, "只有概要设计阶段的交付可以提交概要设计");
+        this.outlineDesignSummary = optionalText(summary, 4000);
+        this.outlineDesignContent = optionalText(content, 60000);
+        this.outlineDesignSubmittedAt = now();
+        this.outlineDesignSubmittedBy = requireNotNull(submittedBy, "概要设计提交人");
         stage = DeliveryStage.DESIGN;
         touch();
     }
@@ -96,6 +127,14 @@ public class RequirementDelivery {
         requireStage(DeliveryStage.DESIGN, "只有设计阶段的交付可以提交设计评审");
         this.designSummary = requireText(summary, "设计摘要", 4000);
         this.designContent = requireText(content, "详细设计", 60000);
+        stage = DeliveryStage.DESIGN_REVIEW;
+        touch();
+    }
+
+    public void submitModularDesign(String summary, String content) {
+        requireStage(DeliveryStage.DESIGN, "只有设计阶段的交付可以提交设计评审");
+        this.designSummary = optionalText(summary, 4000);
+        this.designContent = optionalText(content, 60000);
         stage = DeliveryStage.DESIGN_REVIEW;
         touch();
     }
@@ -238,6 +277,22 @@ public class RequirementDelivery {
 
     public String getDesignContent() {
         return designContent;
+    }
+
+    public String getOutlineDesignSummary() {
+        return outlineDesignSummary;
+    }
+
+    public String getOutlineDesignContent() {
+        return outlineDesignContent;
+    }
+
+    public Instant getOutlineDesignSubmittedAt() {
+        return outlineDesignSubmittedAt;
+    }
+
+    public UserId getOutlineDesignSubmittedBy() {
+        return outlineDesignSubmittedBy;
     }
 
     public Instant getCreatedAt() {

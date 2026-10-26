@@ -2,8 +2,10 @@ package com.pydlove.regent.boot.delivery;
 
 import com.pydlove.regent.delivery.application.command.InitiativeAttachmentService;
 import com.pydlove.regent.delivery.application.command.InitiativeCommandService;
+import com.pydlove.regent.delivery.application.command.InitiativePlanCommandService;
 import com.pydlove.regent.delivery.application.command.ProductVersionCommandService;
 import com.pydlove.regent.delivery.application.command.SaveInitiativeCommand;
+import com.pydlove.regent.delivery.application.command.SaveInitiativePlanCommand;
 import com.pydlove.regent.delivery.application.command.UploadedInitiativeAttachment;
 import com.pydlove.regent.delivery.domain.model.Initiative;
 import com.pydlove.regent.delivery.domain.model.InitiativeStatus;
@@ -27,6 +29,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.file.Path;
+import java.time.LocalDate;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -53,6 +57,9 @@ class InitiativeMeetingMinutesIT {
 
     @Autowired
     private InitiativeAttachmentService attachmentService;
+
+    @Autowired
+    private InitiativePlanCommandService planCommandService;
 
     @Autowired
     private InitiativeRepository initiativeRepository;
@@ -96,6 +103,20 @@ class InitiativeMeetingMinutesIT {
                 null,
                 null,
                 null), OWNER);
+
+        planCommandService.save(
+                initiative.getId(),
+                new SaveInitiativePlanCommand(
+                        LocalDate.now(),
+                        LocalDate.now().plusDays(10),
+                        "完成立项并进入需求评审",
+                        List.of(new SaveInitiativePlanCommand.Item(
+                                "版本立项与需求准备",
+                                "OWNER",
+                                LocalDate.now(),
+                                LocalDate.now().plusDays(10),
+                                1))),
+                OWNER);
 
         assertThrows(DomainException.class,
                 () -> initiativeCommandService.submit(initiative.getId(), OWNER));

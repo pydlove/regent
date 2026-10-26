@@ -73,7 +73,12 @@ public class ProjectMemberQueryService {
                     List<ProjectMemberRole> projectRoles = memberRepository
                             .findRoles(projectId, entry.getKey());
                     return new ProjectMemberCandidateView(
-                            user, List.copyOf(entry.getValue()), projectRoles);
+                            user,
+                            user.getAvatar() == null
+                                    ? null
+                                    : user.getAvatar().updatedAt().toEpochMilli(),
+                            List.copyOf(entry.getValue()),
+                            projectRoles);
                 })
                 .sorted(Comparator.comparing(candidate -> candidate.user().getDisplayName().value()))
                 .toList();

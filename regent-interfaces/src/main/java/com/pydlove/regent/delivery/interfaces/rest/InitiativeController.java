@@ -1,12 +1,15 @@
 package com.pydlove.regent.delivery.interfaces.rest;
 
 import com.pydlove.regent.delivery.application.command.InitiativeCommandService;
+import com.pydlove.regent.delivery.application.command.InitiativePlanCommandService;
 import com.pydlove.regent.delivery.application.command.SaveInitiativeCommand;
 import com.pydlove.regent.delivery.application.query.InitiativeQueryService;
 import com.pydlove.regent.delivery.domain.model.InitiativeId;
 import com.pydlove.regent.delivery.domain.model.ProductVersionId;
 import com.pydlove.regent.delivery.interfaces.dto.InitiativeActionRequest;
 import com.pydlove.regent.delivery.interfaces.dto.InitiativeResponse;
+import com.pydlove.regent.delivery.interfaces.dto.InitiativePlanRequest;
+import com.pydlove.regent.delivery.interfaces.dto.InitiativePlanResponse;
 import com.pydlove.regent.delivery.interfaces.dto.InitiativeSaveRequest;
 import com.pydlove.regent.identity.application.query.AuthenticatedUser;
 import com.pydlove.regent.identity.domain.model.UserId;
@@ -30,11 +33,14 @@ public class InitiativeController {
 
     private final InitiativeCommandService commandService;
     private final InitiativeQueryService queryService;
+    private final InitiativePlanCommandService planCommandService;
 
     public InitiativeController(InitiativeCommandService commandService,
-                                InitiativeQueryService queryService) {
+                                InitiativeQueryService queryService,
+                                InitiativePlanCommandService planCommandService) {
         this.commandService = commandService;
         this.queryService = queryService;
+        this.planCommandService = planCommandService;
     }
 
     @GetMapping
@@ -73,6 +79,22 @@ public class InitiativeController {
     public InitiativeResponse submit(@PathVariable long id, HttpServletRequest request) {
         var initiative = commandService.submit(InitiativeId.of(id), currentUser(request));
         return InitiativeResponse.from(queryService.get(initiative.getId(), currentUser(request)));
+    }
+
+    @GetMapping("/{id}/plan")
+    public InitiativePlanResponse plan(@PathVariable long id, HttpServletRequest request) {
+        return InitiativePlanResponse.from(
+                queryService.plan(InitiativeId.of(id), currentUser(request)));
+    }
+
+    @PutMapping("/{id}/plan")
+    public InitiativePlanResponse savePlan(@PathVariable long id,
+                                           @RequestBody InitiativePlanRequest request,
+                                           HttpServletRequest servletRequest) {
+        var plan = planCommandService.save(
+                InitiativeId.of(id), request.toCommand(), currentUser(servletRequest));
+        return InitiativePlanResponse.from(
+                com.pydlove.regent.delivery.application.query.InitiativePlanView.from(plan));
     }
 
     @PostMapping("/{id}/approve")

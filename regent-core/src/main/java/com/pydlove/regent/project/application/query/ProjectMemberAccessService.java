@@ -57,6 +57,7 @@ public class ProjectMemberAccessService {
             case ARCHITECT -> "架构师";
             case DEVELOPER -> "开发";
             case QA -> "测试负责人";
+            case TESTER -> "测试人员";
             case OPS -> "运维/SRE";
             case SECURITY -> "安全/合规";
             case RELEASE_MANAGER -> "发布负责人";

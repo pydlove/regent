@@ -15,6 +15,10 @@ public class RequirementDeliveryData {
     private String status;
     private String designSummary;
     private String designContent;
+    private String outlineDesignSummary;
+    private String outlineDesignContent;
+    private LocalDateTime outlineDesignSubmittedAt;
+    private Long outlineDesignSubmittedBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

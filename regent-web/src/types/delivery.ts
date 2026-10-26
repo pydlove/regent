@@ -34,6 +34,28 @@ export type Initiative = {
   rejectedAt: string | null
   createdAt: string
   updatedAt: string
+  plan: InitiativePlan | null
+}
+
+export type InitiativePlanItem = {
+  name: string
+  roleCode: string
+  startDate: string
+  endDate: string
+  headcount: number
+  workingDays: number
+  workloadDays: number
+}
+
+export type InitiativePlan = {
+  planStartDate: string
+  planEndDate: string
+  milestones: string | null
+  totalWorkloadDays: number
+  roleWorkloads: Array<{ roleCode: string; workloadDays: number }>
+  items: InitiativePlanItem[]
+  updatedBy: number
+  updatedAt: string
 }
 
 export type InitiativeAttachment = {
@@ -49,6 +71,7 @@ export type InitiativeAttachment = {
 
 export type DeliveryStage =
   | 'REQUIREMENT_REVIEW'
+  | 'OUTLINE_DESIGN'
   | 'DESIGN'
   | 'DESIGN_REVIEW'
   | 'DEVELOPMENT'
@@ -85,9 +108,40 @@ export type RequirementDelivery = {
   status: DeliveryStatus
   designSummary: string | null
   designContent: string | null
+  outlineDesignSummary: string | null
+  outlineDesignContent: string | null
+  outlineDesignSubmittedAt: string | null
+  outlineDesignSubmittedBy: number | null
   createdAt: string
   updatedAt: string
   gates: DeliveryGate[]
+  modules: DesignModule[]
+  designAttachments: DesignAttachment[]
+}
+
+export type DesignModuleStatus = 'PENDING' | 'SUBMITTED' | 'REVISION_REQUIRED'
+
+export type DesignModule = {
+  id: number
+  name: string
+  description: string | null
+  assigneeId: number
+  status: DesignModuleStatus
+  designSummary: string | null
+  designContent: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type DesignAttachment = {
+  id: number
+  moduleId: number | null
+  filename: string
+  contentType: string
+  sizeBytes: number
+  contentUrl: string
+  uploadedBy: number
+  createdAt: string
 }
 
 export type BuildArtifact = {
@@ -148,9 +202,23 @@ export type InitiativeInput = {
   meetingMinutes?: string | null
 }
 
+export type InitiativePlanInput = {
+  planStartDate: string
+  planEndDate: string
+  milestones: string
+  items: Array<{
+    name: string
+    roleCode: string
+    startDate: string
+    endDate: string
+    headcount: number
+  }>
+}
+
 export type RequirementDeliveryAction =
   | 'APPROVE_REQUIREMENT_REVIEW'
   | 'REJECT_REQUIREMENT_REVIEW'
+  | 'SUBMIT_OUTLINE_DESIGN'
   | 'SUBMIT_DESIGN'
   | 'APPROVE_DESIGN'
   | 'REJECT_DESIGN'

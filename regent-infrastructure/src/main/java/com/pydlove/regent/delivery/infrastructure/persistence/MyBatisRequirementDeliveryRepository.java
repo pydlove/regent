@@ -3,6 +3,7 @@ package com.pydlove.regent.delivery.infrastructure.persistence;
 import com.pydlove.regent.delivery.domain.model.DeliveryStage;
 import com.pydlove.regent.delivery.domain.model.DeliveryStatus;
 import com.pydlove.regent.delivery.domain.model.InitiativeId;
+import com.pydlove.regent.delivery.domain.model.ProductVersionId;
 import com.pydlove.regent.delivery.domain.model.RequirementDelivery;
 import com.pydlove.regent.delivery.domain.model.RequirementDeliveryId;
 import com.pydlove.regent.delivery.domain.repository.RequirementDeliveryRepository;
@@ -49,6 +50,11 @@ public class MyBatisRequirementDeliveryRepository implements RequirementDelivery
     }
 
     @Override
+    public boolean existsStartedDesignForVersion(ProductVersionId versionId) {
+        return mapper.existsStartedDesignForVersion(versionId.value());
+    }
+
+    @Override
     public void save(RequirementDelivery delivery) {
         RequirementDeliveryData data = toData(delivery);
         if (delivery.getId() == null) {
@@ -70,6 +76,14 @@ public class MyBatisRequirementDeliveryRepository implements RequirementDelivery
                 DeliveryStatus.valueOf(data.getStatus()),
                 data.getDesignSummary(),
                 data.getDesignContent(),
+                data.getOutlineDesignSummary(),
+                data.getOutlineDesignContent(),
+                data.getOutlineDesignSubmittedAt() == null
+                        ? null
+                        : DeliveryTime.fromDb(data.getOutlineDesignSubmittedAt()),
+                data.getOutlineDesignSubmittedBy() == null
+                        ? null
+                        : UserId.of(data.getOutlineDesignSubmittedBy()),
                 DeliveryTime.fromDb(data.getCreatedAt()),
                 DeliveryTime.fromDb(data.getUpdatedAt()));
     }
@@ -85,6 +99,16 @@ public class MyBatisRequirementDeliveryRepository implements RequirementDelivery
         data.setStatus(delivery.getStatus().name());
         data.setDesignSummary(delivery.getDesignSummary());
         data.setDesignContent(delivery.getDesignContent());
+        data.setOutlineDesignSummary(delivery.getOutlineDesignSummary());
+        data.setOutlineDesignContent(delivery.getOutlineDesignContent());
+        data.setOutlineDesignSubmittedAt(
+                delivery.getOutlineDesignSubmittedAt() == null
+                        ? null
+                        : DeliveryTime.toDb(delivery.getOutlineDesignSubmittedAt()));
+        data.setOutlineDesignSubmittedBy(
+                delivery.getOutlineDesignSubmittedBy() == null
+                        ? null
+                        : delivery.getOutlineDesignSubmittedBy().value());
         data.setCreatedAt(DeliveryTime.toDb(delivery.getCreatedAt()));
         data.setUpdatedAt(DeliveryTime.toDb(delivery.getUpdatedAt()));
         return data;

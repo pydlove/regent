@@ -9,9 +9,14 @@ import com.pydlove.regent.delivery.domain.model.InitiativeId;
 import com.pydlove.regent.delivery.domain.model.InitiativeStatus;
 import com.pydlove.regent.delivery.domain.model.RequirementDelivery;
 import com.pydlove.regent.delivery.domain.model.RequirementDeliveryId;
+import com.pydlove.regent.delivery.domain.model.DesignModuleStatus;
+import com.pydlove.regent.delivery.domain.model.RequirementDesignAttachment;
+import com.pydlove.regent.delivery.domain.model.RequirementDesignModule;
 import com.pydlove.regent.delivery.domain.repository.DeliveryGateRepository;
 import com.pydlove.regent.delivery.domain.repository.InitiativeRepository;
 import com.pydlove.regent.delivery.domain.repository.RequirementDeliveryRepository;
+import com.pydlove.regent.delivery.domain.repository.RequirementDesignAttachmentRepository;
+import com.pydlove.regent.delivery.domain.repository.RequirementDesignModuleRepository;
 import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.application.query.ProjectMemberAccessService;
 import com.pydlove.regent.project.domain.model.ProjectId;
@@ -25,6 +30,8 @@ import com.pydlove.regent.shared.domain.DomainException;
 import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.domain.TransactionRunner;
 
+import java.util.List;
+
 /** 需求交付单的创建与阶段推进。 */
 public class RequirementDeliveryCommandService {
 
@@ -35,6 +42,8 @@ public class RequirementDeliveryCommandService {
     private final ProjectMemberAccessService memberAccessService;
     private final ProjectProfileRepository projectProfileRepository;
     private final TransactionRunner transactionRunner;
+    private final RequirementDesignModuleRepository moduleRepository;
+    private final RequirementDesignAttachmentRepository attachmentRepository;
 
     public RequirementDeliveryCommandService(RequirementDeliveryRepository deliveryRepository,
                                              InitiativeRepository initiativeRepository,
@@ -43,6 +52,20 @@ public class RequirementDeliveryCommandService {
                                              ProjectMemberAccessService memberAccessService,
                                              ProjectProfileRepository projectProfileRepository,
                                              TransactionRunner transactionRunner) {
+        this(deliveryRepository, initiativeRepository, requirementRepository, gateRepository,
+                memberAccessService, projectProfileRepository, transactionRunner, null, null);
+    }
+
+    public RequirementDeliveryCommandService(
+            RequirementDeliveryRepository deliveryRepository,
+            InitiativeRepository initiativeRepository,
+            RequirementRepository requirementRepository,
+            DeliveryGateRepository gateRepository,
+            ProjectMemberAccessService memberAccessService,
+            ProjectProfileRepository projectProfileRepository,
+            TransactionRunner transactionRunner,
+            RequirementDesignModuleRepository moduleRepository,
+            RequirementDesignAttachmentRepository attachmentRepository) {
         this.deliveryRepository = deliveryRepository;
         this.initiativeRepository = initiativeRepository;
         this.requirementRepository = requirementRepository;
@@ -50,6 +73,8 @@ public class RequirementDeliveryCommandService {
         this.memberAccessService = memberAccessService;
         this.projectProfileRepository = projectProfileRepository;
         this.transactionRunner = transactionRunner;
+        this.moduleRepository = moduleRepository;
+        this.attachmentRepository = attachmentRepository;
     }
 
     public RequirementDelivery create(InitiativeId initiativeId,
@@ -126,8 +151,36 @@ public class RequirementDeliveryCommandService {
                     gateType = GateType.REQUIREMENT_REVIEW;
                     gateDecision = GateDecision.REJECTED;
                 }
+                case SUBMIT_OUTLINE_DESIGN -> {
+                    boolean hasText = (designSummary != null && !designSummary.isBlank())
+                            || (designContent != null && !designContent.isBlank());
+                    boolean hasAttachment = attachmentRepository != null
+                            && attachmentRepository.findByDelivery(delivery.getId()).stream()
+                                    .anyMatch(RequirementDesignAttachment::outline);
+                    if (!hasText && !hasAttachment) {
+                        throw new DomainException("请填写概要设计摘要或上传概要设计文档");
+                    }
+                    delivery.submitOutlineDesign(designSummary, designContent, ownerId);
+                    gateType = GateType.OUTLINE_DESIGN_SUBMITTED;
+                }
                 case SUBMIT_DESIGN -> {
-                    delivery.submitDesign(designSummary, designContent);
+                    List<RequirementDesignModule> modules = moduleRepository == null
+                            ? List.of()
+                            : moduleRepository.findByDelivery(delivery.getId());
+                    if (modules.isEmpty()) {
+                        delivery.submitDesign(designSummary, designContent);
+                    } else {
+                        List<String> pending = modules.stream()
+                                .filter(module -> module.getStatus()
+                                        != DesignModuleStatus.SUBMITTED)
+                                .map(RequirementDesignModule::getName)
+                                .toList();
+                        if (!pending.isEmpty()) {
+                            throw new DomainException(
+                                    "还有模块详细设计未提交：" + String.join("、", pending));
+                        }
+                        delivery.submitModularDesign(designSummary, designContent);
+                    }
                     gateType = GateType.DESIGN_SUBMITTED;
                 }
                 case APPROVE_DESIGN -> {
@@ -136,6 +189,9 @@ public class RequirementDeliveryCommandService {
                 }
                 case REJECT_DESIGN -> {
                     delivery.rejectDesign();
+                    if (moduleRepository != null) {
+                        moduleRepository.reopenAll(delivery.getId());
+                    }
                     gateType = GateType.DESIGN_REVIEW;
                     gateDecision = GateDecision.REJECTED;
                 }
@@ -186,7 +242,8 @@ public class RequirementDeliveryCommandService {
         return switch (action) {
             case APPROVE_REQUIREMENT_REVIEW, REJECT_REQUIREMENT_REVIEW ->
                     ProjectMemberRole.PRODUCT;
-            case SUBMIT_DESIGN, APPROVE_DESIGN, REJECT_DESIGN, COMPLETE_DEVELOPMENT ->
+            case SUBMIT_OUTLINE_DESIGN, SUBMIT_DESIGN, APPROVE_DESIGN, REJECT_DESIGN,
+                 COMPLETE_DEVELOPMENT ->
                     ProjectMemberRole.TECH_LEAD;
             case PASS_SMOKE, PASS_AUTOMATION -> ProjectMemberRole.QA;
             case CLOSE, CANCEL -> ProjectMemberRole.OWNER;

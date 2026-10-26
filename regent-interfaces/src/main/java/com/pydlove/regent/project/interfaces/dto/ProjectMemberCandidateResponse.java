@@ -11,6 +11,7 @@ public record ProjectMemberCandidateResponse(
         String username,
         String displayName,
         String email,
+        String avatarUrl,
         List<String> organizationRoles,
         List<String> projectRoles) {
 
@@ -20,6 +21,10 @@ public record ProjectMemberCandidateResponse(
                 view.user().getUsername().value(),
                 view.user().getDisplayName().value(),
                 view.user().getEmail() == null ? null : view.user().getEmail().value(),
+                view.avatarVersion() == null
+                        ? null
+                        : "/api/profile/avatar/" + view.user().getId().value()
+                        + "?v=" + view.avatarVersion(),
                 view.organizationRoles().stream().map(OrganizationRole::name).toList(),
                 view.projectRoles().stream().map(ProjectMemberRole::name).toList());
     }

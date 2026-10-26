@@ -8,6 +8,7 @@ import java.util.List;
 
 public record ProjectMemberCandidateView(
         User user,
+        Long avatarVersion,
         List<OrganizationRole> organizationRoles,
         List<ProjectMemberRole> projectRoles) {
 }

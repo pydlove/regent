@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { Pencil, Plus, RefreshCw, UserRoundPlus, Users } from '@lucide/vue'
+import { Pencil, Plus, RefreshCw, Search, UserRoundPlus, Users } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import {
-  addProjectMember,
+  addProjectMembers,
   listProjectMemberCandidates,
   listProjectMembers,
   updateProjectMemberRoles,
@@ -58,8 +58,10 @@ const candidateError = ref<string | null>(null)
 const error = ref<string | null>(null)
 const dialogOpen = ref(false)
 const saving = ref(false)
-const formUserId = ref('')
-const formRole = ref<ProjectMemberRole>('PRODUCT')
+const formUserIds = ref<number[]>([])
+const quickRole = ref<ProjectMemberRole>()
+const roleAssignments = ref<Record<number, ProjectMemberRole[]>>({})
+const formKeyword = ref('')
 const selectedRole = ref<ProjectMemberRole | null>(null)
 const roleDialogOpen = ref(false)
 const roleSaving = ref(false)
@@ -69,6 +71,11 @@ const roleDraft = ref<ProjectMemberRole[]>([])
 const roleLabels = projectMemberRoleLabels
 const roleDescriptions = projectMemberRoleDescriptions
 const roleOptions = projectMemberRoleOptions
+const roleCardRoles: ProjectMemberRole[] = [
+  'OWNER',
+  ...roleOptions.map((role) => role.value),
+]
+const MAX_BATCH_MEMBERS = 100
 const organizationRoleLabels: Record<OrganizationRole, string> = {
   ORG_OWNER: '组织所有者',
   ORG_ADMIN: '组织管理员',
@@ -97,7 +104,7 @@ const soloOwnerMode = computed(() =>
 )
 const hasVersionInitiator = computed(() => hasProductRole.value || soloOwnerMode.value)
 const roleCards = computed(() =>
-  (Object.keys(roleLabels) as ProjectMemberRole[])
+  roleCardRoles
     .map((role) => ({
       role,
       count: members.value.filter((member) => member.roles.includes(role)).length,
@@ -118,19 +125,41 @@ const roleMemberOwnsProject = computed(
 const canSaveRoles = computed(
   () => !roleSaving.value && (roleMemberOwnsProject.value || roleDraft.value.length > 0),
 )
-const candidateItems = computed(() =>
+const availableCandidates = computed(() =>
   candidates.value
     .filter((candidate) =>
       !!candidate.email
       && !members.value.some((member) => member.userId === candidate.userId),
     )
-    .map((candidate) => ({
-      value: String(candidate.userId),
-      label: `${candidate.displayName} · ${candidate.email}`,
-    })),
 )
-const selectedCandidate = computed(
-  () => candidates.value.find((candidate) => String(candidate.userId) === formUserId.value) ?? null,
+const filteredCandidates = computed(() => {
+  const keyword = formKeyword.value.trim().toLocaleLowerCase('zh-CN')
+  if (!keyword) return availableCandidates.value
+  return availableCandidates.value.filter((candidate) =>
+    [candidate.displayName, candidate.email ?? '', candidate.username]
+      .some((value) => value.toLocaleLowerCase('zh-CN').includes(keyword)),
+  )
+})
+const selectedCandidates = computed(() =>
+  availableCandidates.value.filter((candidate) =>
+    formUserIds.value.includes(candidate.userId)),
+)
+const allFilteredSelected = computed(() =>
+  filteredCandidates.value.length > 0
+  && filteredCandidates.value.every((candidate) =>
+    formUserIds.value.includes(candidate.userId)),
+)
+const selectedNamesSummary = computed(() => {
+  const names = selectedCandidates.value.slice(0, 6)
+    .map((candidate) => candidate.displayName)
+  return selectedCandidates.value.length > names.length
+    ? `${names.join('、')} 等 ${selectedCandidates.value.length} 人`
+    : names.join('、')
+})
+const selectedAssignmentsValid = computed(() =>
+  selectedCandidates.value.length > 0
+  && selectedCandidates.value.every((candidate) =>
+    (roleAssignments.value[candidate.userId] ?? []).length > 0),
 )
 
 function messageOf(value: unknown): string {
@@ -196,29 +225,119 @@ async function loadCandidates() {
 }
 
 async function openAdd() {
-  formUserId.value = ''
-  formRole.value = selectedRole.value ?? 'PRODUCT'
+  formUserIds.value = []
+  formKeyword.value = ''
+  quickRole.value = undefined
+  roleAssignments.value = {}
   dialogOpen.value = true
   await loadCandidates()
-  formUserId.value = String(candidateItems.value[0]?.value ?? '')
 }
 
-async function saveMember() {
-  if (saving.value) return
-  const candidate = selectedCandidate.value
-  if (!candidate?.email) return
+function toggleCandidate(userId: number, checked: boolean) {
+  const next = new Set(formUserIds.value)
+  if (checked) {
+    if (!next.has(userId) && next.size >= MAX_BATCH_MEMBERS) {
+      toast.warning('一次最多添加 100 名成员')
+      return
+    }
+    next.add(userId)
+    if (!roleAssignments.value[userId]) {
+      roleAssignments.value = {
+        ...roleAssignments.value,
+        [userId]: [],
+      }
+    }
+  }
+  else {
+    next.delete(userId)
+    const assignments = { ...roleAssignments.value }
+    delete assignments[userId]
+    roleAssignments.value = assignments
+  }
+  formUserIds.value = [...next]
+}
+
+function toggleAllFilteredCandidates() {
+  const next = new Set(formUserIds.value)
+  if (allFilteredSelected.value) {
+    const assignments = { ...roleAssignments.value }
+    for (const candidate of filteredCandidates.value) {
+      next.delete(candidate.userId)
+      delete assignments[candidate.userId]
+    }
+    roleAssignments.value = assignments
+  } else {
+    const remaining = MAX_BATCH_MEMBERS - next.size
+    const unselected = filteredCandidates.value
+      .filter((candidate) => !next.has(candidate.userId))
+    const selectable = unselected.slice(0, Math.max(0, remaining))
+    const assignments = { ...roleAssignments.value }
+    for (const candidate of selectable) {
+      next.add(candidate.userId)
+      if (!assignments[candidate.userId]) {
+        assignments[candidate.userId] = []
+      }
+    }
+    roleAssignments.value = assignments
+    if (selectable.length < unselected.length) {
+      toast.warning('一次最多添加 100 名成员', '请分批选择其余成员')
+    }
+  }
+  formUserIds.value = [...next]
+}
+
+function memberRoles(userId: number) {
+  return roleAssignments.value[userId] ?? []
+}
+
+function toggleMemberRole(userId: number, role: ProjectMemberRole) {
+  const current = new Set(memberRoles(userId))
+  if (current.has(role)) current.delete(role)
+  else current.add(role)
+  roleAssignments.value = {
+    ...roleAssignments.value,
+    [userId]: [...current],
+  }
+}
+
+function applyQuickRoleToSelected() {
+  const role = quickRole.value
+  if (!role) return
+  const assignments = { ...roleAssignments.value }
+  for (const candidate of selectedCandidates.value) {
+    assignments[candidate.userId] = [
+      ...new Set([...(assignments[candidate.userId] ?? []), role]),
+    ]
+  }
+  roleAssignments.value = assignments
+}
+
+function organizationRolesLabel(candidate: ProjectMemberCandidate) {
+  return candidate.organizationRoles
+    .map((role) => organizationRoleLabels[role])
+    .join('、')
+}
+
+async function saveMembers() {
+  if (saving.value || !selectedAssignmentsValid.value) return
+  const members = selectedCandidates.value.map((candidate) => ({
+    email: candidate.email!,
+    roles: memberRoles(candidate.userId),
+  }))
   saving.value = true
   try {
-    await addProjectMember(
+    await addProjectMembers(
       Number(selectedProjectId.value),
-      candidate.email,
-      formRole.value,
+      members,
     )
     dialogOpen.value = false
     await load()
-    toast.success('团队角色已添加', '该成员下次登录后即可按角色参与审批')
+    toast.success(
+      `已添加 ${members.length} 名团队成员`,
+      '所有成员的项目角色已一次性配置完成',
+    )
   } catch (value) {
-    toast.warning('添加团队成员失败', messageOf(value))
+    toast.warning('批量添加团队成员失败', messageOf(value))
   } finally {
     saving.value = false
   }
@@ -226,8 +345,14 @@ async function saveMember() {
 
 function openRoleEditor(member: ProjectMember) {
   roleMember.value = member
-  roleDraft.value = member.roles.filter((role) => role !== 'OWNER')
+  const editableRoles = new Set(roleOptions.map((role) => role.value))
+  roleDraft.value = member.roles.filter((role) => editableRoles.has(role))
   roleDialogOpen.value = true
+}
+
+function visibleMemberRoles(roles: ProjectMemberRole[]): ProjectMemberRole[] {
+  const visibleRoles = new Set(roleCardRoles)
+  return roles.filter((role) => visibleRoles.has(role))
 }
 
 function toggleRoleDraft(role: ProjectMemberRole, checked: boolean) {
@@ -402,7 +527,7 @@ watch(
           </div>
           <div class="flex flex-wrap items-center gap-1.5">
             <span
-              v-for="role in member.roles"
+              v-for="role in visibleMemberRoles(member.roles)"
               :key="role"
               class="inline-flex items-center rounded-badge bg-accent/10 px-1.5 py-px text-caption text-accent"
             >
@@ -429,7 +554,7 @@ watch(
       <EmptyState
         v-else-if="!loading && selectedProjectId"
         title="还没有团队成员"
-        description="先添加项目负责人、产品负责人、技术负责人和测试负责人，流程门禁才能按角色流转。"
+        description="先添加项目负责人、产品负责人、技术负责人、测试负责人和测试人员，流程门禁才能按角色流转。"
       >
         <Button v-if="canManageMembers" @click="openAdd">添加第一位团队成员</Button>
       </EmptyState>
@@ -481,61 +606,211 @@ watch(
     <Dialog
       v-model:open="dialogOpen"
       layout="form"
-      title="添加团队成员"
-      description="从项目所属组织成员中选择。团队角色属于整个项目，一个账号可以拥有多个角色。"
+      size="wide"
+      title="批量添加团队成员"
+      description="在同一页面选择成员并配置各自的项目角色，最后一次提交完成整个团队设置。"
       :icon="UserRoundPlus"
     >
-      <div class="flex flex-col gap-3">
-        <DialogField label="组织成员" required>
-          <Select
-            v-model="formUserId"
-            :items="candidateItems"
-            placeholder="选择项目所属组织成员"
-            class="w-full"
-          />
-        </DialogField>
-        <p v-if="candidateLoading" class="text-caption text-label-tertiary">
-          正在读取组织成员…
-        </p>
-        <p v-else-if="candidateError" class="text-caption text-danger">
-          {{ candidateError }}
-        </p>
-        <p v-else-if="candidates.length === 0" class="text-caption text-warning">
-          组织里还没有可加入团队的人员，请先在组织管理中邀请成员。
-        </p>
-        <p
-          v-else-if="!candidates.some((candidate) => !!candidate.email)"
-          class="text-caption text-warning"
-        >
-          组织成员还没有可用的登录邮箱。
-        </p>
-        <p v-else-if="candidateItems.length === 0" class="text-caption text-warning">
-          组织成员都已加入团队，请在下方团队列表中调整角色。
-        </p>
-        <div v-if="selectedCandidate" class="rounded-control bg-window px-3 py-2">
-          <p class="text-caption text-label">{{ selectedCandidate.displayName }}</p>
-          <p class="mt-0.5 text-[10px] text-label-tertiary">
-            组织角色：{{ selectedCandidate.organizationRoles.map((role) => organizationRoleLabels[role]).join('、') }}
-            · 项目角色：{{ selectedCandidate.projectRoles.length
-              ? selectedCandidate.projectRoles.map((role) => roleLabels[role]).join('、')
-              : '尚未加入' }}
-          </p>
-        </div>
-        <DialogField label="项目角色" required>
-          <Select v-model="formRole" :items="roleOptions" class="w-full" />
-        </DialogField>
-        <p class="text-caption text-label-tertiary">
-          {{ roleDescriptions[formRole] }}
-        </p>
+      <div class="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <section class="overflow-hidden rounded-panel border border-separator-soft bg-content">
+          <div class="flex flex-wrap items-center gap-2 border-b border-separator-soft bg-window px-3 py-2">
+            <div class="relative min-w-48 flex-1">
+              <Icon
+                :as="Search"
+                size="inline"
+                class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-label-tertiary"
+              />
+              <Input
+                v-model="formKeyword"
+                placeholder="搜索姓名、邮箱或账号"
+                class="w-full pl-8"
+              />
+            </div>
+            <span class="tnum text-caption text-label-tertiary">
+              已选 {{ selectedCandidates.length }} / {{ MAX_BATCH_MEMBERS }} 人
+            </span>
+            <Button
+              v-if="filteredCandidates.length > 0"
+              size="sm"
+              variant="ghost"
+              @click="toggleAllFilteredCandidates"
+            >
+              {{ allFilteredSelected ? '取消全选' : '全选当前结果' }}
+            </Button>
+          </div>
+
+          <div v-if="candidateLoading" class="px-3 py-8 text-center text-caption text-label-tertiary">
+            正在读取组织成员…
+          </div>
+          <div v-else-if="candidateError" class="px-3 py-8 text-center text-caption text-danger">
+            {{ candidateError }}
+          </div>
+          <div
+            v-else-if="candidates.length === 0"
+            class="px-3 py-8 text-center text-caption text-warning"
+          >
+            组织里还没有可加入团队的人员，请先在组织管理中邀请成员。
+          </div>
+          <div
+            v-else-if="!candidates.some((candidate) => !!candidate.email)"
+            class="px-3 py-8 text-center text-caption text-warning"
+          >
+            组织成员还没有可用的登录邮箱。
+          </div>
+          <div
+            v-else-if="availableCandidates.length === 0"
+            class="px-3 py-8 text-center text-caption text-warning"
+          >
+            组织成员都已加入团队，请在下方团队列表中调整角色。
+          </div>
+          <div
+            v-else-if="filteredCandidates.length === 0"
+            class="px-3 py-8 text-center text-caption text-label-tertiary"
+          >
+            没有匹配的组织成员。
+          </div>
+          <div v-else class="max-h-72 overflow-y-auto">
+            <label
+              v-for="candidate in filteredCandidates"
+              :key="candidate.userId"
+              class="flex cursor-pointer items-start gap-2.5 border-b border-separator-soft px-3 py-2.5 last:border-b-0"
+              :class="formUserIds.includes(candidate.userId)
+                ? 'bg-accent/5'
+                : 'hover:bg-hover'"
+            >
+              <Checkbox
+                class="mt-1"
+                :model-value="formUserIds.includes(candidate.userId)"
+                @update:model-value="toggleCandidate(candidate.userId, $event === true)"
+              />
+              <Avatar
+                :src="candidate.avatarUrl ?? ''"
+                :name="candidate.displayName"
+                size="lg"
+              />
+              <span class="min-w-0 flex-1">
+                <span class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span class="truncate text-caption font-emphasis text-label">
+                    {{ candidate.displayName }}
+                  </span>
+                  <span class="truncate text-[10px] text-label-tertiary">
+                    {{ candidate.email }}
+                  </span>
+                </span>
+                <span class="mt-0.5 block text-[10px] text-label-tertiary">
+                  {{ organizationRolesLabel(candidate) || '组织成员' }}
+                </span>
+              </span>
+            </label>
+          </div>
+        </section>
+
+        <section class="overflow-hidden rounded-panel border border-separator-soft bg-content">
+          <div class="border-b border-separator-soft bg-window px-3 py-2">
+            <div class="flex items-center gap-2">
+              <p class="text-caption font-emphasis text-label">成员与项目角色</p>
+              <span class="tnum text-caption text-label-tertiary">
+                {{ selectedCandidates.length }}
+              </span>
+              <span class="ml-auto text-[10px] text-label-tertiary">角色可多选</span>
+            </div>
+            <div v-if="selectedCandidates.length > 0" class="mt-2 flex items-center gap-2">
+              <Select
+                v-model="quickRole"
+                :items="roleOptions"
+                placeholder="选择统一角色"
+                class="min-w-0 flex-1"
+              />
+              <Button size="sm" :disabled="!quickRole" @click="applyQuickRoleToSelected">
+                应用到已选
+              </Button>
+            </div>
+            <p
+              v-if="selectedCandidates.length > 0"
+              class="mt-1 truncate text-[10px] text-label-tertiary"
+            >
+              已选：{{ selectedNamesSummary }}
+            </p>
+          </div>
+
+          <div
+            v-if="selectedCandidates.length === 0"
+            class="grid min-h-72 place-items-center px-6 py-10 text-center"
+          >
+            <div>
+              <Icon :as="Users" size="large" class="mx-auto text-label-tertiary" />
+              <p class="mt-2 text-caption text-label-tertiary">
+                从左侧选择成员后，在这里一次配置每个人的角色。
+              </p>
+            </div>
+          </div>
+          <div v-else class="max-h-96 overflow-y-auto">
+            <div
+              v-for="candidate in selectedCandidates"
+              :key="candidate.userId"
+              class="border-b border-separator-soft px-3 py-3 last:border-b-0"
+            >
+              <div class="flex min-w-0 items-center gap-2">
+                <Avatar
+                  :src="candidate.avatarUrl ?? ''"
+                  :name="candidate.displayName"
+                  size="lg"
+                />
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-caption font-emphasis text-label">
+                    {{ candidate.displayName }}
+                  </p>
+                  <p class="truncate text-[10px] text-label-tertiary">
+                    {{ candidate.email }}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="rounded-control px-1.5 py-1 text-[10px] text-label-tertiary hover:bg-hover hover:text-label"
+                  @click="toggleCandidate(candidate.userId, false)"
+                >
+                  移除
+                </button>
+              </div>
+              <div class="mt-2 flex flex-wrap gap-1">
+                <button
+                  v-for="role in roleOptions"
+                  :key="role.value"
+                  type="button"
+                  class="rounded-badge border px-1.5 py-0.5 text-[10px] transition-colors"
+                  :class="memberRoles(candidate.userId).includes(role.value)
+                    ? 'border-accent/30 bg-accent/10 text-accent'
+                    : 'border-separator-soft bg-window text-label-tertiary hover:bg-hover hover:text-label'"
+                  :aria-pressed="memberRoles(candidate.userId).includes(role.value)"
+                  @click="toggleMemberRole(candidate.userId, role.value)"
+                >
+                  {{ role.label }}
+                </button>
+              </div>
+              <p
+                v-if="memberRoles(candidate.userId).length === 0"
+                class="mt-1.5 text-[10px] text-danger"
+              >
+                请至少选择一个项目角色。
+              </p>
+            </div>
+          </div>
+        </section>
       </div>
       <template #footer>
         <Button :disabled="saving" @click="dialogOpen = false">取消</Button>
         <Button
           variant="primary"
-          :disabled="saving || candidateLoading || !formUserId"
-          @click="saveMember"
+          :disabled="saving || candidateLoading || !selectedAssignmentsValid"
+          @click="saveMembers"
         >
-          {{ saving ? '添加中…' : candidateLoading ? '加载中…' : '添加团队成员' }}
+          {{
+            saving
+              ? '添加中…'
+              : candidateLoading
+                ? '加载中…'
+                : `添加 ${selectedCandidates.length} 名成员`
+          }}
         </Button>
       </template>
     </Dialog>

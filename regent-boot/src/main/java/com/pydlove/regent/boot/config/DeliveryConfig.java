@@ -4,6 +4,8 @@ import com.pydlove.regent.delivery.application.command.InitiativeCommandService;
 import com.pydlove.regent.delivery.application.command.ProductVersionCommandService;
 import com.pydlove.regent.delivery.application.command.ReleaseCommandService;
 import com.pydlove.regent.delivery.application.command.RequirementDeliveryCommandService;
+import com.pydlove.regent.delivery.application.command.RequirementDesignAttachmentService;
+import com.pydlove.regent.delivery.application.command.RequirementDesignCommandService;
 import com.pydlove.regent.delivery.application.query.InitiativeQueryService;
 import com.pydlove.regent.delivery.application.query.ProductVersionQueryService;
 import com.pydlove.regent.delivery.application.query.ReleaseQueryService;
@@ -11,11 +13,15 @@ import com.pydlove.regent.delivery.application.query.RequirementDeliveryQuerySer
 import com.pydlove.regent.delivery.domain.repository.BuildArtifactRepository;
 import com.pydlove.regent.delivery.domain.repository.DeliveryGateRepository;
 import com.pydlove.regent.delivery.domain.repository.InitiativeAttachmentRepository;
+import com.pydlove.regent.delivery.domain.repository.InitiativePlanRepository;
 import com.pydlove.regent.delivery.domain.repository.InitiativeRepository;
 import com.pydlove.regent.delivery.domain.repository.ProductVersionRepository;
 import com.pydlove.regent.delivery.domain.repository.ReleaseRepository;
 import com.pydlove.regent.delivery.domain.repository.RequirementDeliveryRepository;
+import com.pydlove.regent.delivery.domain.repository.RequirementDesignAttachmentRepository;
+import com.pydlove.regent.delivery.domain.repository.RequirementDesignModuleRepository;
 import com.pydlove.regent.project.domain.repository.ProjectProfileRepository;
+import com.pydlove.regent.project.domain.repository.ProjectMemberRepository;
 import com.pydlove.regent.project.domain.repository.WorkflowTemplateRepository;
 import com.pydlove.regent.project.application.command.WorkflowTemplateCommandService;
 import com.pydlove.regent.project.application.query.WorkflowTemplateQueryService;
@@ -23,6 +29,7 @@ import com.pydlove.regent.project.application.query.ProjectMemberAccessService;
 import com.pydlove.regent.requirement.domain.repository.RequirementRepository;
 import com.pydlove.regent.shared.domain.TransactionRunner;
 import com.pydlove.regent.delivery.application.command.InitiativeAttachmentService;
+import com.pydlove.regent.delivery.application.command.InitiativePlanCommandService;
 import com.pydlove.regent.shared.domain.port.AttachmentStorage;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -41,10 +48,12 @@ public class DeliveryConfig {
             ProjectMemberAccessService memberAccessService,
             InitiativeRepository initiativeRepository,
             RequirementRepository requirementRepository,
-            WorkflowTemplateRepository workflowTemplateRepository) {
+            WorkflowTemplateRepository workflowTemplateRepository,
+            TransactionRunner transactionRunner) {
         return new ProductVersionCommandService(
                 versionRepository, projectProfileRepository, memberAccessService,
-                initiativeRepository, requirementRepository, workflowTemplateRepository);
+                initiativeRepository, requirementRepository, workflowTemplateRepository,
+                transactionRunner);
     }
 
     @Bean
@@ -76,10 +85,24 @@ public class DeliveryConfig {
             ProjectMemberAccessService memberAccessService,
             ProjectProfileRepository projectProfileRepository,
             ProductVersionRepository productVersionRepository,
+            InitiativePlanRepository initiativePlanRepository,
             TransactionRunner transactionRunner) {
         return new InitiativeCommandService(
                 initiativeRepository, attachmentRepository, gateRepository, memberAccessService,
-                projectProfileRepository, productVersionRepository, transactionRunner);
+                projectProfileRepository, productVersionRepository,
+                initiativePlanRepository, transactionRunner);
+    }
+
+    @Bean
+    public InitiativePlanCommandService initiativePlanCommandService(
+            InitiativeRepository initiativeRepository,
+            InitiativePlanRepository planRepository,
+            ProjectProfileRepository projectProfileRepository,
+            ProjectMemberAccessService memberAccessService,
+            TransactionRunner transactionRunner) {
+        return new InitiativePlanCommandService(
+                initiativeRepository, planRepository, projectProfileRepository,
+                memberAccessService, transactionRunner);
     }
 
     @Bean
@@ -97,8 +120,10 @@ public class DeliveryConfig {
     @Bean
     public InitiativeQueryService initiativeQueryService(
             InitiativeRepository initiativeRepository,
+            InitiativePlanRepository planRepository,
             ProjectProfileRepository projectProfileRepository) {
-        return new InitiativeQueryService(initiativeRepository, projectProfileRepository);
+        return new InitiativeQueryService(
+                initiativeRepository, planRepository, projectProfileRepository);
     }
 
     @Bean
@@ -109,10 +134,13 @@ public class DeliveryConfig {
             DeliveryGateRepository gateRepository,
             ProjectMemberAccessService memberAccessService,
             ProjectProfileRepository projectProfileRepository,
+            RequirementDesignModuleRepository moduleRepository,
+            RequirementDesignAttachmentRepository designAttachmentRepository,
             TransactionRunner transactionRunner) {
         return new RequirementDeliveryCommandService(
                 deliveryRepository, initiativeRepository, requirementRepository,
-                gateRepository, memberAccessService, projectProfileRepository, transactionRunner);
+                gateRepository, memberAccessService, projectProfileRepository, transactionRunner,
+                moduleRepository, designAttachmentRepository);
     }
 
     @Bean
@@ -121,10 +149,43 @@ public class DeliveryConfig {
             InitiativeRepository initiativeRepository,
             RequirementRepository requirementRepository,
             DeliveryGateRepository gateRepository,
-            ProjectProfileRepository projectProfileRepository) {
+            ProjectProfileRepository projectProfileRepository,
+            RequirementDesignModuleRepository moduleRepository,
+            RequirementDesignAttachmentRepository designAttachmentRepository) {
         return new RequirementDeliveryQueryService(
                 deliveryRepository, initiativeRepository, requirementRepository,
-                gateRepository, projectProfileRepository);
+                gateRepository, projectProfileRepository,
+                moduleRepository, designAttachmentRepository);
+    }
+
+    @Bean
+    public RequirementDesignCommandService requirementDesignCommandService(
+            RequirementDeliveryRepository deliveryRepository,
+            RequirementDesignModuleRepository moduleRepository,
+            RequirementDesignAttachmentRepository attachmentRepository,
+            ProjectMemberRepository memberRepository,
+            ProjectMemberAccessService memberAccessService,
+            ProjectProfileRepository projectProfileRepository,
+            TransactionRunner transactionRunner) {
+        return new RequirementDesignCommandService(
+                deliveryRepository, moduleRepository, attachmentRepository,
+                memberRepository, memberAccessService, projectProfileRepository,
+                transactionRunner);
+    }
+
+    @Bean
+    public RequirementDesignAttachmentService requirementDesignAttachmentService(
+            RequirementDeliveryRepository deliveryRepository,
+            RequirementDesignModuleRepository moduleRepository,
+            RequirementDesignAttachmentRepository attachmentRepository,
+            ProjectProfileRepository projectProfileRepository,
+            ProjectMemberAccessService memberAccessService,
+            AttachmentStorage attachmentStorage,
+            @Value("${regent.documents.max-bytes}") long maxBytes) {
+        return new RequirementDesignAttachmentService(
+                deliveryRepository, moduleRepository, attachmentRepository,
+                projectProfileRepository, memberAccessService,
+                attachmentStorage, maxBytes);
     }
 
     @Bean

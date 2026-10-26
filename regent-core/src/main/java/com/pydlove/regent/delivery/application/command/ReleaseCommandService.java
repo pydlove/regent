@@ -63,7 +63,7 @@ public class ReleaseCommandService {
                           UserId ownerId) {
         return transactionRunner.inTransaction(() -> {
             requireProject(projectId, ownerId);
-            memberAccessService.requireRole(projectId, ownerId, ProjectMemberRole.RELEASE_MANAGER);
+            memberAccessService.requireRole(projectId, ownerId, ProjectMemberRole.OWNER);
             List<RequirementDelivery> deliveries = deliveryRepository.findByIds(deliveryIds);
             if (deliveries.size() != deliveryIds.size()) {
                 throw new DomainException("部分需求交付不存在");
@@ -159,7 +159,7 @@ public class ReleaseCommandService {
     private static ProjectMemberRole requiredRoleFor(ReleaseAction action) {
         return switch (action) {
             case APPROVE_TRANSFER, PASS_INTEGRATION, PASS_REGRESSION -> ProjectMemberRole.QA;
-            case APPROVE_RELEASE, MARK_DEPLOYED -> ProjectMemberRole.RELEASE_MANAGER;
+            case APPROVE_RELEASE, MARK_DEPLOYED -> ProjectMemberRole.OWNER;
             case CLOSE -> ProjectMemberRole.OWNER;
         };
     }

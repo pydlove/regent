@@ -16,6 +16,7 @@ import com.pydlove.regent.organization.domain.model.Organization;
 import com.pydlove.regent.organization.domain.model.OrganizationRole;
 import com.pydlove.regent.project.application.command.ProjectRegistrationService;
 import com.pydlove.regent.project.application.command.ProjectMemberCommandService;
+import com.pydlove.regent.project.application.command.ProjectMemberRoleAssignment;
 import com.pydlove.regent.project.application.command.RegisterProjectCommand;
 import com.pydlove.regent.project.application.query.ProjectMemberQueryService;
 import com.pydlove.regent.project.domain.model.Project;
@@ -33,6 +34,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -163,6 +165,66 @@ class OrganizationManagementIT {
                 () -> commandService.create(
                         new CreateOrganizationCommand("pm_cannot_create", "不应创建", null),
                         accepted.user().getId()));
+    }
+
+    @Test
+    @DisplayName("可以批量把多个组织成员加入项目并统一分配角色")
+    void batchAddsOrganizationMembersToProject(@TempDir Path workspace) {
+        Organization organization = commandService.create(
+                new CreateOrganizationCommand("batch_project_members", "批量成员组织", null),
+                OWNER);
+        commandService.addRole(
+                organization.getId(), MEMBER, OrganizationRole.ORG_MEMBER, OWNER);
+        Project project = projectRegistrationService.register(
+                new RegisterProjectCommand(
+                        "batch_project_members",
+                        "批量成员项目",
+                        workspace.toString(),
+                        null,
+                        null,
+                        DecisionLevel.L1),
+                OWNER,
+                organization.getId());
+        jdbcTemplate.update("""
+                UPDATE app_user
+                SET avatar_filename = 'owner.png',
+                    avatar_content_type = 'image/png',
+                    avatar_storage_path = '/tmp/owner.png',
+                    avatar_updated_at = UTC_TIMESTAMP(3)
+                WHERE id = ?
+                """, OWNER.value());
+
+        var candidate = projectMemberQueryService.candidates(project.getId(), OWNER).stream()
+                .filter(item -> item.user().getId().equals(OWNER))
+                .findFirst()
+                .orElseThrow();
+        assertNotNull(candidate.avatarVersion());
+
+        var added = projectMemberCommandService.addAssignments(
+                project.getId(),
+                List.of(
+                        new ProjectMemberRoleAssignment(
+                                "org-owner@example.com",
+                                List.of(ProjectMemberRole.QA, ProjectMemberRole.OPS)),
+                        new ProjectMemberRoleAssignment(
+                                "org-member@example.com",
+                                List.of(ProjectMemberRole.DEVELOPER, ProjectMemberRole.VIEWER))),
+                OWNER);
+
+        assertEquals(4, added.size());
+        var members = projectMemberQueryService.list(project.getId(), OWNER);
+        assertTrue(members.stream().anyMatch(view ->
+                view.member().userId().equals(OWNER)
+                        && view.member().role() == ProjectMemberRole.QA));
+        assertTrue(members.stream().anyMatch(view ->
+                view.member().userId().equals(OWNER)
+                        && view.member().role() == ProjectMemberRole.OPS));
+        assertTrue(members.stream().anyMatch(view ->
+                view.member().userId().equals(MEMBER)
+                        && view.member().role() == ProjectMemberRole.DEVELOPER));
+        assertTrue(members.stream().anyMatch(view ->
+                view.member().userId().equals(MEMBER)
+                        && view.member().role() == ProjectMemberRole.VIEWER));
     }
 
     @Test

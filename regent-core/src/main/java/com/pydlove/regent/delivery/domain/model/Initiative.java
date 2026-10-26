@@ -257,6 +257,12 @@ public class Initiative {
         }
     }
 
+    public void requirePlanEditable() {
+        if (status == InitiativeStatus.APPROVED || status == InitiativeStatus.CANCELLED) {
+            throw new DomainException("立项已批准或已取消，不能修改版本计划");
+        }
+    }
+
     public void cancel() {
         if (status == InitiativeStatus.CANCELLED) return;
         status = InitiativeStatus.CANCELLED;

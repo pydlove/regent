@@ -172,6 +172,11 @@ class InitiativeCommandServiceTest {
             }
             store.put(initiative.getId().value(), initiative);
         }
+
+        @Override
+        public void deleteByVersion(ProductVersionId versionId) {
+            store.values().removeIf(initiative -> versionId.equals(initiative.getVersionId()));
+        }
     }
 
     private static final class Attachments implements InitiativeAttachmentRepository {

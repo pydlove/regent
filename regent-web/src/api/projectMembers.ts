@@ -14,17 +14,35 @@ function resolveMembers(members: ProjectMember[]): ProjectMember[] {
   return members.map(resolveMember)
 }
 
+function resolveCandidate(
+  candidate: ProjectMemberCandidate,
+): ProjectMemberCandidate {
+  const avatarUrl = candidate.avatarUrl ? apiResourceUrl(candidate.avatarUrl) : null
+  return avatarUrl === candidate.avatarUrl ? candidate : { ...candidate, avatarUrl }
+}
+
 export const listProjectMembers = async (projectId: number) =>
   resolveMembers(await get<ProjectMember[]>(`/projects/${projectId}/members`))
 
 export const listProjectMemberCandidates = (projectId: number) =>
   get<ProjectMemberCandidate[]>(`/projects/${projectId}/members/candidates`)
+    .then((candidates) => candidates.map(resolveCandidate))
 
 export const addProjectMember = async (
   projectId: number,
   email: string,
   role: ProjectMemberRole,
 ) => resolveMembers(await postJson<ProjectMember[]>(`/projects/${projectId}/members`, { email, role }))
+
+export const addProjectMembers = async (
+  projectId: number,
+  members: Array<{ email: string; roles: ProjectMemberRole[] }>,
+) => resolveMembers(
+  await postJson<ProjectMember[]>(
+    `/projects/${projectId}/members/batch`,
+    { members },
+  ),
+)
 
 export const removeProjectMember = (
   projectId: number,

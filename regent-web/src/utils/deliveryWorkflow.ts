@@ -19,6 +19,7 @@ export const deliveryWorkflowSteps = [
   '版本立项',
   '需求池',
   '需求评审',
+  '概要设计',
   '详细设计',
   '设计评审',
   '研发',
@@ -42,13 +43,19 @@ export function deliveryNextStep(
       return {
         label: '需求评审',
         role: 'PRODUCT',
-        hint: '确认需求边界、验收标准和影响范围后进入详细设计。',
+        hint: '确认需求边界、验收标准和影响范围后进入概要设计。',
+      }
+    case 'OUTLINE_DESIGN':
+      return {
+        label: '提交概要设计',
+        role: 'TECH_LEAD',
+        hint: '上传概要设计文档，确认模块边界、接口和技术风险。',
       }
     case 'DESIGN':
       return {
-        label: '提交详细设计',
+        label: '模块详细设计',
         role: 'TECH_LEAD',
-        hint: '写清架构、接口、数据迁移、测试策略和回滚方案。',
+        hint: '技术负责人分配模块，研发分别提交自己模块的详细设计。',
       }
     case 'DESIGN_REVIEW':
       return {
@@ -77,8 +84,8 @@ export function deliveryNextStep(
     case 'READY_FOR_TRANSFER':
       return {
         label: '纳入版本发布',
-        role: 'RELEASE_MANAGER',
-        hint: '发布负责人把需求纳入不可变制品的发布轮次。',
+        role: 'OWNER',
+        hint: '项目负责人把需求纳入不可变制品的发布轮次。',
       }
     case 'IN_RELEASE':
       return {
@@ -104,13 +111,13 @@ export function initiativeNextStep(status: InitiativeStatus): WorkflowStep | nul
       return {
         label: '提交立项审批',
         role: null,
-        hint: '补齐业务目标、范围和成功指标后提交项目负责人审批。',
+        hint: '产品负责人补齐目标与材料，项目负责人配置版本计划后提交审批。',
       }
     case 'SUBMITTED':
       return {
         label: '立项审批',
         role: 'OWNER',
-        hint: '项目负责人确认业务价值和资源投入。',
+        hint: '项目负责人确认版本计划、资源投入和业务价值。',
       }
     case 'APPROVED':
       return {
@@ -149,13 +156,13 @@ export function releaseNextStep(stage: ReleaseStage, status: ReleaseStatus): Wor
     case 'RELEASE_REVIEW':
       return {
         label: '发版评审',
-        role: 'RELEASE_MANAGER',
-        hint: '发布负责人确认风险、窗口和回滚方案。',
+        role: 'OWNER',
+        hint: '项目负责人确认风险、窗口和回滚方案。',
       }
     case 'PRODUCTION':
       return {
         label: '确认生产部署',
-        role: 'RELEASE_MANAGER',
+        role: 'OWNER',
         hint: '确认生产部署和发布后冒烟完成。',
       }
     case 'OBSERVING':

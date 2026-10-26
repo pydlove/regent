@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  Boxes,
   ChevronLeft,
   Download,
   Pencil,
@@ -13,7 +14,7 @@ import {
   X,
 } from '@lucide/vue'
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { listInitiatives } from '@/api/delivery'
 import { ApiError } from '@/api/http'
@@ -57,6 +58,7 @@ import { formatRelative } from '@/utils/format'
 import { findDuplicateImportRows } from '@/utils/requirementImport'
 import {
   formatRequirementNo,
+  lockedRequirementVersionIds,
   requirementDisplayStatus,
   type RequirementDisplayStatus,
 } from '@/utils/requirementPool'
@@ -73,6 +75,7 @@ const store = useTaskStore()
 const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
+const router = useRouter()
 
 const requirements = ref<Requirement[]>([])
 const trash = ref<RequirementTrashItem[]>([])
@@ -179,15 +182,50 @@ const statusFilterItems = [
 const versionMap = computed(() =>
   new Map(versions.value.map((version) => [version.id, version])),
 )
+const lockedDesignVersionIds = computed(() =>
+  lockedRequirementVersionIds(requirements.value),
+)
 const planningVersions = computed(() =>
   versions.value.filter((version) => version.status === 'PLANNING'),
 )
 const assignableVersions = computed(() =>
   planningVersions.value.filter((version) =>
-    allInitiatives.value.some((initiative) =>
+    !lockedDesignVersionIds.value.has(version.id)
+    && allInitiatives.value.some((initiative) =>
       initiative.versionId === version.id && initiative.status === 'APPROVED'),
   ),
 )
+const assignableVersionOptions = computed(() =>
+  assignableVersions.value.map((version) => {
+    const initiative = allInitiatives.value.find((item) =>
+      item.versionId === version.id && item.status === 'APPROVED')
+    return {
+      value: String(version.id),
+      label: `${version.versionNo} · ${initiative?.title ?? '已批准立项'}`,
+    }
+  }),
+)
+const selectedAssignVersion = computed(() =>
+  assignableVersions.value.find((version) =>
+    String(version.id) === assignVersionId.value) ?? null,
+)
+const selectedAssignInitiative = computed(() =>
+  selectedAssignVersion.value
+    ? allInitiatives.value.find((initiative) =>
+        initiative.versionId === selectedAssignVersion.value?.id
+        && initiative.status === 'APPROVED') ?? null
+    : null,
+)
+const assignBlockedReason = computed(() => {
+  if (planningVersions.value.length === 0) {
+    return '当前项目还没有产品版本。请先到“版本”页新建版本并完成立项审批。'
+  }
+  if (planningVersions.value.every((version) =>
+    lockedDesignVersionIds.value.has(version.id))) {
+    return '规划中的版本都已进入设计或研发阶段，需求范围已锁定。请创建新的后续版本。'
+  }
+  return '当前版本还没有完成立项审批。请先到“版本”页完成审批后再纳入需求。'
+})
 const targetVersionId = computed(() => {
   const value = Number(route.query.versionId)
   return Number.isSafeInteger(value) && value > 0 ? value : null
@@ -240,7 +278,7 @@ const canDeleteAnyRequirement = computed(() =>
 )
 const canPurgeRequirements = canDeleteAnyRequirement
 const importVersionOptions = computed(() =>
-  planningVersions.value.flatMap((version) => {
+  assignableVersions.value.flatMap((version) => {
     const initiative = allInitiatives.value.find((item) =>
       item.versionId === version.id && item.status === 'APPROVED')
     return initiative ? [{ version, initiative }] : []
@@ -537,6 +575,7 @@ async function saved(requirement: Requirement) {
     targetVersionId.value !== null
     && requirement.versionId === null
     && targetVersion.value?.status === 'PLANNING'
+    && !lockedDesignVersionIds.value.has(targetVersionId.value)
   ) {
     try {
       await assignRequirementVersion(requirement.id, targetVersionId.value)
@@ -624,14 +663,17 @@ async function restoreFromTrash(item: RequirementTrashItem) {
 
 function openAssign(requirement: Requirement) {
   assignTarget.value = requirement
-  assignVersionId.value = String(
-    requirement.versionId
-    ?? targetVersionId.value
-    ?? assignableVersions.value[0]?.id
-    ?? '',
-  )
+  const preferredId = requirement.versionId ?? targetVersionId.value
+  const preferred = assignableVersions.value.find((version) => version.id === preferredId)
+  assignVersionId.value = String(preferred?.id ?? assignableVersions.value[0]?.id ?? '')
   assignError.value = null
   assignOpen.value = true
+}
+
+function goToVersions() {
+  assignOpen.value = false
+  batchAssignOpen.value = false
+  void router.push({ path: '/projects', query: { view: 'versions' } })
 }
 
 async function saveAssignment() {
@@ -1207,7 +1249,7 @@ onMounted(() => void load())
             v-else-if="selectedRequirement.poolStatus === 'FORMAL'"
             class="mt-4 rounded-panel border border-success/20 bg-success/5 p-3 text-caption text-label-secondary"
           >
-            正式需求已进入详细设计，请到“版本”页继续推进研发流程。
+            正式需求已进入设计流程，请到“版本”页继续推进概要设计和详细设计。
           </p>
           <div class="mt-4 flex flex-wrap items-center gap-2 border-t border-separator pt-3">
             <template v-if="isRequirementAssignable(selectedRequirement)">
@@ -1349,32 +1391,73 @@ onMounted(() => void load())
     <Dialog
       v-model:open="assignOpen"
       layout="form"
+      size="large"
       title="纳入产品版本"
-      description="需求纳入规划中的产品版本后，才能登记线下需求评审记录。"
+      description="版本必须先完成立项审批，且尚未进入设计或研发阶段。"
     >
-      <div class="flex flex-col gap-3">
-        <div class="rounded-control bg-window px-3 py-2 text-caption text-label">
-          {{ assignTarget?.title }}
+      <div class="flex flex-col gap-4">
+        <div v-if="assignTarget" class="rounded-panel border border-separator-soft bg-window px-3 py-2.5">
+          <div class="flex items-center gap-2">
+            <span class="tnum shrink-0 font-mono text-caption text-label-tertiary">
+              #{{ formatRequirementNo(assignTarget.requirementNo) }}
+            </span>
+            <p class="min-w-0 flex-1 truncate text-caption font-emphasis text-label">
+              {{ assignTarget.title }}
+            </p>
+          </div>
         </div>
-        <DialogField label="产品版本" required>
-          <Select
-            v-model="assignVersionId"
-            :items="assignableVersions.map((version) => ({
-              value: String(version.id),
-              label: version.versionNo,
-            }))"
-            placeholder="先创建一个完成立项审批的规划版本"
-            class="w-full"
-          />
-        </DialogField>
-        <p v-if="assignableVersions.length === 0" class="text-caption text-warning">
-          当前项目没有可纳入的规划版本，请先创建版本并完成版本立项审批。
-        </p>
+
+        <template v-if="assignableVersions.length > 0">
+          <DialogField label="目标产品版本" required>
+            <Select
+              v-model="assignVersionId"
+              :items="assignableVersionOptions"
+              placeholder="选择已完成立项审批的规划版本"
+              class="w-full"
+            />
+          </DialogField>
+          <div
+            v-if="selectedAssignVersion"
+            class="rounded-control bg-window px-3 py-2 text-caption text-label-secondary"
+          >
+            <p class="font-emphasis text-label">{{ selectedAssignVersion.versionNo }}</p>
+            <p class="mt-0.5 text-label-tertiary">
+              立项：{{ selectedAssignInitiative?.title ?? '已批准立项' }}
+              · 当前状态：规划中
+            </p>
+          </div>
+          <p class="text-caption text-label-tertiary">
+            纳入后需求会进入待评审状态，可继续到“版本”页提交线下评审材料。
+          </p>
+        </template>
+
+        <div
+          v-else
+          class="rounded-panel border border-warning/25 bg-warning/5 p-4"
+        >
+          <div class="flex items-start gap-3">
+            <span class="grid size-9 shrink-0 place-items-center rounded-panel bg-warning/10 text-warning">
+              <Icon :as="Boxes" size="regular" />
+            </span>
+            <div class="min-w-0 flex-1">
+              <p class="text-caption font-emphasis text-label">当前没有可纳入的产品版本</p>
+              <p class="mt-1 text-caption text-label-secondary">
+                {{ assignBlockedReason }}
+              </p>
+              <Button class="mt-3" size="sm" variant="primary" @click="goToVersions">
+                去版本管理
+              </Button>
+            </div>
+          </div>
+        </div>
         <p v-if="assignError" class="text-caption text-danger">{{ assignError }}</p>
       </div>
       <template #footer>
-        <Button :disabled="assignSaving" @click="assignOpen = false">取消</Button>
+        <Button :disabled="assignSaving" @click="assignOpen = false">
+          {{ assignableVersions.length > 0 ? '取消' : '关闭' }}
+        </Button>
         <Button
+          v-if="assignableVersions.length > 0"
           variant="primary"
           :disabled="assignSaving || !assignVersionId"
           @click="saveAssignment"
@@ -1410,16 +1493,13 @@ onMounted(() => void load())
         <DialogField label="目标产品版本" required>
           <Select
             v-model="batchAssignVersionId"
-            :items="assignableVersions.map((version) => ({
-              value: String(version.id),
-              label: version.versionNo,
-            }))"
+            :items="assignableVersionOptions"
             placeholder="选择规划中的产品版本"
             class="w-full"
           />
         </DialogField>
         <p v-if="assignableVersions.length === 0" class="text-caption text-warning">
-          当前项目没有可纳入的规划版本，请先创建版本并完成版本立项审批。
+          {{ assignBlockedReason }}
         </p>
         <p v-if="batchAssignError" class="text-caption text-danger">{{ batchAssignError }}</p>
       </div>

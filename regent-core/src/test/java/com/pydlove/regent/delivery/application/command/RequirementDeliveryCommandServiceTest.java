@@ -140,6 +140,11 @@ class RequirementDeliveryCommandServiceTest {
             }
             store.put(initiative.getId().value(), initiative);
         }
+
+        @Override
+        public void deleteByVersion(ProductVersionId versionId) {
+            store.values().removeIf(initiative -> versionId.equals(initiative.getVersionId()));
+        }
     }
 
     private static final class Requirements implements RequirementRepository {
@@ -235,6 +240,11 @@ class RequirementDeliveryCommandServiceTest {
             return store.values().stream()
                     .filter(delivery -> delivery.getRequirementId().equals(requirementId))
                     .findFirst();
+        }
+
+        @Override
+        public boolean existsStartedDesignForVersion(ProductVersionId versionId) {
+            return false;
         }
 
         @Override

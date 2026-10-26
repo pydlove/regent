@@ -7,6 +7,8 @@ import com.pydlove.regent.delivery.domain.model.RequirementDeliveryId;
 import com.pydlove.regent.delivery.domain.repository.DeliveryGateRepository;
 import com.pydlove.regent.delivery.domain.repository.InitiativeRepository;
 import com.pydlove.regent.delivery.domain.repository.RequirementDeliveryRepository;
+import com.pydlove.regent.delivery.domain.repository.RequirementDesignAttachmentRepository;
+import com.pydlove.regent.delivery.domain.repository.RequirementDesignModuleRepository;
 import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.repository.ProjectProfile;
@@ -23,17 +25,33 @@ public class RequirementDeliveryQueryService {
     private final RequirementRepository requirementRepository;
     private final DeliveryGateRepository gateRepository;
     private final ProjectProfileRepository projectProfileRepository;
+    private final RequirementDesignModuleRepository moduleRepository;
+    private final RequirementDesignAttachmentRepository attachmentRepository;
 
     public RequirementDeliveryQueryService(RequirementDeliveryRepository deliveryRepository,
                                           InitiativeRepository initiativeRepository,
                                           RequirementRepository requirementRepository,
                                           DeliveryGateRepository gateRepository,
                                           ProjectProfileRepository projectProfileRepository) {
+        this(deliveryRepository, initiativeRepository, requirementRepository, gateRepository,
+                projectProfileRepository, null, null);
+    }
+
+    public RequirementDeliveryQueryService(
+            RequirementDeliveryRepository deliveryRepository,
+            InitiativeRepository initiativeRepository,
+            RequirementRepository requirementRepository,
+            DeliveryGateRepository gateRepository,
+            ProjectProfileRepository projectProfileRepository,
+            RequirementDesignModuleRepository moduleRepository,
+            RequirementDesignAttachmentRepository attachmentRepository) {
         this.deliveryRepository = deliveryRepository;
         this.initiativeRepository = initiativeRepository;
         this.requirementRepository = requirementRepository;
         this.gateRepository = gateRepository;
         this.projectProfileRepository = projectProfileRepository;
+        this.moduleRepository = moduleRepository;
+        this.attachmentRepository = attachmentRepository;
     }
 
     public List<RequirementDeliveryView> list(ProjectId projectId, UserId ownerId) {
@@ -76,7 +94,14 @@ public class RequirementDeliveryQueryService {
                 requirementTitle,
                 initiativeTitle,
                 project.name(),
-                gateRepository.findByScope(GateScope.REQUIREMENT_DELIVERY, delivery.getId().value()));
+                gateRepository.findByScope(
+                        GateScope.REQUIREMENT_DELIVERY, delivery.getId().value()),
+                moduleRepository == null
+                        ? List.of()
+                        : moduleRepository.findByDelivery(delivery.getId()),
+                attachmentRepository == null
+                        ? List.of()
+                        : attachmentRepository.findByDelivery(delivery.getId()));
     }
 
     private ProjectProfile requireProject(ProjectId projectId, UserId ownerId) {

@@ -55,6 +55,7 @@ public final class OrganizationMemberExcel {
             Map.entry(ProjectMemberRole.ARCHITECT, "架构师"),
             Map.entry(ProjectMemberRole.DEVELOPER, "开发"),
             Map.entry(ProjectMemberRole.QA, "测试负责人"),
+            Map.entry(ProjectMemberRole.TESTER, "测试人员"),
             Map.entry(ProjectMemberRole.OPS, "运维/SRE"),
             Map.entry(ProjectMemberRole.SECURITY, "安全/合规"),
             Map.entry(ProjectMemberRole.RELEASE_MANAGER, "发布负责人"),

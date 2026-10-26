@@ -39,7 +39,7 @@ const pages = computed(() => [
   { title: '交付', description: '部署与测试', to: '/delivery', icon: ServerCog },
   { title: '项目', description: '项目与执行资源', to: '/projects', icon: FolderKanban },
   ...(organizationStore.canManageOrganization
-    ? [{ title: '研发流程', description: '全局流程模板与阶段配置', to: '/settings/workflow', icon: Workflow }]
+    ? [{ title: '研发流程', description: '组织下的全局流程模板与阶段配置', to: '/organizations/workflow', icon: Workflow }]
     : []),
   { title: '设置', description: '账户、执行设备与系统设置', to: '/settings', icon: Settings },
   { title: '使用说明', description: '功能说明与排障', to: '/help', icon: CircleHelp },

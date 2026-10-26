@@ -27,3 +27,21 @@ export function requirementDisplayStatus(
   }
   return requirement.poolStatus
 }
+
+export function lockedRequirementVersionIds(
+  requirements: RequirementPoolState[],
+): Set<number> {
+  return new Set(
+    requirements
+      .filter((requirement) =>
+        requirement.versionId !== null && requirement.poolStatus === 'FORMAL')
+      .map((requirement) => requirement.versionId as number),
+  )
+}
+
+export function versionHasStartedDesign(
+  requirements: RequirementPoolState[],
+  versionId: number | null,
+): boolean {
+  return versionId !== null && lockedRequirementVersionIds(requirements).has(versionId)
+}

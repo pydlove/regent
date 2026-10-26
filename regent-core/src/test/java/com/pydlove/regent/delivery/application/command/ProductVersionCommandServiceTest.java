@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -61,7 +62,7 @@ class ProductVersionCommandServiceTest {
     }
 
     @Test
-    @DisplayName("已有立项或需求的版本只能关闭，不能删除")
+    @DisplayName("已有需求的版本不能删除，仅立项的版本关闭后可以删除")
     void linkedVersionCannotBeDeleted() {
         Fixture fixture = new Fixture(List.of(ProjectMemberRole.OWNER));
         ProductVersion version = fixture.createVersion();
@@ -85,9 +86,17 @@ class ProductVersionCommandServiceTest {
                 null,
                 null);
 
-        assertThrows(DomainException.class,
+        DomainException exception = assertThrows(DomainException.class,
                 () -> fixture.service().delete(version.getId(), OWNER));
+        assertEquals("产品版本已有立项，请先关闭版本后再删除", exception.getMessage());
         assertTrue(fixture.versions.findById(version.getId()).isPresent());
+
+        version.close();
+        fixture.versions.update(version);
+        fixture.service().delete(version.getId(), OWNER);
+
+        assertTrue(fixture.versions.findById(version.getId()).isEmpty());
+        assertTrue(fixture.initiatives.findByVersion(version.getId()).isEmpty());
     }
 
     private static final class Fixture {
@@ -175,6 +184,14 @@ class ProductVersionCommandServiceTest {
         @Override
         public void save(Initiative initiative) {
             linkedInitiative = initiative;
+        }
+
+        @Override
+        public void deleteByVersion(ProductVersionId versionId) {
+            if (linkedInitiative != null
+                    && versionId.equals(linkedInitiative.getVersionId())) {
+                linkedInitiative = null;
+            }
         }
     }
 

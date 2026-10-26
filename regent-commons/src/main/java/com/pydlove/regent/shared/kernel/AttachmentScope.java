@@ -8,5 +8,6 @@ public enum AttachmentScope {
     BUG,
     INITIATIVE,
     REQUIREMENT_REVIEW,
+    DELIVERY_DESIGN,
     USER_AVATAR
 }

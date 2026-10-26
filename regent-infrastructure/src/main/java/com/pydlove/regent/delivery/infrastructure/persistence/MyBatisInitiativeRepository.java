@@ -49,6 +49,12 @@ public class MyBatisInitiativeRepository implements InitiativeRepository {
         }
     }
 
+    @Override
+    public void deleteByVersion(ProductVersionId versionId) {
+        mapper.deleteGatesByVersion(versionId.value());
+        mapper.deleteByVersion(versionId.value());
+    }
+
     private Initiative toDomain(InitiativeData data) {
         return Initiative.restore(
                 InitiativeId.of(data.getId()),

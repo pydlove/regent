@@ -2,6 +2,7 @@ package com.pydlove.regent.delivery.domain.model;
 
 public enum DeliveryStage {
     REQUIREMENT_REVIEW,
+    OUTLINE_DESIGN,
     DESIGN,
     DESIGN_REVIEW,
     DEVELOPMENT,

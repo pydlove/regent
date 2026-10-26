@@ -16,4 +16,6 @@ public interface InitiativeRepository {
     Optional<Initiative> findByVersion(ProductVersionId versionId);
 
     void save(Initiative initiative);
+
+    void deleteByVersion(ProductVersionId versionId);
 }

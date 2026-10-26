@@ -24,7 +24,8 @@ public record InitiativeResponse(
         Instant approvedAt,
         Instant rejectedAt,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        InitiativePlanResponse plan) {
 
     public static InitiativeResponse from(InitiativeView view) {
         Initiative initiative = view.initiative();
@@ -49,6 +50,7 @@ public record InitiativeResponse(
                 initiative.getApprovedAt(),
                 initiative.getRejectedAt(),
                 initiative.getCreatedAt(),
-                initiative.getUpdatedAt());
+                initiative.getUpdatedAt(),
+                InitiativePlanResponse.from(view.plan()));
     }
 }

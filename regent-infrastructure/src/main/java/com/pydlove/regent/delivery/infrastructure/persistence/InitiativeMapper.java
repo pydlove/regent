@@ -1,6 +1,7 @@
 package com.pydlove.regent.delivery.infrastructure.persistence;
 
 import org.apache.ibatis.annotations.Insert;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
@@ -80,4 +81,16 @@ public interface InitiativeMapper {
             WHERE id = #{id}
             """)
     int update(InitiativeData data);
+
+    @Delete("""
+            DELETE FROM delivery_gate
+            WHERE scope_type = 'INITIATIVE'
+              AND scope_id IN (
+                  SELECT id FROM initiative WHERE version_id = #{versionId}
+              )
+            """)
+    int deleteGatesByVersion(long versionId);
+
+    @Delete("DELETE FROM initiative WHERE version_id = #{versionId}")
+    int deleteByVersion(long versionId);
 }

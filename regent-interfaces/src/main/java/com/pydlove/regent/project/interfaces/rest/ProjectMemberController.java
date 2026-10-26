@@ -4,10 +4,12 @@ import com.pydlove.regent.identity.application.query.AuthenticatedUser;
 import com.pydlove.regent.identity.domain.model.UserId;
 import com.pydlove.regent.identity.interfaces.rest.AuthSessionInterceptor;
 import com.pydlove.regent.project.application.command.ProjectMemberCommandService;
+import com.pydlove.regent.project.application.command.ProjectMemberRoleAssignment;
 import com.pydlove.regent.project.application.query.ProjectMemberQueryService;
 import com.pydlove.regent.project.domain.model.ProjectId;
 import com.pydlove.regent.project.domain.model.ProjectMemberRole;
 import com.pydlove.regent.project.interfaces.dto.ProjectMemberAddRequest;
+import com.pydlove.regent.project.interfaces.dto.ProjectMemberBatchAddRequest;
 import com.pydlove.regent.project.interfaces.dto.ProjectMemberCandidateResponse;
 import com.pydlove.regent.project.interfaces.dto.ProjectMemberResponse;
 import com.pydlove.regent.project.interfaces.dto.ProjectMemberRolesUpdateRequest;
@@ -83,6 +85,28 @@ public class ProjectMemberController {
             throw new IllegalArgumentException("不支持的项目角色：" + request.role());
         }
         commandService.add(ProjectId.of(projectId), request.email(), role,
+                currentUser(servletRequest));
+        return list(projectId, servletRequest);
+    }
+
+    @PostMapping("/batch")
+    public List<ProjectMemberResponse> addMany(
+            @PathVariable long projectId,
+            @RequestBody ProjectMemberBatchAddRequest request,
+            HttpServletRequest servletRequest) {
+        commandService.addAssignments(
+                ProjectId.of(projectId),
+                request.members() == null
+                        ? List.of()
+                        : request.members().stream()
+                        .map(member -> new ProjectMemberRoleAssignment(
+                                member.email(),
+                                member.roles() == null
+                                        ? List.of()
+                                        : member.roles().stream()
+                                        .map(ProjectMemberController::parseRole)
+                                        .toList()))
+                        .toList(),
                 currentUser(servletRequest));
         return list(projectId, servletRequest);
     }

@@ -134,6 +134,11 @@ class InitiativeAttachmentServiceTest {
             store.put(initiative.getId().value(), new Row(initiative));
         }
 
+        @Override
+        public void deleteByVersion(ProductVersionId versionId) {
+            store.values().removeIf(row -> versionId.equals(row.initiative().getVersionId()));
+        }
+
         private record Row(Initiative initiative) {
         }
     }

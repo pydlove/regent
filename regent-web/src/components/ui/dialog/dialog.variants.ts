@@ -51,14 +51,18 @@ export const dialogPanelVariants = tv({
       regular: '',
       large: 'w-[640px]',
       wide: 'w-[760px]',
+      xwide: 'w-[960px]',
     },
   },
   compoundVariants: [
     { layout: 'alert', size: 'large', class: 'w-[340px]' },
     { layout: 'alert', size: 'wide', class: 'w-[340px]' },
+    { layout: 'alert', size: 'xwide', class: 'w-[340px]' },
     { layout: 'form', size: 'wide', class: 'w-[760px]' },
+    { layout: 'form', size: 'xwide', class: 'w-[960px]' },
     { layout: 'log', size: 'large', class: 'w-[640px]' },
     { layout: 'log', size: 'wide', class: 'w-[760px]' },
+    { layout: 'log', size: 'xwide', class: 'w-[960px]' },
   ],
   defaultVariants: {
     layout: 'alert',

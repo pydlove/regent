@@ -34,7 +34,7 @@ const props = withDefaults(
     fullscreen?: boolean
     icon?: DialogIcon
     iconTone?: DialogIconProps['tone']
-    /** 表单类弹框可关闭“点击遮罩关闭”，避免误触丢失未保存内容。 */
+    /** 默认点击遮罩不关闭，避免误触退出并丢失内容。 */
     closeOnOutsideClick?: boolean
   }>(),
   {
@@ -46,7 +46,7 @@ const props = withDefaults(
     fullscreen: false,
     icon: undefined,
     iconTone: 'default',
-    closeOnOutsideClick: true,
+    closeOnOutsideClick: false,
   },
 )
 

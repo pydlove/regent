@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  CalendarClock,
   ChevronLeft,
   Download,
   Eye,
@@ -56,6 +57,8 @@ import Select from '@/components/ui/select/Select.vue'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/useAuthStore'
 import { useTaskStore } from '@/stores/useTaskStore'
+import RequirementDesignPanel from '@/components/business/RequirementDesignPanel.vue'
+import InitiativePlanDialog from '@/components/business/InitiativePlanDialog.vue'
 import type { Requirement } from '@/types/api'
 import type {
   DeliveryStage,
@@ -71,6 +74,7 @@ import type {
 } from '@/types/delivery'
 import type { ProjectMember, ProjectMemberRole } from '@/types/projectMember'
 import { formatBytes, formatDateTime, formatRelative } from '@/utils/format'
+import { effortUnits, formatEffort } from '@/utils/initiativePlan'
 import {
   canActWithRoles,
   deliveryNextStep,
@@ -150,6 +154,7 @@ function localDateInputValue() {
 
 const deliverySteps = [
   { value: 'REQUIREMENT_REVIEW', label: '需求评审' },
+  { value: 'OUTLINE_DESIGN', label: '概要设计' },
   { value: 'DESIGN', label: '详细设计' },
   { value: 'DESIGN_REVIEW', label: '设计评审' },
   { value: 'DEVELOPMENT', label: '研发' },
@@ -173,6 +178,7 @@ const releaseSteps = [
 
 const deliveryStageLabels: Record<DeliveryStage, string> = {
   REQUIREMENT_REVIEW: '需求评审',
+  OUTLINE_DESIGN: '概要设计',
   DESIGN: '详细设计',
   DESIGN_REVIEW: '设计评审',
   DEVELOPMENT: '研发中',
@@ -330,6 +336,12 @@ const selectedDeliveryRequirement = computed(
 const selectedInitiative = computed(
   () => initiatives.value.find((item) => item.id === selectedInitiativeId.value) ?? null,
 )
+const selectedInitiativeHasPlan = computed(
+  () => Boolean(selectedInitiative.value?.plan),
+)
+const selectedInitiativeEffort = computed(() =>
+  effortUnits(selectedInitiative.value?.plan?.totalWorkloadDays ?? 0),
+)
 const selectedInitiativeRequirements = computed(() => {
   if (!selectedInitiative.value) return []
   return requirements.value.filter(
@@ -408,9 +420,9 @@ const currentProjectId = computed(
 const currentProjectRoles = computed(() => rolesForProject(currentProjectId.value))
 const currentProjectRoleLabels = computed(() => currentProjectRoles.value.map(roleLabel))
 const canCreateRelease = computed(() => {
-  if (store.projectId) return canRole(store.projectId, 'RELEASE_MANAGER')
+  if (store.projectId) return canRole(store.projectId, 'OWNER')
   return Object.keys(projectMembers.value).some((projectId) =>
-    canRole(Number(projectId), 'RELEASE_MANAGER'),
+    canRole(Number(projectId), 'OWNER'),
   )
 })
 type PendingWorkflowItem = {
@@ -428,6 +440,7 @@ const pendingWorkflowItems = computed<PendingWorkflowItem[]>(() => {
     if (delivery.status !== 'ACTIVE') continue
     if (![
       'REQUIREMENT_REVIEW',
+      'OUTLINE_DESIGN',
       'DESIGN',
       'DESIGN_REVIEW',
       'DEVELOPMENT',
@@ -579,14 +592,14 @@ const versionSetup = computed(() => {
       action: 'requirements',
       label: '查看需求评审',
       title: `当前版本已有 ${versionRequirements.value.length} 条需求`,
-      description: '需求评审通过后，系统会批量创建详细设计交付。',
+      description: '需求评审通过后，系统会批量创建设计交付，从概要设计开始。',
     } as const
   }
   return {
     action: 'flows',
     label: '查看研发交付',
     title: '版本需求已进入研发',
-    description: '按详细设计、设计评审、研发、测试和发布依次推进。',
+    description: '按概要设计、模块详细设计、设计评审、研发、测试和发布依次推进。',
   } as const
 })
 
@@ -595,7 +608,7 @@ const workflowStartLabel = computed(() => versionSetup.value.label)
 const workflowGroupDefinitions = [
   { label: '版本立项', description: '目标、范围与资源' },
   { label: '需求与评审', description: '需求池、版本范围、评审' },
-  { label: '设计与研发', description: '详细设计、设计评审、研发' },
+  { label: '设计与研发', description: '概要设计、模块详细设计、设计评审、研发' },
   { label: '测试与发布', description: '冒烟、自动化、转测、发版' },
 ] as const
 
@@ -605,7 +618,8 @@ const workflowGroups = computed(() => {
   if (versionDeliveries.value.length > 0) {
     const rank = (stage: DeliveryStage) => {
       if (stage === 'REQUIREMENT_REVIEW') return 1
-      if (stage === 'DESIGN' || stage === 'DESIGN_REVIEW' || stage === 'DEVELOPMENT') return 2
+      if (stage === 'OUTLINE_DESIGN' || stage === 'DESIGN'
+          || stage === 'DESIGN_REVIEW' || stage === 'DEVELOPMENT') return 2
       return 3
     }
     current = Math.max(...versionDeliveries.value.map((delivery) => rank(delivery.stage)))
@@ -882,10 +896,10 @@ function removeInitiativeFile(index: number) {
   )
 }
 
-async function saveInitiative(submitAfterSave = false) {
+async function saveInitiative(submitAfterSave = false, configurePlanAfterSave = false) {
   if (initiativeSaving.value || initiativeUploading.value) return
   if (submitAfterSave && !canSubmitInitiativeComposer.value) {
-    initiativeError.value = '请填写会议纪要或上传纪要附件后再提交审批'
+    initiativeError.value = '请先保存草稿，由项目负责人配置版本计划，并补齐会议纪要与附件后再提交审批'
     return
   }
   initiativeSaving.value = true
@@ -924,13 +938,23 @@ async function saveInitiative(submitAfterSave = false) {
     await load(true)
     mode.value = 'initiatives'
     selectedInitiativeId.value = saved.id
-    toast.success(
-      submitAfterSave
-        ? '版本立项已提交审批'
-        : wasEditing
-          ? '版本立项已保存'
-          : '版本立项已创建',
-    )
+    const savedInitiative = initiatives.value.find((item) => item.id === saved.id)
+    if (
+      configurePlanAfterSave
+      && savedInitiative
+      && canRole(savedInitiative.projectId, 'OWNER')
+    ) {
+      openInitiativePlan(savedInitiative)
+      toast.success('版本立项草稿已保存', '请先配置版本计划，再提交审批')
+    } else {
+      toast.success(
+        submitAfterSave
+          ? '版本立项已提交审批'
+          : wasEditing
+            ? '版本立项已保存'
+            : '版本立项已创建',
+      )
+    }
     emit('changed')
   } catch (value) {
     initiativeError.value = messageOf(value)
@@ -950,10 +974,27 @@ const initiativeMinutes = ref('')
 const initiativeComposerFiles = ref<File[]>([])
 const initiativeFileInput = ref<HTMLInputElement | null>(null)
 const initiativeUploading = ref(false)
+const initiativePlanOpen = ref(false)
+const initiativePlanTarget = ref<Initiative | null>(null)
 
+function openInitiativePlan(initiative: Initiative) {
+  initiativePlanTarget.value = initiative
+  initiativePlanOpen.value = true
+}
+
+const initiativeComposerPlan = computed(() =>
+  initiativeEditingId.value
+    ? initiatives.value.find((item) => item.id === initiativeEditingId.value)?.plan ?? null
+    : null,
+)
+const canConfigureInitiativePlan = computed(() => {
+  const projectId = Number(initiativeProjectId.value)
+  return Number.isInteger(projectId) && canRole(projectId, 'OWNER')
+})
 const canSubmitInitiativeComposer = computed(() =>
   !initiativeSaving.value
   && !initiativeUploading.value
+  && Boolean(initiativeComposerPlan.value)
   && (
     initiativeMinutes.value.trim().length > 0
     || initiativeComposerFiles.value.length > 0
@@ -970,6 +1011,11 @@ function openCreateRequirement(initiative: Initiative) {
 }
 
 async function submitInitiativeForApproval(initiative: Initiative) {
+  if (!initiative.plan) {
+    toast.warning('请先配置版本计划', '项目负责人需要补充排期、人员投入和工作量估算')
+    if (canRole(initiative.projectId, 'OWNER')) openInitiativePlan(initiative)
+    return
+  }
   try {
     await submitInitiative(initiative.id)
     await load(true)
@@ -1072,13 +1118,6 @@ async function deliveryAction(action: RequirementDeliveryAction, extra = {}) {
   }
 }
 
-function submitDesign() {
-  void deliveryAction('SUBMIT_DESIGN', {
-    designSummary: designSummary.value,
-    designContent: designContent.value,
-  })
-}
-
 const releaseOpen = ref(false)
 const releaseSaving = ref(false)
 const releaseError = ref<string | null>(null)
@@ -1094,7 +1133,7 @@ const releaseDeliveryIds = ref<number[]>([])
 
 const releaseProjectItems = computed(() =>
   store.projects
-    .filter((project) => canRole(project.id, 'RELEASE_MANAGER'))
+    .filter((project) => canRole(project.id, 'OWNER'))
     .map((project) => ({ value: String(project.id), label: project.name })),
 )
 const readyDeliveries = computed(() =>
@@ -1116,8 +1155,8 @@ function openCreateRelease(prefillDelivery?: RequirementDelivery) {
   releaseError.value = null
   releaseProjectId.value = String(
     prefillDelivery?.projectId
-      ?? (store.projectId && canRole(store.projectId, 'RELEASE_MANAGER') ? store.projectId : null)
-      ?? store.projects.find((project) => canRole(project.id, 'RELEASE_MANAGER'))?.id
+      ?? (store.projectId && canRole(store.projectId, 'OWNER') ? store.projectId : null)
+      ?? store.projects.find((project) => canRole(project.id, 'OWNER'))?.id
       ?? '',
   )
   releaseVersion.value = ''
@@ -1302,7 +1341,7 @@ async function decideReview(decision: 'APPROVE' | 'REJECT') {
     toast.success(
       decision === 'APPROVE' ? '需求评审已通过' : '需求评审已驳回',
       decision === 'APPROVE'
-        ? '当前版本需求已正式化并创建详细设计交付'
+        ? '当前版本需求已正式化并创建设计交付，从概要设计开始'
         : '需求已退回，产品负责人可补充材料后重新提交',
     )
   } catch (value) {
@@ -1389,6 +1428,16 @@ watch(selectedVersionId, () => {
                 @click="startWorkflow"
               >
                 <Icon :as="Plus" size="inline" />{{ workflowStartLabel }}
+              </Button>
+              <Button
+                v-if="versionInitiative
+                  && canRole(versionInitiative.projectId, 'OWNER')
+                  && !['APPROVED', 'CANCELLED'].includes(versionInitiative.status)"
+                size="sm"
+                @click="openInitiativePlan(versionInitiative)"
+              >
+                <Icon :as="CalendarClock" size="inline" />
+                {{ versionInitiative.plan ? '调整版本计划' : '配置版本计划' }}
               </Button>
               <span
                 v-if="versionSetup.action === 'initiative' && !canInitiateVersionInitiative"
@@ -1668,7 +1717,7 @@ watch(selectedVersionId, () => {
               </Button>
             </div>
             <p v-if="versionReleases.length === 0" class="mt-3 text-caption text-label-tertiary">
-              需求完成冒烟与自动化回归、达到待转测后，由发布负责人创建发布轮次。
+              需求完成冒烟与自动化回归、达到待转测后，由项目负责人创建发布轮次。
             </p>
             <div v-else class="mt-3 space-y-1.5">
               <button
@@ -1840,35 +1889,21 @@ watch(selectedVersionId, () => {
               </p>
             </template>
 
-            <template v-else-if="selectedDelivery.stage === 'DESIGN'">
-              <p class="text-caption font-emphasis text-label-secondary">详细设计</p>
-              <p class="mt-1 text-caption text-label-tertiary">提交角色：技术负责人</p>
-              <template v-if="canRole(selectedDelivery.projectId, 'TECH_LEAD')">
-                <Input v-model="designSummary" class="mt-2" placeholder="设计摘要，例如：新增交付流程聚合与门禁" />
-                <Textarea
-                  v-model="designContent"
-                  class="mt-2"
-                  :rows="6"
-                  placeholder="写清架构、模块、接口、数据迁移、测试策略和回滚方案"
-                />
-                <Button class="mt-2" variant="primary" size="sm" @click="submitDesign">
-                  提交设计评审
-                </Button>
-              </template>
-              <p v-else class="mt-2 text-caption text-label-tertiary">
-                等待技术负责人提交设计。你当前的角色：{{ roleSummaryForProject(selectedDelivery.projectId) }}。
-              </p>
+            <template
+              v-else-if="['OUTLINE_DESIGN', 'DESIGN', 'DESIGN_REVIEW'].includes(selectedDelivery.stage)"
+            >
+              <RequirementDesignPanel
+                :delivery="selectedDelivery"
+                :members="projectMembers[selectedDelivery.projectId] ?? []"
+                :current-user-id="auth.user?.id ?? null"
+                :can-tech-lead="canRole(selectedDelivery.projectId, 'TECH_LEAD')"
+                @changed="refresh"
+              />
             </template>
 
-            <template v-else-if="selectedDelivery.stage === 'DESIGN_REVIEW'">
+            <template v-if="selectedDelivery.stage === 'DESIGN_REVIEW'">
               <p class="text-caption font-emphasis text-label-secondary">设计评审</p>
               <p class="mt-1 text-caption text-label-tertiary">审批角色：技术负责人</p>
-              <div v-if="selectedDelivery.designSummary" class="mt-2 rounded-control bg-window p-2">
-                <p class="text-caption text-label">{{ selectedDelivery.designSummary }}</p>
-                <p class="mt-1 line-clamp-4 whitespace-pre-wrap text-caption text-label-tertiary">
-                  {{ selectedDelivery.designContent }}
-                </p>
-              </div>
               <template v-if="canRole(selectedDelivery.projectId, 'TECH_LEAD')">
                 <Textarea v-model="actionComment" class="mt-2" :rows="2" placeholder="评审意见（可选）" />
                 <div class="mt-2 flex flex-wrap gap-2">
@@ -1948,7 +1983,7 @@ watch(selectedVersionId, () => {
                 这个需求可以纳入版本发布，进入转测和集成测试。
               </p>
               <Button
-                v-if="canRole(selectedDelivery.projectId, 'RELEASE_MANAGER')"
+                v-if="canRole(selectedDelivery.projectId, 'OWNER')"
                 class="mt-2"
                 variant="primary"
                 size="sm"
@@ -1957,7 +1992,7 @@ watch(selectedVersionId, () => {
                 创建发布
               </Button>
               <p v-else class="mt-2 text-caption text-label-tertiary">
-                等待发布负责人纳入版本发布。你当前的角色：{{ roleSummaryForProject(selectedDelivery.projectId) }}。
+                等待项目负责人纳入版本发布。你当前的角色：{{ roleSummaryForProject(selectedDelivery.projectId) }}。
               </p>
             </template>
 
@@ -2173,6 +2208,70 @@ watch(selectedVersionId, () => {
             </div>
           </div>
 
+          <div class="mt-4 rounded-panel border border-separator-soft bg-window p-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="min-w-0 flex-1">
+                <p class="text-caption font-emphasis text-label">版本计划</p>
+                <p class="mt-0.5 text-caption text-label-tertiary">
+                  按固定研发流程自动排期，项目负责人只需维护阶段工期、角色和投入人数。
+                </p>
+              </div>
+              <Button
+                v-if="['DRAFT', 'SUBMITTED', 'REJECTED'].includes(selectedInitiative.status)
+                  && canRole(selectedInitiative.projectId, 'OWNER')"
+                size="sm"
+                @click="openInitiativePlan(selectedInitiative)"
+              >
+                <Icon :as="CalendarClock" size="inline" />
+                {{ selectedInitiative.plan ? '调整版本计划' : '配置版本计划' }}
+              </Button>
+            </div>
+            <template v-if="selectedInitiative.plan">
+              <div class="mt-2 grid gap-2 text-caption sm:grid-cols-3">
+                <div class="rounded-control bg-content px-2.5 py-2">
+                  <p class="text-[10px] text-label-tertiary">计划周期</p>
+                  <p class="mt-0.5 text-label">
+                    {{ selectedInitiative.plan.planStartDate }} 至
+                    {{ selectedInitiative.plan.planEndDate }}
+                  </p>
+                </div>
+                <div class="rounded-control bg-content px-2.5 py-2">
+                  <p class="text-[10px] text-label-tertiary">固定阶段</p>
+                  <p class="mt-0.5 text-label">{{ selectedInitiative.plan.items.length }} 个阶段</p>
+                </div>
+                <div class="rounded-control bg-content px-2.5 py-2">
+                  <p class="text-[10px] text-label-tertiary">自动估算</p>
+                  <p class="mt-0.5 font-emphasis text-accent">
+                    {{ formatEffort(selectedInitiativeEffort.personDays) }} 人天 ·
+                    {{ formatEffort(selectedInitiativeEffort.personWeeks) }} 人周 ·
+                    {{ formatEffort(selectedInitiativeEffort.personMonths) }} 人月
+                  </p>
+                </div>
+              </div>
+              <p
+                v-if="selectedInitiative.plan.milestones"
+                class="mt-2 whitespace-pre-wrap text-caption text-label-secondary"
+              >
+                {{ selectedInitiative.plan.milestones }}
+              </p>
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                <span
+                  v-for="role in selectedInitiative.plan.roleWorkloads"
+                  :key="role.roleCode"
+                  class="rounded-badge bg-accent/8 px-2 py-1 text-[10px] text-label-secondary"
+                >
+                  {{ roleLabel(role.roleCode) }} {{ role.workloadDays }} 人天
+                </span>
+              </div>
+            </template>
+            <p
+              v-else
+              class="mt-2 rounded-control bg-warning/8 px-2.5 py-2 text-caption text-warning"
+            >
+              尚未配置版本计划。产品负责人提交立项审批前，需要项目负责人先补充计划。
+            </p>
+          </div>
+
           <div class="mt-5 flex flex-wrap gap-2">
             <Button
               v-if="(selectedInitiative.status === 'DRAFT' || selectedInitiative.status === 'REJECTED')
@@ -2187,7 +2286,8 @@ watch(selectedVersionId, () => {
                 && canManageVersionInitiative"
               variant="primary"
               size="sm"
-              :disabled="!selectedInitiative.meetingMinutes && initiativeAttachments.length === 0"
+              :disabled="((!selectedInitiative.meetingMinutes && initiativeAttachments.length === 0)
+                || !selectedInitiativeHasPlan)"
               @click="submitInitiativeForApproval(selectedInitiative)"
             >
               提交审批
@@ -2357,24 +2457,24 @@ watch(selectedVersionId, () => {
             </template>
             <template v-else-if="selectedRelease.stage === 'RELEASE_REVIEW'">
               <p class="text-caption font-emphasis text-label-secondary">发版评审</p>
-              <p class="mt-1 text-caption text-label-tertiary">审批角色：发布负责人</p>
-              <template v-if="canRole(selectedRelease.projectId, 'RELEASE_MANAGER')">
+              <p class="mt-1 text-caption text-label-tertiary">审批角色：项目负责人</p>
+              <template v-if="canRole(selectedRelease.projectId, 'OWNER')">
                 <Textarea v-model="releaseActionComment" class="mt-2" :rows="2" placeholder="发版评审意见（可选）" />
                 <Button class="mt-2" variant="primary" size="sm" @click="releaseAction('APPROVE_RELEASE')">
                   批准发版
                 </Button>
               </template>
               <p v-else class="mt-2 text-caption text-label-tertiary">
-                等待发布负责人评审。你当前的角色：{{ roleSummaryForProject(selectedRelease.projectId) }}。
+                等待项目负责人评审。你当前的角色：{{ roleSummaryForProject(selectedRelease.projectId) }}。
               </p>
             </template>
             <template v-else-if="selectedRelease.stage === 'PRODUCTION'">
               <p class="text-caption font-emphasis text-label-secondary">生产发布</p>
               <p class="mt-1 text-caption text-label-tertiary">
-                审批角色：发布负责人。同一制品完成生产部署并经过发布后冒烟后，确认进入观察期。
+                审批角色：项目负责人。同一制品完成生产部署并经过发布后冒烟后，确认进入观察期。
               </p>
               <Button
-                v-if="canRole(selectedRelease.projectId, 'RELEASE_MANAGER')"
+                v-if="canRole(selectedRelease.projectId, 'OWNER')"
                 class="mt-2"
                 variant="primary"
                 size="sm"
@@ -2383,7 +2483,7 @@ watch(selectedVersionId, () => {
                 确认生产部署完成
               </Button>
               <p v-else class="mt-2 text-caption text-label-tertiary">
-                等待发布负责人确认生产部署。你当前的角色：{{ roleSummaryForProject(selectedRelease.projectId) }}。
+                等待项目负责人确认生产部署。你当前的角色：{{ roleSummaryForProject(selectedRelease.projectId) }}。
               </p>
             </template>
             <template v-else-if="selectedRelease.stage === 'OBSERVING'">
@@ -2471,7 +2571,7 @@ watch(selectedVersionId, () => {
     layout="form"
     size="large"
     :title="initiativeEditingId ? '编辑版本立项' : '发起版本立项'"
-    description="只需填写或上传会议纪要，用于记录本版本的立项决策和审批依据。"
+    description="先保存立项草稿；项目负责人配置版本计划后，再补齐会议纪要并提交审批。"
     :icon="FileText"
   >
     <div class="flex flex-col gap-3">
@@ -2541,6 +2641,17 @@ watch(selectedVersionId, () => {
           </li>
         </ul>
       </DialogField>
+      <p
+        v-if="initiativeVersionId && !initiativeComposerPlan"
+        class="rounded-control bg-warning/8 px-2.5 py-2 text-caption text-warning"
+      >
+        <span class="font-emphasis">版本计划尚未配置，暂时不能提交审批。</span>
+        {{
+          canConfigureInitiativePlan
+            ? '请点击“保存草稿并配置计划”，配置完成后再提交。'
+            : '请先保存草稿，由项目负责人配置版本计划后再提交。'
+        }}
+      </p>
       <p v-if="initiativeError" class="text-caption text-danger">{{ initiativeError }}</p>
     </div>
     <template #footer>
@@ -2552,6 +2663,15 @@ watch(selectedVersionId, () => {
         {{ initiativeSaving ? '保存中…' : '保存草稿' }}
       </Button>
       <Button
+        v-if="initiativeVersionId && !initiativeComposerPlan && canConfigureInitiativePlan"
+        variant="primary"
+        :disabled="initiativeSaving || !selectedVersion || !initiativeVersionId"
+        @click="saveInitiative(false, true)"
+      >
+        {{ initiativeSaving ? '保存中…' : '保存草稿并配置计划' }}
+      </Button>
+      <Button
+        v-else
         variant="primary"
         :disabled="!canSubmitInitiativeComposer || !selectedVersion || !initiativeVersionId"
         @click="saveInitiative(true)"
@@ -2560,6 +2680,16 @@ watch(selectedVersionId, () => {
       </Button>
     </template>
   </Dialog>
+
+  <InitiativePlanDialog
+    v-if="initiativePlanTarget"
+    v-model:open="initiativePlanOpen"
+    :initiative="initiativePlanTarget"
+    :stages="selectedWorkflowTemplate?.stages ?? []"
+    :template-name="selectedWorkflowTemplate?.displayName ?? '标准瀑布式'"
+    :members="projectMembers[initiativePlanTarget.projectId] ?? []"
+    @changed="refresh"
+  />
 
   <Dialog
     v-model:open="reviewOpen"
@@ -2659,7 +2789,7 @@ watch(selectedVersionId, () => {
     layout="form"
     size="large"
     title="提交需求评审"
-    description="提交线下评审形成的会议纪要和附件；项目负责人审核通过后，需求才会正式化并进入详细设计。"
+    description="提交线下评审形成的会议纪要和附件；项目负责人审核通过后，需求才会正式化并进入概要设计。"
     :icon="FileText"
   >
     <div class="flex flex-col gap-3">

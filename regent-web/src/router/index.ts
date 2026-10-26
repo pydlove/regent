@@ -99,6 +99,20 @@ const router = createRouter({
       meta: { title: '项目' },
     },
     {
+      path: '/organizations/workflow',
+      name: 'workflow-templates',
+      component: () => import('@/views/WorkflowTemplatesSettings.vue'),
+      meta: { title: '研发流程' },
+    },
+    {
+      path: '/workflow-templates',
+      redirect: '/organizations/workflow',
+    },
+    {
+      path: '/settings/workflow',
+      redirect: '/organizations/workflow',
+    },
+    {
       path: '/organizations',
       name: 'organizations',
       component: () => import('@/views/OrganizationManagementView.vue'),

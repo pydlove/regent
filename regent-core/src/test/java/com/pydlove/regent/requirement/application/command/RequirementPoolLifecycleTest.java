@@ -72,7 +72,7 @@ class RequirementPoolLifecycleTest {
         assertEquals(RequirementPoolStatus.FORMAL, approved.getPoolStatus());
         RequirementDelivery delivery = fixture.deliveries.findActiveByRequirement(requirement.getId())
                 .orElseThrow();
-        assertEquals(DeliveryStage.DESIGN, delivery.getStage());
+        assertEquals(DeliveryStage.OUTLINE_DESIGN, delivery.getStage());
         assertEquals(initiative.getId(), delivery.getInitiativeId());
     }
 
@@ -96,6 +96,26 @@ class RequirementPoolLifecycleTest {
         assertEquals(version.getId(), requirement.getVersionId());
         assertEquals(RequirementPoolStatus.POOL, requirement.getPoolStatus());
         assertEquals(1, fixture.requirements.findByProject(PROJECT).size());
+    }
+
+    @Test
+    @DisplayName("版本进入设计或研发阶段后不能继续纳入需求")
+    void rejectsAssignmentAfterVersionEnteredDesign() {
+        Fixture fixture = new Fixture();
+        ProductVersion version = fixture.productVersions.create(PROJECT, "v1.0.0");
+        Initiative initiative = fixture.approvedInitiative(version.getId());
+        Requirement first = fixture.createRequirement(initiative.getId());
+        fixture.service.assignVersion(first.getId(), version.getId(), OWNER);
+        fixture.service.submitPoolReview(first.getId(), OWNER);
+        fixture.service.approvePoolReview(first.getId(), OWNER, "通过");
+        Requirement late = fixture.createRequirement(initiative.getId());
+
+        DomainException exception = assertThrows(
+                DomainException.class,
+                () -> fixture.service.assignVersion(late.getId(), version.getId(), OWNER));
+
+        assertEquals("产品版本已进入设计或研发阶段，不能继续纳入需求",
+                exception.getMessage());
     }
 
     @Test
@@ -322,7 +342,7 @@ class RequirementPoolLifecycleTest {
         private final Requirements requirements = new Requirements();
         private final Initiatives initiatives = new Initiatives();
         private final ProductVersions productVersions = new ProductVersions();
-        private final Deliveries deliveries = new Deliveries();
+        private final Deliveries deliveries = new Deliveries(requirements);
         private final Purges purges = new Purges(requirements);
         private final RequirementCommandService service = new RequirementCommandService(
                 requirements,
@@ -483,6 +503,11 @@ class RequirementPoolLifecycleTest {
             }
             store.put(initiative.getId().value(), initiative);
         }
+
+        @Override
+        public void deleteByVersion(ProductVersionId versionId) {
+            store.values().removeIf(initiative -> versionId.equals(initiative.getVersionId()));
+        }
     }
 
     private static final class ProductVersions implements ProductVersionRepository {
@@ -542,7 +567,12 @@ class RequirementPoolLifecycleTest {
 
     private static final class Deliveries implements RequirementDeliveryRepository {
         private final Map<Long, RequirementDelivery> store = new LinkedHashMap<>();
+        private final Requirements requirements;
         private long sequence;
+
+        private Deliveries(Requirements requirements) {
+            this.requirements = requirements;
+        }
 
         @Override
         public Optional<RequirementDelivery> findById(RequirementDeliveryId id) {
@@ -569,6 +599,18 @@ class RequirementPoolLifecycleTest {
             return store.values().stream()
                     .filter(delivery -> delivery.getRequirementId().equals(requirementId))
                     .findFirst();
+        }
+
+        @Override
+        public boolean existsStartedDesignForVersion(ProductVersionId versionId) {
+            return store.values().stream()
+                    .filter(delivery -> delivery.getStage() != DeliveryStage.REQUIREMENT_REVIEW)
+                    .anyMatch(delivery -> {
+                        Requirement requirement = requirements.findById(delivery.getRequirementId())
+                                .orElse(null);
+                        return requirement != null
+                                && versionId.equals(requirement.getVersionId());
+                    });
         }
 
         @Override

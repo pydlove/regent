@@ -254,7 +254,7 @@ const save = async () => {
         v-else-if="!editing && !templatesLoading && workflowTemplates.length > 0 && availableWorkflowTemplates.length === 0"
         class="text-caption text-danger"
       >
-        当前没有可用的研发流程模板，请让组织管理员到“设置 → 研发流程”发布模板。
+        当前没有可用的研发流程模板，请让组织管理员到“组织 → 研发流程”发布模板。
       </p>
 
       <div

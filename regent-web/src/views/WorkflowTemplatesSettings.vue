@@ -2,7 +2,7 @@
 import {
   ArrowUp,
   ChevronDown,
-  Copy,
+  Pencil,
   Plus,
   RefreshCw,
   Trash2,
@@ -34,6 +34,7 @@ import { useToast } from '@/composables/useToast'
 import { useOrganizationStore } from '@/stores/useOrganizationStore'
 import {
   projectMemberRoleLabels,
+  workflowRoleOptions,
 } from '@/utils/projectMemberRoles'
 
 type StageForm = {
@@ -66,8 +67,7 @@ const form = reactive({
 
 const roleOptions = [
   { value: '__none__', label: '不限制' },
-  ...(Object.keys(projectMemberRoleLabels) as Array<keyof typeof projectMemberRoleLabels>)
-    .map((role) => ({ value: role, label: projectMemberRoleLabels[role] })),
+  ...workflowRoleOptions,
 ]
 const scopeOptions = [
   { value: 'VERSION', label: '版本级' },
@@ -91,7 +91,7 @@ const publishedCount = computed(
 )
 const editorTitle = computed(() => {
   if (editorMode.value === 'create') return '新建研发流程模板'
-  return `复制「${sourceTemplate.value?.displayName ?? ''}」为新版本`
+  return `编辑「${sourceTemplate.value?.displayName ?? ''}」并生成新版本`
 })
 const canSave = computed(() =>
   canManage.value
@@ -212,7 +212,7 @@ async function save() {
     await load()
     toast.success(
       `${saved.displayName} 已发布`,
-      '新建项目现在可以选择这套研发流程',
+      '新版本已生效，历史项目和产品版本继续使用原流程快照',
     )
   } catch (value) {
     editorError.value = messageOf(value, '保存研发流程模板失败')
@@ -347,9 +347,13 @@ void load()
             </div>
           </div>
           <div v-if="canManage" class="flex shrink-0 flex-col items-end gap-2">
-            <Button size="sm" @click="openVersion(template)">
-              <Icon :as="Copy" size="inline" />
-              复制新版本
+            <Button
+              size="sm"
+              title="编辑内容将保存为同流程的下一版本，不影响历史快照"
+              @click="openVersion(template)"
+            >
+              <Icon :as="Pencil" size="inline" />
+              编辑
             </Button>
             <Button
               v-if="template.status === 'PUBLISHED'"
@@ -370,7 +374,7 @@ void load()
       layout="form"
       size="wide"
       :title="editorTitle"
-      description="发布后不可原地修改；需要调整时复制新版本，历史项目继续使用原快照。"
+      description="编辑内容会保存为同流程的下一版本并立即生效；历史项目和产品版本继续使用原快照。"
       :close-on-outside-click="false"
     >
       <div class="flex max-h-[min(68dvh,720px)] flex-col gap-4 overflow-y-auto pr-1">

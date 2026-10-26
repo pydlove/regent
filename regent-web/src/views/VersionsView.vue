@@ -37,6 +37,7 @@ import type { Initiative, ProductVersion, ProductVersionStatus } from '@/types/d
 import type { ProjectMember } from '@/types/projectMember'
 import { canActWithRoles } from '@/utils/deliveryWorkflow'
 import { formatRelative } from '@/utils/format'
+import { versionHasStartedDesign } from '@/utils/requirementPool'
 
 const store = useTaskStore()
 const auth = useAuthStore()
@@ -130,11 +131,18 @@ const selectedVersionInitiative = computed(() =>
 const selectedVersionReady = computed(
   () => selectedVersionInitiative.value?.status === 'APPROVED',
 )
+const selectedVersionHasStartedDesign = computed(() =>
+  versionHasStartedDesign(
+    requirementsInVersion.value,
+    selectedVersion.value?.id ?? null,
+  ),
+)
 const canDeleteSelectedVersion = computed(() =>
   canDeleteVersions.value
     && selectedVersion.value !== null
-    && selectedVersionInitiative.value === null
-    && requirementsInVersion.value.length === 0,
+    && requirementsInVersion.value.length === 0
+    && (selectedVersionInitiative.value === null
+      || selectedVersion.value.status === 'CLOSED'),
 )
 const initiativeForVersion = (version: ProductVersion) =>
   initiatives.value.find((initiative) => initiative.versionId === version.id) ?? null
@@ -264,6 +272,9 @@ async function saveVersion() {
 }
 
 function openAddRequirements() {
+  if (!selectedVersion.value || !selectedVersionReady.value || selectedVersionHasStartedDesign.value) {
+    return
+  }
   addIds.value = []
   addError.value = null
   addOpen.value = true
@@ -278,6 +289,10 @@ function toggleRequirement(id: number, checked: boolean) {
 
 async function addRequirementsToVersion() {
   if (!selectedVersion.value || addIds.value.length === 0 || addSaving.value) return
+  if (selectedVersionHasStartedDesign.value) {
+    addError.value = '产品版本已进入设计或研发阶段，不能继续纳入需求'
+    return
+  }
   addSaving.value = true
   addError.value = null
   try {
@@ -502,7 +517,11 @@ onMounted(() => void load())
             v-if="selectedVersion.status === 'PLANNING'"
             variant="primary"
             size="sm"
-            :disabled="!canManageVersions || !selectedVersionReady"
+            :disabled="
+              !canManageVersions
+                || !selectedVersionReady
+                || selectedVersionHasStartedDesign
+            "
             @click="openAddRequirements"
           >
             <Icon :as="Plus" size="inline" />纳入已有需求
@@ -526,16 +545,32 @@ onMounted(() => void load())
           </Button>
         </div>
         <p
-          v-if="selectedVersion.status === 'PLANNING' && !selectedVersionReady"
+          v-if="selectedVersionHasStartedDesign"
+          class="mt-2 text-caption text-warning"
+        >
+          版本已进入设计或研发阶段，需求范围已锁定，不能再纳入新需求。
+        </p>
+        <p
+          v-else-if="selectedVersion.status === 'PLANNING' && !selectedVersionReady"
           class="mt-2 text-caption text-warning"
         >
           完成当前版本的立项审批后，才能向版本纳入需求。
         </p>
         <p
-          v-if="canDeleteVersions && !canDeleteSelectedVersion"
+          v-if="canDeleteVersions && requirementsInVersion.length > 0"
           class="mt-2 text-caption text-warning"
         >
-          版本已有立项、需求或研发记录时不能删除，请使用“关闭版本”。
+          版本已有需求或研发记录，不能删除。
+        </p>
+        <p
+          v-else-if="
+            canDeleteVersions
+              && selectedVersionInitiative
+              && selectedVersion.status !== 'CLOSED'
+          "
+          class="mt-2 text-caption text-warning"
+        >
+          版本已有立项记录，请先关闭版本；关闭且没有需求后可以删除该版本。
         </p>
         </div>
 
@@ -613,7 +648,7 @@ onMounted(() => void load())
       v-model:open="deleteOpen"
       layout="form"
       title="删除产品版本"
-      description="删除后不可恢复；版本号释放后可以重新创建。已有立项、需求或研发记录的版本不能删除。"
+      description="删除后不可恢复；版本号释放后可以重新创建。没有需求的已关闭版本会连同立项记录一起删除。"
       :icon="Trash2"
     >
       <div class="flex flex-col gap-3">
@@ -621,7 +656,11 @@ onMounted(() => void load())
           {{ selectedVersion?.versionNo }}
         </div>
         <p class="text-caption text-label-secondary">
-          当前版本尚未立项，也没有关联需求，可以安全删除。
+          {{
+            selectedVersionInitiative
+              ? '当前版本没有需求，删除时会同时清理该版本的立项、会议材料和计划记录。'
+              : '当前版本没有关联需求，可以安全删除。'
+          }}
         </p>
         <p v-if="deleteError" class="text-caption text-danger">{{ deleteError }}</p>
       </div>

@@ -22,6 +22,8 @@ class RequirementDeliveryTest {
         assertThrows(DomainException.class, delivery::completeDevelopment);
 
         delivery.approveRequirementReview();
+        delivery.submitOutlineDesign("概要设计", "概要设计内容", UserId.of(9));
+        assertEquals(DeliveryStage.DESIGN, delivery.getStage());
         delivery.submitDesign("设计摘要", "详细设计内容");
         delivery.approveDesign();
         delivery.completeDevelopment();
@@ -38,6 +40,7 @@ class RequirementDeliveryTest {
         RequirementDelivery delivery = RequirementDelivery.create(
                 InitiativeId.of(1), ProjectId.of(2), RequirementId.of(3), UserId.of(9));
         delivery.approveRequirementReview();
+        delivery.submitOutlineDesign("概要设计", "概要设计内容", UserId.of(9));
 
         assertThrows(DomainException.class, () -> delivery.submitDesign("", ""));
         assertEquals(DeliveryStage.DESIGN, delivery.getStage());

@@ -10,6 +10,7 @@ import com.pydlove.regent.delivery.domain.model.ProductVersion;
 import com.pydlove.regent.delivery.domain.model.ProductVersionStatus;
 import com.pydlove.regent.delivery.domain.repository.DeliveryGateRepository;
 import com.pydlove.regent.delivery.domain.repository.InitiativeAttachmentRepository;
+import com.pydlove.regent.delivery.domain.repository.InitiativePlanRepository;
 import com.pydlove.regent.delivery.domain.repository.InitiativeRepository;
 import com.pydlove.regent.delivery.domain.repository.ProductVersionRepository;
 import com.pydlove.regent.identity.domain.model.UserId;
@@ -29,6 +30,7 @@ public class InitiativeCommandService {
     private final ProjectMemberAccessService memberAccessService;
     private final ProjectProfileRepository projectProfileRepository;
     private final ProductVersionRepository productVersionRepository;
+    private final InitiativePlanRepository planRepository;
     private final TransactionRunner transactionRunner;
 
     public InitiativeCommandService(InitiativeRepository initiativeRepository,
@@ -38,7 +40,7 @@ public class InitiativeCommandService {
                                     ProjectProfileRepository projectProfileRepository,
                                     TransactionRunner transactionRunner) {
         this(initiativeRepository, attachmentRepository, gateRepository,
-                memberAccessService, projectProfileRepository, null, transactionRunner);
+                memberAccessService, projectProfileRepository, null, null, transactionRunner);
     }
 
     public InitiativeCommandService(InitiativeRepository initiativeRepository,
@@ -48,12 +50,26 @@ public class InitiativeCommandService {
                                     ProjectProfileRepository projectProfileRepository,
                                     ProductVersionRepository productVersionRepository,
                                     TransactionRunner transactionRunner) {
+        this(initiativeRepository, attachmentRepository, gateRepository,
+                memberAccessService, projectProfileRepository, productVersionRepository,
+                null, transactionRunner);
+    }
+
+    public InitiativeCommandService(InitiativeRepository initiativeRepository,
+                                    InitiativeAttachmentRepository attachmentRepository,
+                                    DeliveryGateRepository gateRepository,
+                                    ProjectMemberAccessService memberAccessService,
+                                    ProjectProfileRepository projectProfileRepository,
+                                    ProductVersionRepository productVersionRepository,
+                                    InitiativePlanRepository planRepository,
+                                    TransactionRunner transactionRunner) {
         this.initiativeRepository = initiativeRepository;
         this.attachmentRepository = attachmentRepository;
         this.gateRepository = gateRepository;
         this.memberAccessService = memberAccessService;
         this.projectProfileRepository = projectProfileRepository;
         this.productVersionRepository = productVersionRepository;
+        this.planRepository = planRepository;
         this.transactionRunner = transactionRunner;
     }
 
@@ -140,6 +156,11 @@ public class InitiativeCommandService {
                         || initiative.getMeetingMinutes().isBlank())
                 && attachmentRepository.findByInitiative(id).isEmpty()) {
             throw new DomainException("请填写会议纪要或上传会议纪要附件后再提交审批");
+        }
+        if (initiative.getVersionId() != null
+                && planRepository != null
+                && planRepository.findByInitiative(id).isEmpty()) {
+            throw new DomainException("请先由项目负责人配置版本计划、排期和工作量后再提交审批");
         }
         initiative.submit();
         initiativeRepository.save(initiative);

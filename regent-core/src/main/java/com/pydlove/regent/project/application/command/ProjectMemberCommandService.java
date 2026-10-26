@@ -15,11 +15,15 @@ import com.pydlove.regent.shared.domain.EntityNotFoundException;
 import com.pydlove.regent.shared.domain.TransactionRunner;
 
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /** 项目成员角色维护。当前只允许项目 owner 管理。 */
 public class ProjectMemberCommandService {
+
+    private static final int MAX_BATCH_MEMBERS = 100;
 
     private final ProjectMemberRepository memberRepository;
     private final ProjectMembershipGuard membershipGuard;
@@ -43,20 +47,82 @@ public class ProjectMemberCommandService {
                                        String email,
                                        ProjectMemberRole role,
                                        UserId actorId) {
-        var project = membershipGuard.requireManage(projectId, actorId);
+        return addMany(projectId, List.of(email), role, actorId).get(0);
+    }
+
+    public List<ProjectMemberViewResult> addMany(ProjectId projectId,
+                                                 List<String> emails,
+                                                 ProjectMemberRole role,
+                                                 UserId actorId) {
         if (role == null || role == ProjectMemberRole.OWNER) {
             throw new DomainException("不能通过成员角色接口授予 OWNER；项目负责人创建项目时自动指定");
         }
-        User user = userRepository.findByEmail(Email.of(email))
-                .orElseThrow(() -> new DomainException("该邮箱尚未注册 Regent，请先让成员注册账号"));
-        if (project.organizationId() != null
-                && !organizationAccessService.isMember(project.organizationId(), user.getId())) {
-            throw new DomainException("该账号还不是项目所属组织成员，请先加入组织");
+        if (emails == null || emails.isEmpty()) {
+            throw new DomainException("请选择要添加的团队成员");
         }
-        if (!memberRepository.exists(projectId, user.getId(), role)) {
-            memberRepository.save(ProjectMember.assign(projectId, user.getId(), role));
+        if (emails.size() > MAX_BATCH_MEMBERS) {
+            throw new DomainException("一次最多添加 " + MAX_BATCH_MEMBERS + " 名团队成员");
         }
-        return new ProjectMemberViewResult(user.getId().value(), user.getDisplayName().value(), role);
+        return addAssignments(
+                projectId,
+                emails.stream()
+                        .map(email -> new ProjectMemberRoleAssignment(email, List.of(role)))
+                        .toList(),
+                actorId);
+    }
+
+    public List<ProjectMemberViewResult> addAssignments(
+            ProjectId projectId,
+            List<ProjectMemberRoleAssignment> assignments,
+            UserId actorId) {
+        if (assignments == null || assignments.isEmpty()) {
+            throw new DomainException("请选择要添加的团队成员");
+        }
+        if (assignments.size() > MAX_BATCH_MEMBERS) {
+            throw new DomainException("一次最多添加 " + MAX_BATCH_MEMBERS + " 名团队成员");
+        }
+        return transactionRunner.inTransaction(() -> {
+            var project = membershipGuard.requireManage(projectId, actorId);
+            Map<UserId, User> users = new LinkedHashMap<>();
+            Map<UserId, LinkedHashSet<ProjectMemberRole>> rolesByUser = new LinkedHashMap<>();
+            for (ProjectMemberRoleAssignment assignment : assignments) {
+                LinkedHashSet<ProjectMemberRole> roles = new LinkedHashSet<>();
+                if (assignment.roles() != null) {
+                    assignment.roles().stream().filter(Objects::nonNull).forEach(roles::add);
+                }
+                if (roles.isEmpty()) {
+                    throw new DomainException("请为每个团队成员至少选择一个项目角色");
+                }
+                if (roles.contains(ProjectMemberRole.OWNER)) {
+                    throw new DomainException(
+                            "不能通过成员角色接口授予 OWNER；项目负责人创建项目时自动指定");
+                }
+                User user = userRepository.findByEmail(Email.of(assignment.email()))
+                        .orElseThrow(() -> new DomainException(
+                                "该邮箱尚未注册 Regent，请先让成员注册账号"));
+                if (project.organizationId() != null
+                        && !organizationAccessService.isMember(
+                        project.organizationId(), user.getId())) {
+                    throw new DomainException("该账号还不是项目所属组织成员，请先加入组织");
+                }
+                users.putIfAbsent(user.getId(), user);
+                rolesByUser.computeIfAbsent(user.getId(), ignored -> new LinkedHashSet<>())
+                        .addAll(roles);
+            }
+            List<ProjectMemberViewResult> results = new java.util.ArrayList<>();
+            for (User user : users.values()) {
+                for (ProjectMemberRole role : rolesByUser.get(user.getId())) {
+                    if (!memberRepository.exists(projectId, user.getId(), role)) {
+                        memberRepository.save(ProjectMember.assign(projectId, user.getId(), role));
+                    }
+                    results.add(new ProjectMemberViewResult(
+                            user.getId().value(),
+                            user.getDisplayName().value(),
+                            role));
+                }
+            }
+            return List.copyOf(results);
+        });
     }
 
     public void remove(ProjectId projectId,

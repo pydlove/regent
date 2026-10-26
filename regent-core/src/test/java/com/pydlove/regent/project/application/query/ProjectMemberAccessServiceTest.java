@@ -18,6 +18,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ProjectMemberAccessServiceTest {
 
     @Test
+    @DisplayName("业务负责人和测试人员有独立角色名称")
+    void 业务负责人和测试人员角色名称独立() {
+        assertEquals("业务负责人", ProjectMemberAccessService.label(
+                ProjectMemberRole.BUSINESS_OWNER));
+        assertEquals("测试人员", ProjectMemberAccessService.label(
+                ProjectMemberRole.TESTER));
+    }
+
+    @Test
     @DisplayName("单人项目允许 owner 代审")
     void 单人项目允许负责人代审() {
         ProjectMemberAccessService service = new ProjectMemberAccessService(

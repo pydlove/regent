@@ -233,6 +233,11 @@ public class RequirementCommandService {
             throw new com.pydlove.regent.shared.domain.DomainException(
                     "请先完成该产品版本的立项审批，再纳入需求");
         }
+        if (deliveryRepository != null
+                && deliveryRepository.existsStartedDesignForVersion(version.getId())) {
+            throw new com.pydlove.regent.shared.domain.DomainException(
+                    "产品版本已进入设计或研发阶段，不能继续纳入需求");
+        }
         requirement.assignVersion(version.getId(), versionInitiative.getId());
     }
 
@@ -471,7 +476,7 @@ public class RequirementCommandService {
                 requirement.getProjectId(),
                 requirement.getId(),
                 ownerId,
-                DeliveryStage.DESIGN));
+                DeliveryStage.OUTLINE_DESIGN));
     }
 
     private Requirement load(RequirementId id, UserId ownerId) {

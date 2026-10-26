@@ -14,6 +14,7 @@ import {
   Settings,
   Smartphone,
   TriangleAlert,
+  Workflow,
 } from '@lucide/vue'
 import { TooltipProvider } from 'reka-ui'
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
@@ -172,8 +173,17 @@ const organizationOptions = computed(() => [
     : []),
 ])
 
-// 一级导航按用户工作流组织，而不是按系统实体展开：
-// 工作台看状态与待办，任务承载需求/计划，交付承载测试/部署，项目承载资源。
+const organizationMenu = computed(() => [
+  ...((organizationStore.organizations.length === 0
+    || organizationStore.canAccessManagement)
+    ? [{ label: '组织管理', to: '/organizations', icon: Building2 }]
+    : []),
+  ...(organizationStore.canManageOrganization
+    ? [{ label: '研发流程', to: '/organizations/workflow', icon: Workflow }]
+    : []),
+])
+
+// 一级菜单按用户工作流组织；组织相关能力收拢在“组织”下作为二级菜单。
 const navGroups = computed(() => [
   {
     label: '工作区',
@@ -188,9 +198,12 @@ const navGroups = computed(() => [
       },
       { label: '交付', to: '/delivery', icon: ServerCog },
       { label: '项目', to: '/projects', icon: FolderKanban },
-      ...((organizationStore.organizations.length === 0
-        || organizationStore.canAccessManagement)
-        ? [{ label: '组织', to: '/organizations', icon: Building2 }]
+      ...(organizationMenu.value.length > 0
+        ? [{
+            label: '组织',
+            icon: Building2,
+            children: organizationMenu.value,
+          }]
         : []),
     ],
   },
